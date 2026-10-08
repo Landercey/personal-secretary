@@ -32,7 +32,7 @@
 | 2 | 第一条竖直切片：粘贴文字 → 解析 → 存库 → 打印 | ✅ 完成 |
 | 3 | 接企微推送 | ✅ 完成 |
 | 4 | 接 QQ 来源 | ✅ 完成 |
-| 5 | 文件解析 + 附件 | ⬜ 待做 |
+| 5 | 文件解析 + 附件 | ✅ 完成 |
 | 6 | 去重 + 时间解析增强（碎片率 <3%） | ⬜ 待做 |
 | 7 | 定时调度 | ⬜ 待做 |
 | 8 | 一键部署脚本（自动装 QQ + NapCat） | ⬜ 待做 |
@@ -50,6 +50,8 @@
 ```bat
 python run.py --selftest          检查契约和环境
 python run.py "明天下午三点交作业"  录一条
+python run.py --read 照片.jpg     只看这个文件能提出什么字，不入库
+python run.py --file 作业.pptx    把一个文件变成待办
 python run.py --list              看未完成
 python run.py --list junk         看废件箱（没收下的原文都在这里）
 python run.py --digest            生成一份汇总打印出来
@@ -85,6 +87,9 @@ python -m unittest discover -s tests -t . -v
 | 加一个新推送通道 | 新写一个 `app/sinks/xxx.py`，然后在 `app/sinks/router.py` 里登记 |
 | 群里什么算闲聊、什么算通知 | `app/pipeline/chat_filter.py` 里的那几张词表 |
 | QQ 怎么连（端口、令牌、收哪些群） | `config.toml` 的 `[qq]` 段 |
+| 识别用哪个 OCR 引擎 | `config.toml` 的 `[extract] ocr_engine` |
+| 支持一种新文件格式 | `app/pipeline/extract/service.py` 的 `_READERS` 加一行 |
+| 多线程下数据库行为 | `app/store/repository.py` 的 `_synchronized` —— **改前先读那段注释** |
 
 改完一定要跑一遍：
 
