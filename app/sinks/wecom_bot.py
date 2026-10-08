@@ -158,19 +158,18 @@ def split_for_send(text: str, limit: int) -> list[str]:
     return chunks or [""]
 
 
-def _multipart(fields: dict[str, str], file_field: str,
-               file_name: str, file_bytes: bytes) -> tuple[bytes, str]:
+def _multipart(file_field: str, file_name: str, file_bytes: bytes) -> tuple[bytes, str]:
     """手工拼一个 multipart/form-data 请求体。
 
     上传文件必须用这种格式，标准库里没有现成的构造器，所以手拼。
     返回 (请求体字节, Content-Type 头里的 boundary 值)。
+
+    这里**故意不收 fields 参数**：企微的 upload_media 接口所有参数
+    （key、type）都走 URL 查询串，表单体里只有文件本身。
+    留一个用不上的参数，早晚有人往里塞东西然后调不通。
     """
     boundary = "----Secretary" + uuid.uuid4().hex
     body = bytearray()
-    for name, value in fields.items():
-        body += f"--{boundary}\r\n".encode()
-        body += f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode()
-        body += f"{value}\r\n".encode()
     mime = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
     body += f"--{boundary}\r\n".encode()
     body += (f'Content-Disposition: form-data; name="{file_field}"; '
@@ -352,14 +351,19 @@ class WeComBotSink(Sink):
         """发一个文件（Word / PDF / 压缩包…）。
 
         两步：先上传换一个 media_id，再拿 media_id 发出去。
+
+        ⚠️ 踩过的坑：`type=file` 必须放在 **URL 的查询参数**里，
+        不能放进 multipart 表单体 —— 放表单里官方会回
+        `40058 missing param 'type'`，看起来像是"消息格式不对"，
+        其实跟消息内容毫无关系，很容易查错方向。
         """
         target = Path(path)
         if not target.is_file():
             return SinkResult(ok=False, code=-1, message="文件不在了")
         try:
-            body, content_type = _multipart(
-                {"type": "file"}, "media", target.name, target.read_bytes())
-            payload = self._post_form(f"{UPLOAD_BASE}?key={self.key}", body, content_type)
+            body, content_type = _multipart("media", target.name, target.read_bytes())
+            url = f"{UPLOAD_BASE}?key={self.key}&type=file"
+            payload = self._post_form(url, body, content_type)
         except Exception as exc:
             return SinkResult(ok=False, code=-2, message=f"{type(exc).__name__}: {exc}")
         if int(payload.get("errcode") or 0) != 0:

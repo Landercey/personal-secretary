@@ -110,12 +110,39 @@ class TestSplitForSend(unittest.TestCase):
 
 class TestMultipart(unittest.TestCase):
     def test_body_carries_file_bytes_and_boundary(self):
-        body, content_type = _multipart({"type": "file"}, "media", "作业.pdf", b"HELLO")
+        body, content_type = _multipart("media", "作业.pdf", b"HELLO")
         self.assertIn("boundary=", content_type)
         self.assertIn(b"HELLO", body)
-        self.assertIn(b'name="type"', body)
         self.assertIn(b"file", body)
         self.assertIn("作业.pdf".encode("utf-8"), body)
+
+    def test_upload_url_carries_type_not_the_form(self):
+        """回归：type=file 必须走 URL 查询串。
+
+        放错地方官方会回 40058 missing param 'type'，
+        报错文字却像在说"消息格式不对"，极容易查错方向。
+        """
+        captured: dict[str, str] = {}
+        sink = WeComBotSink(webhook="abc-key")
+        tmp = Path(__file__).parent / "_tmp_upload.txt"
+        tmp.write_text("hello", encoding="utf-8")
+
+        def fake_post(url: str, body: bytes, content_type: str) -> dict:
+            captured["url"] = url
+            captured["body"] = body.decode("utf-8", "ignore")
+            return {"errcode": 0, "media_id": "FAKE_MEDIA_ID"}
+
+        sink._post_form = fake_post                 # type: ignore[method-assign]
+        sink._post_json = lambda _p: {"errcode": 0}  # type: ignore[method-assign]
+        try:
+            result = sink.send_file(str(tmp))
+        finally:
+            tmp.unlink(missing_ok=True)
+
+        self.assertTrue(result.ok, result.message)
+        self.assertIn("type=file", captured["url"])
+        self.assertIn("key=abc-key", captured["url"])
+        self.assertNotIn('name="type"', captured["body"])
 
 
 class TestReadiness(unittest.TestCase):
