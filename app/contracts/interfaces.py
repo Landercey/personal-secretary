@@ -1,5 +1,19 @@
 """五个接口。实现它们的类不许被别的模块直接 import，只能通过运行时注册表拿。
 
+=====================================================================
+想改这里的话，先看这张地图
+=====================================================================
+  加一个新来源（邮箱/短信）    → 写一个类继承 Source，放到 sources/ 下
+  加一个理解步骤（比如翻译）   → 继承 TextEnricher（改消息）或
+                                 DraftEnricher（改草稿），放到 pipeline/ 下
+  换存储（比如换成 MySQL）     → 写一个类继承 Store，放到 store/ 下
+  加一个推送通道（钉钉）       → 继承 Sink，放到 sinks/ 下，
+                                 然后在 sinks/router.py 里登记
+
+**改接口要慎重**：接口一动，所有实现都要跟着改。契约的意义就是让这件事
+尽量少发生 —— 优先加一个新接口，而不是往老接口上堆参数。
+
+=====================================================================
 分成两类理解零件是有原因的（不是过度设计）：
   · TextEnricher 变的是「消息本身」——文件解析、语音转写、AI 读图；
   · DraftEnricher 变的是「草稿」——切分、时间识别、去重、AI 归纳。
@@ -15,10 +29,14 @@ from .models import Message, PushPayload, Task, TaskDraft
 
 
 class Source(ABC):
-    """来源：把外部世界的东西变成 Message，不做任何解析。"""
+    """来源：把外部世界的东西变成 Message，不做任何解析。
 
-    kind: str = "source"
-    title: str = "未命名来源"
+    解析（这行是不是待办、什么时候到期）是理解层的事。来源只负责
+    "把外面的东西原样搬进来"，这样同一个 QQ 接入能同时服务群消息和小号收件箱。
+    """
+
+    kind: str = "source"            # 唯一标识，同时会写进 Message.source_kind
+    title: str = "未命名来源"        # 设置界面里显示的名字
 
     @abstractmethod
     def submit(self, message: Message) -> Message:
@@ -34,9 +52,10 @@ class TextEnricher(ABC):
     """理解层·消息级：只把消息本身变丰富，不产生待办。"""
 
     name: str = "text-enricher"
-    order: int = 50
+    order: int = 50                 # 数字小的先跑。文件解析 10、AI 读图 90
 
     def enabled(self) -> bool:
+        """False = 这一步跳过。用来做"每步可单独关掉"。"""
         return True
 
     @abstractmethod
@@ -48,7 +67,7 @@ class DraftEnricher(ABC):
     """理解层·草稿级：吃消息吐草稿，或对已有草稿做加工。链式执行。"""
 
     name: str = "draft-enricher"
-    order: int = 50
+    order: int = 50                 # 切分 10 → 时间识别 20 → 去重 30 → AI 90
 
     def enabled(self) -> bool:
         return True
@@ -59,7 +78,11 @@ class DraftEnricher(ABC):
 
 
 class Store(ABC):
-    """存储：只读写数据库，不放业务规则。"""
+    """存储：只读写数据库，不放业务规则。
+
+    业务规则（什么样的行算待办、怎么判重复）全在 pipeline 里。
+    这条线一旦模糊，以后换数据库会变成一场灾难。
+    """
 
     @abstractmethod
     def save_message(self, message: Message) -> None:
@@ -71,7 +94,18 @@ class Store(ABC):
 
     @abstractmethod
     def list_tasks(self, view: str = "open", limit: int = 200) -> list[Task]:
-        """view: open / today / tomorrow / week / overdue / archive / junk"""
+        """按视图列待办。
+
+        view 的取值（对应界面左侧那几个分组）：
+          open      没做完的
+          today     今天到期
+          tomorrow  明天到期
+          week      七天内到期
+          overdue   已经过期还没做
+          archive   已归档
+          junk      废件箱
+          all       全部（不过滤）
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -80,7 +114,11 @@ class Store(ABC):
 
     @abstractmethod
     def log_dropped(self, draft: TaskDraft, reason: str) -> None:
-        """废件箱 + 删除记录。这些记录就是日后调规则的案例，不许丢。"""
+        """废件箱 + 删除记录。这些记录就是日后调规则的案例，不许丢。
+
+        为什么强调：用户说"这条不是碎片"时，你得有据可查；
+        想把规则调得更准时，也得先有一批真实的误判样本。
+        """
         raise NotImplementedError
 
 
@@ -92,7 +130,11 @@ class SinkResult:
 
 
 class Sink(ABC):
-    """输出：只负责把 PushPayload 送出去，不改内容。"""
+    """输出：只负责把 PushPayload 送出去，不改内容。
+
+    内容怎么组织是上游的事。通道只关心"怎么发"——
+    这样加钉钉通道时不用碰任何业务代码。
+    """
 
     name: str = "sink"
 

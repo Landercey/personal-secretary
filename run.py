@@ -1,5 +1,18 @@
 """开发期命令行入口。
 
+=====================================================================
+想改这里的话，先看这张地图
+=====================================================================
+  加一个新命令                    → 在 `main()` 里加一个 argparse 参数和分支
+  改零件怎么装配（注册新插件）    → `build()` —— 全项目只有这里能 import 各模块
+  改录入之后做什么（比如顺手推送） → `ingest()`
+  改自检检查哪几项                → `_selftest()`
+
+**这个文件是全项目唯一的"装配点"。** 别的模块之间不许互相 import
+（由 tests/test_contract_integrity.py 自动检查）。想加一个新零件，
+就是在这里 `new` 出来、塞进 Pipeline。
+
+=====================================================================
 第 9 步会被图形界面取代，但在那之前它是验证链路唯一的工具 ——
 而且它是**唯一**一个允许 import 各模块来组装程序的文件（装配点），
 别的模块之间不许互相 import。
@@ -9,7 +22,9 @@
     python run.py --list                   看未完成
     python run.py --list junk              看废件箱
     python run.py --done 3                 标记完成
-    python run.py --digest                 生成一份汇总并打印
+    python run.py --digest                 生成一份汇总并打印到控制台
+    python run.py --push                   把汇总真正推送到企业微信
+    python run.py --check-push             检查推送通道配置对不对（不发消息）
     python run.py --stats                  看统计
     python run.py --selftest               检查契约与环境
 """
@@ -26,23 +41,38 @@ from app.contracts.models import STATUS_DONE, STATUS_DROPPED     # noqa: E402
 from app.pipeline.chain import Pipeline                          # noqa: E402
 from app.pipeline.parse_enricher import RuleParseEnricher        # noqa: E402
 from app.runtime.config import config, default_data_dir          # noqa: E402
-from app.sinks.console import ConsoleSink, build_digest          # noqa: E402
+from app.sinks.console import build_digest                       # noqa: E402
+from app.sinks.router import build_sink, channel_status          # noqa: E402
 from app.sources.manual import ManualSource                      # noqa: E402
 from app.store.repository import SqliteStore, open_database      # noqa: E402
 
 
 def build(database: str | Path | None = None):
-    """把零件装配起来。换数据库路径主要是为了测试。"""
+    """把零件装配起来。换数据库路径主要是为了测试。
+
+    加一个新零件/插件的标准动作就是改这里（下面四行）：
+        store / source / pipeline / sink
+    比如以后接 QQ 来源，就是在 source 那边多一个 QQSource；
+    加 AI 理解，就是 pipeline 的 draft_enrichers 里多一个 AISummarizer。
+    """
     db_path = Path(database) if database else default_data_dir() / "secretary.db"
     store = SqliteStore(open_database(db_path))
     source = ManualSource()
     pipeline = Pipeline(draft_enrichers=[RuleParseEnricher()])
-    sink = ConsoleSink()
+    sink = build_sink()          # 配了企微就走企微，没配就退回控制台
     return store, source, pipeline, sink
 
 
 def ingest(store, source, pipeline, text: str) -> int:
-    """一段文字 → 待办。返回新入库的条数。"""
+    """一段文字 → 待办。返回新入库的条数。
+
+    这就是整条流水线的样子，一共五步：
+      1. 来源产出 Message
+      2. 存原始消息（留证据，出问题能回查）
+      3. 理解层跑一遍：消息 → 草稿
+      4. 草稿入库（重复的会被自动挡掉）
+      5. 没收下的碎片记进废件箱
+    """
     message = source.from_text(text)
     store.save_message(message)
     prepared, drafts = pipeline.run(message)
@@ -66,6 +96,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--done", type=int, help="把某条标记为完成")
     parser.add_argument("--drop", type=int, help="把某条标记为误判（日后调规则的案例）")
     parser.add_argument("--digest", action="store_true", help="生成汇总并打印")
+    parser.add_argument("--push", action="store_true", help="生成汇总并真正推送")
+    parser.add_argument("--check-push", action="store_true",
+                        help="检查推送通道配置（不发消息）")
     parser.add_argument("--stats", action="store_true", help="看统计")
     parser.add_argument("--selftest", action="store_true", help="检查契约与环境")
     parser.add_argument("--db", help="数据库路径（默认 data/secretary.db）")
@@ -91,10 +124,28 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{key:>10}: {value}")
         return 0
 
-    if args.digest:
-        tasks = store.list_tasks("open")
-        sink.deliver(build_digest(tasks, title="今天要做的"))
+    if args.check_push:
+        print("推送通道现状：")
+        for line in channel_status():
+            print(f"  · {line}")
+        print("\n要真正收到推送，需要在 config.toml 里填 [wecom_bot] webhook，"
+              "并把 enabled 改成 true。")
         return 0
+
+    if args.digest or args.push:
+        tasks = store.list_tasks("open")
+        payload = build_digest(tasks, title="今天要做的")
+        if args.digest:
+            # --digest 永远只打印，不真的发出去（免得调试时误发到群里）
+            from app.sinks.console import ConsoleSink
+
+            ConsoleSink().deliver(payload)
+            return 0
+        payload.channel = sink.name
+        result = sink.deliver(payload)
+        explain = getattr(sink, "explain", None)
+        print(explain(result) if explain else f"推送{'成功' if result.ok else '失败'}：{result.message}")
+        return 0 if result.ok else 1
 
     if args.list is not None:
         if args.list == "junk":
@@ -134,7 +185,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _selftest() -> int:
-    """第 1 步的门禁：契约完整、配置齐全、目录能建。"""
+    """第 1 步的门禁：契约完整、配置齐全、目录能建。
+
+    加一个新的必填配置项时，记得往下面的 `required` 里加一行 ——
+    否则用户配置漏了会在运行到一半时才炸，而不是启动时就告诉他。
+    """
     from app.contracts import models
     from app.contracts.interfaces import (
         DraftEnricher, Sink, Source, Store, TextEnricher,

@@ -199,6 +199,12 @@ deliver(payload) -> SinkResult(ok, code, message)
 | `resource.mem_critical_percent` | `88` | 内存占用超过此值：只入库、不分析、不推送 |
 | `resource.mem_resume_percent` | `75` | 降到这个值以下恢复 |
 | `risk.require_secondary_account` | `true` | 首次启动必须确认是用小号 |
+| `wecom_bot.enabled` | `false` | 关着的时候推送会退回控制台，不会静默丢消息 |
+| `wecom_bot.webhook` | `""` | 用户唯一需要填的一项；默认空，新仓库零真实信息 |
+| `wecom_bot.max_per_minute` | `20` | 官方硬限制，改了也没用，列在这里是为了看得见 |
+| `wecom_bot.retry_times` | `2` | 网络抖动重试次数 |
+| `wecom_bot.timeout` | `10` | 单次请求超时秒数 |
+| `wecom_bot.send_attachments` | `true` | 推送时要不要把图片/文件原件一起发到手机 |
 
 ---
 

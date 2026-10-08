@@ -74,6 +74,7 @@ class TestConfig(unittest.TestCase):
         "ai": ["mode", "cloud_priority", "token_budget_per_day"],
         "resource": ["mem_critical_percent", "mem_resume_percent"],
         "risk": ["require_secondary_account"],
+        "wecom_bot": ["enabled", "webhook", "max_per_minute", "timeout"],
     }
 
     def test_required_thresholds_declared(self):

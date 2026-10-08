@@ -1,5 +1,14 @@
 """手动来源：界面粘贴文字、拖入文件。
 
+=====================================================================
+想改这里的话，先看这张地图
+=====================================================================
+  改"哪些后缀算图片/文档"   → 文件顶部的 IMAGE_EXT / DOC_EXT
+  加一种新的手动录入方式     → 在这个类上加一个 from_xxx() 方法
+  改文件指纹怎么算           → `file_sha256()`（大文件嫌慢可以改成算首尾）
+  加一个全新的来源（邮箱）   → 别改这个文件，新写一个 sources/email.py
+
+=====================================================================
 这是最可靠的入口（不依赖 QQ、不依赖网络），也是 QQ 出问题时唯一的兜底。
 所以它不是"临时的"，是一等公民。
 """
@@ -59,6 +68,12 @@ def build_attachment(path: str | Path) -> Attachment:
 
 
 class ManualSource(Source):
+    """手动录入。实现契约里的 Source 接口。
+
+    虽然叫"手动"，但它遵守的规矩和 QQ 来源完全一样 ——
+    产出标准的 Message，不改其它任何东西。所以三种来源能共用同一条管线。
+    """
+
     kind = SOURCE_MANUAL
     title = "手动录入"
 
@@ -67,10 +82,15 @@ class ManualSource(Source):
         self._counter = 0
 
     def submit(self, message: Message) -> Message:
-        """手动录入已经是标准格式，只补上缺失的字段。"""
+        """契约要求的方法。手动录入本来就是标准格式，只补缺失字段。"""
         return self.normalize(message)
 
     def normalize(self, message: Message) -> Message:
+        """补齐 source_kind / source_name / sent_at / msg_id 这几样。
+
+        `is_self=True` 是关键：它让理解层用"宽判"（见 pipeline/parse_enricher.py
+        的 `_strict()`）。自己敲的"拿快递"必须留下，不能按群消息的标准过滤掉。
+        """
         message.source_kind = SOURCE_MANUAL
         message.source_name = message.source_name or self.source_name
         message.is_self = True          # 自己敲的，等于自己发的 → 宽判
@@ -81,13 +101,17 @@ class ManualSource(Source):
         return message
 
     def next_id(self) -> str:
+        """生成唯一编号：时间戳 + 序号，机器算的，保证同一条不会存两遍。"""
         self._counter += 1
         stamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
         return f"{SOURCE_MANUAL}:{stamp}-{self._counter}"
 
     # ------------------------------------------------------------------ 便捷入口
     def from_text(self, text: str, source_name: str | None = None) -> Message:
-        """一段文字 → 消息。"""
+        """一段文字 → 消息。
+
+        界面上的"粘贴识别"就是调它。
+        """
         message = Message(
             msg_id="",
             source_kind=SOURCE_MANUAL,
@@ -97,7 +121,11 @@ class ManualSource(Source):
         return self.normalize(message)
 
     def from_files(self, paths: list[str]) -> Message:
-        """一组文件 → 一条消息（合规：60 秒合并窗口的等价手动版本）。"""
+        """一组文件 → **一条**消息。
+
+        注意是"一条"不是"每条一个"：拖进来 3 张黑板照，说的是同一件事。
+        这跟群里 60 秒合并窗口是同一个道理（CONTRACT.md 第七节）。
+        """
         message = Message(
             msg_id="",
             source_kind=SOURCE_MANUAL,

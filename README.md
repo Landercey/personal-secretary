@@ -18,7 +18,7 @@
 | 0 | 架构契约 | ✅ 完成 |
 | 1 | 空壳骨架 + 契约自检 | ✅ 完成 |
 | 2 | 第一条竖直切片：粘贴文字 → 解析 → 存库 → 打印 | ✅ 完成 |
-| 3 | 接企微推送 | ⬜ 待做 |
+| 3 | 接企微推送 | ✅ 完成 |
 | 4 | 接 QQ 来源 | ⬜ 待做 |
 | 5 | 文件解析 + 附件 | ⬜ 待做 |
 | 6 | 去重 + 时间解析增强（碎片率 <3%） | ⬜ 待做 |
@@ -41,6 +41,8 @@ python run.py "明天下午三点交作业"  录一条
 python run.py --list              看未完成
 python run.py --list junk         看废件箱（没收下的原文都在这里）
 python run.py --digest            生成一份汇总打印出来
+python run.py --push              把汇总真正推送到企业微信
+python run.py --check-push        检查推送通道配置（不发消息）
 python run.py --done 3            标记某条完成
 python run.py --stats             看统计
 ```
@@ -49,6 +51,29 @@ python run.py --stats             看统计
 
 ```bat
 python -m unittest discover -s tests -t . -v
+```
+
+---
+
+## 想改代码？先看这几张地图
+
+每个文件开头都有一张「想改这里的话，先看这张地图」，直接告诉你改什么去哪一行：
+
+| 你想改 | 去哪 |
+|---|---|
+| 界面上的分组口径（今天/本周怎么算） | `app/store/repository.py` 的 `_view_filter()` |
+| 怎么判断一句话是待办 | `app/pipeline/quick_parse.py` |
+| 什么样的碎片该丢掉 | `app/pipeline/quick_parse.py` 的 `is_fragment()` |
+| 过滤的松紧 | `config.toml` 的 `[parse] filter_strength`（严格/宽松/关闭三档） |
+| 推送长什么样 | `app/sinks/console.py` 的 `build_digest()` |
+| 推送时间 | `config.toml` 的 `[push] default_times` |
+| 加一个新的消息来源 | 新写一个 `app/sources/xxx.py`，然后在 `run.py` 的 `build()` 里注册 |
+| 加一个新推送通道 | 新写一个 `app/sinks/xxx.py`，然后在 `app/sinks/router.py` 里登记 |
+
+改完一定要跑一遍：
+
+```bat
+python -m unittest discover -s tests -t .
 ```
 
 ---

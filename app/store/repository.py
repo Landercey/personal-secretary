@@ -1,5 +1,20 @@
 """SQLite 存储实现。
 
+=====================================================================
+想改这里的话，先看这张地图
+=====================================================================
+  加一张表 / 加一列              → 先改 schema.sql，再改本文件的读和写，
+                                    然后改 contracts/models.py 加字段。
+                                    三处都要动，少一处就会出现
+                                    "存进去了但读出来是空的"
+  改"同一件事算不算重复"          → `dedup_key_for()`
+  改界面左侧那几个分组的口径      → `_view_filter()`
+  改附件保留多久、废件箱留多久    → config.toml 的 [store]
+  改排序（哪条排前面）            → `list_tasks()` 里的 ORDER BY
+
+改完必须跑：python -m unittest discover -s tests -t .
+
+=====================================================================
 短事务 + WAL：写库不会阻塞前台，也不会在界面卡顿时攒出一堆锁。
 """
 
@@ -34,7 +49,11 @@ def now_text() -> str:
 
 
 def open_database(path: str | Path) -> sqlite3.Connection:
-    """打开（必要时初始化）数据库。"""
+    """打开（必要时初始化）数据库。
+
+    `executescript` 里的 SQL 全是 `CREATE TABLE IF NOT EXISTS`，
+    所以这个函数可以放心地每次启动都调用：第一次建表，以后什么都不做。
+    """
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(target), timeout=10.0)
@@ -48,6 +67,10 @@ def dedup_key_for(draft: TaskDraft) -> str:
 
     只用标题 + 到期日，不用秒级时间：群里同一件事被转两遍是很常见的，
     但"今天是 10:31 发的、昨天 09:02 又发一遍"不该算两条。
+
+    想改去重尺度就改这里：
+      · 觉得太松（两件不同的事被并了）→ 把 due_at 的时分也算进去
+      · 觉得太紧（同一件事还是重复）→ 干脆只留标题，去掉日期
     """
     body = "".join((draft.title or "").split()).lower()
     day = (draft.due_at or "")[:10]
@@ -58,13 +81,23 @@ def dedup_key_for(draft: TaskDraft) -> str:
 
 
 class SqliteStore(Store):
-    """契约里 `Store` 接口的 SQLite 实现。"""
+    """契约里 `Store` 接口的 SQLite 实现。
+
+    所有方法都直接对应接口里的一个方法。要换成 MySQL，
+    照抄这个文件换掉 SQL 即可，别的模块一行都不用改。
+    """
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
 
     # ------------------------------------------------------------------ 消息
     def save_message(self, message: Message) -> None:
+        """把消息存下来。
+
+        `INSERT OR REPLACE` 而不是普通 INSERT：同一条消息被处理两次
+        （比如断线重连后补收）不该报错，直接覆盖就好。
+        顺带维护 sources 表，记录"这台机器见过哪些群"。
+        """
         with self.conn:
             self.conn.execute(
                 """INSERT OR REPLACE INTO messages
@@ -99,6 +132,7 @@ class SqliteStore(Store):
         return stored
 
     def _insert_draft(self, message: Message, draft: TaskDraft) -> Task | None:
+        """插入一条草稿。重复的返回 None（不新增，但记一笔事件）。"""
         key = dedup_key_for(draft)
         if key:
             row = self.conn.execute(
@@ -153,6 +187,7 @@ class SqliteStore(Store):
         )
 
     def _event(self, task_id: int, kind: str, detail: str) -> None:
+        """记一笔事件。出问题时能回答"它怎么变成现在这样的"。"""
         self.conn.execute(
             "INSERT INTO task_events (task_id, kind, detail, created_at) VALUES (?,?,?,?)",
             (task_id, kind, detail, now_text()),
@@ -176,6 +211,11 @@ class SqliteStore(Store):
         return int(row["n"] if row else 0)
 
     def _view_filter(self, view: str) -> tuple[str, tuple[Any, ...]]:
+        """把界面上的分组名翻译成 SQL 条件。
+
+        想改"今天"的口径（比如把逾期也算进今天），就改这里。
+        返回 (WHERE 子句, 参数)。参数用 ? 占位是防注入的，不要拼字符串。
+        """
         today = datetime.now().strftime("%Y-%m-%d")
         tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
         week_end = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
@@ -203,6 +243,7 @@ class SqliteStore(Store):
         return self._row_to_task(row) if row else None
 
     def list_attachments(self, task_id: int) -> list[Attachment]:
+        """取一条待办的所有附件。推送和详情面板都靠它。"""
         rows = self.conn.execute(
             "SELECT * FROM attachments WHERE task_id=? ORDER BY attachment_id", (task_id,)
         ).fetchall()
@@ -240,6 +281,11 @@ class SqliteStore(Store):
 
     # ------------------------------------------------------------------ 状态
     def set_status(self, task_id: int, status: str, reason: str = "") -> None:
+        """改状态（完成 / 误判）。
+
+        标记完成时会写 completed_at；标成误判时会写 drop_reason ——
+        这条记录以后就是调规则的案例。
+        """
         stamp = now_text()
         completed = stamp if status == STATUS_DONE else ""
         drop_reason = reason if status == STATUS_DROPPED else ""
@@ -252,6 +298,7 @@ class SqliteStore(Store):
             self._event(task_id, f"status:{status}", reason)
 
     def archive(self, task_id: int, reason: str = "") -> None:
+        """归档。归档 ≠ 删除：数据还在，只是不再出现在主列表。"""
         with self.conn:
             self.conn.execute(
                 "UPDATE tasks SET is_archived=1, archive_reason=?, updated_at=? WHERE task_id=?",
@@ -266,7 +313,10 @@ class SqliteStore(Store):
 
     def log_dropped_text(self, text: str, reason: str, source_kind: str = "",
                          source_name: str = "", msg_id: str = "") -> None:
-        """记一条被判为碎片/噪声的原文。翻案、调规则全靠它。"""
+        """记一条被判为碎片/噪声的原文。翻案、调规则全靠它。
+
+        截断到 500 字：废件箱是给人翻的，不是备份原文的地方。
+        """
         with self.conn:
             self.conn.execute(
                 """INSERT INTO dropped_items
@@ -276,6 +326,7 @@ class SqliteStore(Store):
             )
 
     def list_dropped(self, limit: int = 200) -> list[dict[str, Any]]:
+        """列废件箱，最近丢的排前面。"""
         rows = self.conn.execute(
             "SELECT * FROM dropped_items ORDER BY drop_id DESC LIMIT ?", (int(limit),)
         ).fetchall()
@@ -283,7 +334,10 @@ class SqliteStore(Store):
 
     # ------------------------------------------------------------------ 维护
     def purge_old_dropped(self) -> int:
-        """废件箱记录也要过期清理，否则会一直长。"""
+        """废件箱记录也要过期清理，否则会一直长。
+
+        保留天数在 config.toml 的 [store] keep_dropped_days（默认 90 天）。
+        """
         days = int(config.get("store", "keep_dropped_days", 90))
         cutoff = (datetime.now() - timedelta(days=days)).strftime(TIME_FORMAT)
         with self.conn:
@@ -291,6 +345,7 @@ class SqliteStore(Store):
         return int(cursor.rowcount or 0)
 
     def stats(self) -> dict[str, int]:
+        """几个数字，给 `python run.py --stats` 和以后的状态栏用。"""
         def one(sql: str, *args: Any) -> int:
             row = self.conn.execute(sql, args).fetchone()
             return int(row["n"] if row else 0)
