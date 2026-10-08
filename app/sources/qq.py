@@ -38,14 +38,18 @@ NapCat 那边填"反向 WebSocket 地址"和同一个 token。
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import ipaddress
 import json
 import re
 import secrets
 import threading
 import time
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
 
@@ -57,7 +61,8 @@ from ..contracts.models import (
     TIME_FORMAT,
     Message,
 )
-from ..runtime.config import config
+from ..runtime.config import config, default_data_dir
+from .manual import build_attachment
 
 # 来源标识。QQ 一个源会产出两种消息：
 #   qq_group  群消息（别人发的，要过闲聊过滤）
@@ -65,6 +70,68 @@ from ..runtime.config import config
 SOURCE_QQ = "qq"
 KIND_GROUP = "group"
 KIND_PRIVATE = "private"
+
+# ---------------------------------------------------------------------------
+# 沙箱路径换算
+#
+# QQ 跑在沙盒里（Sandboxie）时，它报给我们的路径是"沙盒内的视角"，
+# 在这边的文件系统里是不存在的。下面两组根目录是实测出来的映射规律：
+#     C:\Users\<你>\Documents\...  →  <box>\user\current\Documents\...
+#     D:\某目录\...                →  <box>\drive\D\某目录\...
+# 换成不在沙盒里跑时，NapCat 给的路径本来就是真实路径，第一段就能命中，
+# 这两组映射用不上（所以留着也不碍事）。
+# ---------------------------------------------------------------------------
+SANDBOX_DRIVE_ROOTS = (Path(r"C:\Sandbox\user\QQNapCat\drive"),)
+SANDBOX_USER_ROOTS = (Path(r"C:\Sandbox\user\QQNapCat\user"),)
+
+# 认得出后缀的才留，避免把随机命名的临时文件当图片存下来
+IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
+
+
+def host_file(raw: str) -> Path | None:
+    """把 NapCat 给的路径换成本机真实路径（沙盒里的也算）。找不到返回 None。"""
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    if text.startswith("file://"):
+        text = urllib.parse.unquote(text[len("file://"):])
+        # file:///C:/... 前面会多一个斜杠
+        text = re.sub(r"^/(?=[A-Za-z]:)", "", text)
+    text = text.replace("/", "\\") if re.match(r"^/?[A-Za-z]:[\\/]", text) else text
+    candidate = Path(text.lstrip("\\"))
+    if candidate.is_file():
+        return candidate
+
+    # C:\Users\<你>\Documents\... —— 沙盒里对应 <box>\user\current\Documents\...
+    match = re.match(r"^[A-Za-z]:\\Users\\[^\\]+\\", str(candidate))
+    if match:
+        rest = str(candidate)[match.end():]
+        for root in SANDBOX_USER_ROOTS:
+            inside = root / "current" / rest
+            if inside.is_file():
+                return inside
+
+    # 盘符路径 → <box>\drive\<盘符>\...
+    drive = candidate.drive.rstrip(":")
+    if drive:
+        rest = str(candidate)[len(candidate.drive):].lstrip("\\/")
+        for root in SANDBOX_DRIVE_ROOTS:
+            inside = root / drive / rest
+            if inside.is_file():
+                return inside
+
+    # 只给了文件名：到沙盒的常见目录里按文件名找
+    name = candidate.name
+    if name:
+        for root in SANDBOX_USER_ROOTS:
+            for found in root.glob(f"current/Documents/**/{name}"):
+                if found.is_file():
+                    return found
+        for root in SANDBOX_DRIVE_ROOTS:
+            for found in root.glob(f"*/NapCatShell/**/{name}"):
+                if found.is_file():
+                    return found
+    return None
 
 
 # ===========================================================================
@@ -237,6 +304,92 @@ def today_allday() -> str:
 
 
 # ===========================================================================
+# 附件：图片和文件怎么从 QQ 取回本地
+# ===========================================================================
+def file_refs(event: dict[str, Any]) -> list[dict[str, str]]:
+    """这条消息里要"问 NapCat 要路径"的附件。
+
+    实测报文长这样，**没有 url**，只有一个 file_id：
+        {"type": "file", "data": {"file": "IMG_2026.jpg",
+                                  "file_id": "e55c…", "file_size": "2075342"}}
+    所以必须再调一次接口换路径，不能直接用。
+    """
+    message = event.get("message")
+    if isinstance(message, str):
+        return []
+    found: list[dict[str, str]] = []
+    for segment in message or []:
+        if not isinstance(segment, dict) or segment.get("type") != "file":
+            continue
+        data = segment.get("data") or {}
+        name = str(data.get("file_name") or data.get("name") or data.get("file") or "")
+        file_id = str(data.get("file_id") or name)
+        if name or file_id:
+            found.append({"name": name or file_id, "file_id": file_id})
+    return found
+
+
+def attachment_dir() -> Path:
+    """附件存哪儿。跟着数据目录走（绿色版就是程序旁边的 data/attachments）。"""
+    target = default_data_dir() / "attachments"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def save_attachment(source: Path, name: str, stamp: str) -> Path | None:
+    """把取回来的文件存进附件目录，返回存好的路径。
+
+    为什么必须复制一份、不能直接用 QQ 的临时文件：
+      QQ 的缓存目录会被它自己清理，几天后你点开附件就是空的。
+    文件名带上内容指纹，同一个文件被转发多次只存一份。
+    """
+    try:
+        data = source.read_bytes()
+    except OSError:
+        return None
+    if not data:
+        return None
+    digest = hashlib.sha256(data).hexdigest()[:16]
+    safe_name = re.sub(r'[\\/:*?"<>|]', "_", str(name or source.name))[:80] or "file"
+    target = attachment_dir() / f"qq_{stamp}_{digest}_{safe_name}"
+    if not target.exists():
+        try:
+            target.write_bytes(data)
+        except OSError:
+            return None
+    return target
+
+
+def download_url(url: str, timeout: float = 20.0, limit_mb: float = 30.0) -> Path | None:
+    """把一个 http 地址的内容下载到临时文件。
+
+    限制大小是为了别把内存吃光 —— 群里有人发个 500 MB 的视频，
+    不能让它把程序拖死。
+    """
+    import tempfile
+
+    limit = int(limit_mb * 1024 * 1024)
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = response.read(limit + 1)
+    except Exception:
+        return None
+    if not data or len(data) > limit or len(data) < 512:
+        return None
+    suffix = ".jpg"
+    lowered = url.lower()
+    for candidate in IMAGE_SUFFIXES:
+        if candidate in lowered:
+            suffix = candidate
+            break
+    handle = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    handle.write(data)
+    handle.close()
+    return Path(handle.name)
+
+
+# ===========================================================================
 # 事件 → Message
 # ===========================================================================
 def event_to_message(event: dict[str, Any], settings: "QQSettings",
@@ -294,6 +447,13 @@ def event_to_message(event: dict[str, Any], settings: "QQSettings",
     if len(text) > settings.max_text_chars:
         text = text[: settings.max_text_chars]
 
+    # 附件是异步取回来的（拿路径要问 NapCat），已经落在本地了。
+    # 这里只把路径变成标准的 Attachment 对象 ——
+    # 里面的文字由理解层的 FileEnricher 去读，来源层不解析内容。
+    attachments = [build_attachment(item["path"])
+                   for item in (event.get("_local_files") or [])
+                   if Path(str(item.get("path") or "")).is_file()]
+
     sender_info = event.get("sender") or {}
     nickname = str(sender_info.get("card") or sender_info.get("nickname")
                    or sender_info.get("user_id") or "")
@@ -319,9 +479,7 @@ def event_to_message(event: dict[str, Any], settings: "QQSettings",
         is_self=inbox,
         sent_at=_event_time(event),
         text=text,
-        # 附件（图片/文件/语音的下载）是第 5 步的事。
-        # 这里先把地址记进 raw，免得后面要重新解析一遍事件。
-        attachments=[],
+        attachments=attachments,
         raw={
             "qq_kind": chat_kind,
             "qq_ref": chat_ref,
@@ -503,6 +661,9 @@ class QQSource(Source):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._stopping = False
+        # 调 OneBot 接口用的"回执槽"：发出去的请求带一个 echo，
+        # NapCat 把同一个 echo 带回来，靠它把请求和响应配上。
+        self._pending: dict[str, asyncio.Future] = {}
 
     # ------------------------------------------------------------------ 契约
     def submit(self, message: Message) -> Message:
@@ -730,6 +891,7 @@ class QQSource(Source):
                     continue
                 if post_type in ("notice", "request"):
                     continue          # 戳一戳/撤回/加好友这类不是消息
+                await self._prepare_event(event)
                 self.feed_event(event)
         except Exception as exc:
             self._set(error=f"连接异常：{type(exc).__name__}")
@@ -738,6 +900,99 @@ class QQSource(Source):
             self._set(connected=False)
 
     # ------------------------------------------------------------------ 事件处理
+    async def call_api(self, action: str, params: dict[str, Any],
+                       timeout: float = 20.0) -> dict[str, Any] | None:
+        """调一次 OneBot 接口（比如 get_file 查文件路径）。失败返回 None。
+
+        ⚠️ 这是本项目**唯一主动**跟 QQ 说话的地方，调用点只有"把附件取回来"。
+        其余什么都不主动要 —— 少一个动作就少一分被风控盯上的概率。
+        """
+        connection = self._connection
+        if connection is None:
+            return None
+        loop = asyncio.get_running_loop()
+        echo = f"secretary-{secrets.token_hex(8)}"
+        future: asyncio.Future = loop.create_future()
+        self._pending[echo] = future
+        try:
+            await connection.send(json.dumps(
+                {"action": action, "params": params, "echo": echo}, ensure_ascii=False))
+            return await asyncio.wait_for(future, timeout)
+        except Exception:
+            return None
+        finally:
+            self._pending.pop(echo, None)
+
+    def _resolve_pending(self, event: dict[str, Any]) -> bool:
+        """这条是不是某个接口调用的回执？是就填进去并返回 True。
+
+        必须在"当成消息处理"之前判断 —— 不然回执会被当成一条群消息。
+        """
+        echo = event.get("echo")
+        if not isinstance(echo, str) or echo not in self._pending:
+            return False
+        future = self._pending.get(echo)
+        if future is not None and not future.done():
+            future.set_result(event)
+        return True
+
+    async def _prepare_event(self, event: dict[str, Any]) -> None:
+        """把消息里的图片/文件取回本地，路径塞进 event["_local_files"]。
+
+        取附件**之前**先过一遍"这个会话收不收"—— 不收的群一张图都不下载，
+        免得白耗流量和磁盘。群里一天几百条消息，每条都下载图片是不可接受的。
+        """
+        if not event.get("message"):
+            return
+        probe, _reason = event_to_message(
+            event, self.settings, self.self_id or str(event.get("self_id") or ""))
+        if probe is None:
+            return
+        if not file_refs(event) and not probe.raw.get("image_urls"):
+            return
+
+        stamp = str(event.get("message_id") or "qq")
+        limit_mb = self._attachment_limit_mb()
+        local: list[dict[str, str]] = []
+
+        # 路径一：file 段只有 file_id，得问 NapCat 换成本地路径
+        for ref in file_refs(event):
+            if not ref["file_id"]:
+                continue
+            got = await self.call_api("get_file", {"file_id": ref["file_id"]}, timeout=25.0)
+            raw_path = str(((got or {}).get("data") or {}).get("file") or "")
+            if not raw_path:
+                continue
+            source = host_file(raw_path)
+            if source is None:
+                continue
+            saved = save_attachment(source, ref["name"], stamp)
+            if saved is not None:
+                local.append({"path": str(saved), "name": ref["name"] or saved.name})
+
+        # 路径二：image 段里直接带 http 地址，下载即可
+        for index, url in enumerate(probe.raw.get("image_urls") or [], start=1):
+            temp = download_url(url, limit_mb=limit_mb)
+            if temp is None:
+                continue
+            saved = save_attachment(temp, temp.name, f"{stamp}_{index}")
+            try:
+                temp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            if saved is not None:
+                local.append({"path": str(saved), "name": saved.name})
+
+        if local:
+            event["_local_files"] = local
+
+    @staticmethod
+    def _attachment_limit_mb() -> float:
+        try:
+            return float(config.get("extract", "max_attachment_mb", 30) or 30)
+        except (TypeError, ValueError):
+            return 30.0
+
     def feed_event(self, event: dict[str, Any]) -> tuple[Message | None, str]:
         """处理一条 OneBot 事件。返回 (消息, 跳过原因)。
 

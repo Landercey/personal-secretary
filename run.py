@@ -19,6 +19,8 @@
 
 用法：
     python run.py "明天下午三点交作业"     录入一条
+    python run.py --file 作业.pptx         把一个文件变成待办（读里面的字）
+    python run.py --read 照片.jpg          只看这个文件能提出什么字，不入库
     python run.py --list                   看未完成
     python run.py --list junk              看废件箱
     python run.py --done 3                 标记完成
@@ -43,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from app.contracts.models import STATUS_DONE, STATUS_DROPPED     # noqa: E402
 from app.pipeline.chain import Pipeline                          # noqa: E402
 from app.pipeline.chat_filter import ChatNoiseEnricher           # noqa: E402
+from app.pipeline.file_enricher import FileEnricher              # noqa: E402
 from app.pipeline.parse_enricher import RuleParseEnricher        # noqa: E402
 from app.runtime.config import config, default_data_dir          # noqa: E402
 from app.sinks.console import build_digest                       # noqa: E402
@@ -63,11 +66,17 @@ def build(database: str | Path | None = None):
     db_path = Path(database) if database else default_data_dir() / "secretary.db"
     store = SqliteStore(open_database(db_path))
     source = ManualSource()
-    # 理解层的零件按 order 跑：闲聊过滤(5) → 规则解析(10) →（以后）去重(30) → AI(90)
-    pipeline = Pipeline(draft_enrichers=[
-        ChatNoiseEnricher(),
-        RuleParseEnricher(),
-    ])
+    # 理解层的零件分两组，管线保证「消息级」整组先跑：
+    #   ① 文件解析（把附件读成文字拼进正文）
+    #   ② 闲聊过滤 → 切分/时间识别 →（以后）去重 → AI
+    # 为什么文件解析必须在最前：正文可能只有"看这个"，真正的活在图里。
+    pipeline = Pipeline(
+        text_enrichers=[FileEnricher()],
+        draft_enrichers=[
+            ChatNoiseEnricher(),
+            RuleParseEnricher(),
+        ],
+    )
     sink = build_sink()          # 配了企微就走企微，没配就退回控制台
     return store, source, pipeline, sink
 
@@ -105,6 +114,31 @@ def ingest_message(store, pipeline, message) -> int:
 def ingest(store, source, pipeline, text: str) -> int:
     """一段文字 → 待办（手动录入的快捷方式）。"""
     return ingest_message(store, pipeline, source.from_text(text))
+
+
+def read_file(path: str) -> int:
+    """只看一个文件能提出什么文字，不入库。
+
+    调这个是为了回答"这张图/这份 PPT 到底被读成了什么" ——
+    排查"为什么它没变成待办"时的第一个动作。
+    """
+    from app.pipeline.extract import extract_text, job_type_for
+    from app.pipeline.extract.ocr import describe as ocr_describe
+
+    target = Path(path)
+    if not target.is_file():
+        print(f"文件不存在：{target}")
+        return 1
+    kind = job_type_for(target)
+    print(f"文件：{target.name}（{target.stat().st_size // 1024} KB）")
+    print(f"类型：{kind or '不认识这种格式'}")
+    print(f"引擎：{ocr_describe()}")
+    print("-" * 62)
+    result = extract_text(target)
+    print(f"结果：{'成功' if result.ok else '失败'}｜{result.method}｜{result.note}")
+    print("-" * 62)
+    print(result.text[:2000] if result.text else "（没有文字）")
+    return 0 if result.ok else 1
 
 
 def run_qq(store, pipeline) -> int:
@@ -205,6 +239,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check-qq", action="store_true",
                         help="看 QQ 接入的配置和状态")
     parser.add_argument("--qq", action="store_true", help="启动 QQ 接收")
+    parser.add_argument("--file", help="把一个文件（图片/Word/PPT/PDF）变成待办")
+    parser.add_argument("--read", help="只看这个文件能提出什么字，不入库")
     parser.add_argument("--stats", action="store_true", help="看统计")
     parser.add_argument("--selftest", action="store_true", help="检查契约与环境")
     parser.add_argument("--db", help="数据库路径（默认 data/secretary.db）")
@@ -250,6 +286,21 @@ def main(argv: list[str] | None = None) -> int:
             print("  ⚠️ 一个群都没勾，也没有收件箱 —— 现在什么都不会收。")
             print("     在 config.toml 的 [qq] group_ids 里填群号，")
             print("     或者在 inbox_ids 里填小号会话。")
+        return 0
+
+    if args.read:
+        return read_file(args.read)
+
+    if args.file:
+        target = Path(args.file)
+        if not target.is_file():
+            print(f"文件不存在：{target}")
+            return 1
+        message = source.from_files([str(target)])
+        added = ingest_message(store, pipeline, message)
+        print(f"\n录入完成：新待办 {added} 条")
+        for task in store.list_tasks("open", limit=5):
+            print(f"  #{task.task_id:<4} {task.title}   [{task.due_at or '没写时间'}]")
         return 0
 
     if args.qq:

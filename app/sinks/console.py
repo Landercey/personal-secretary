@@ -44,12 +44,35 @@ def format_task_line(task: Task, index: int = 0) -> str:
     return f"{head}{task.title} — {when}{where}{origin}"
 
 
-def build_digest(tasks: list[Task], title: str = "待办汇总") -> PushPayload:
-    """一批待办 → 一条汇总推送。"""
+def build_digest(tasks: list[Task], title: str = "待办汇总",
+                 max_attachments: int = 5) -> PushPayload:
+    """一批待办 → 一条汇总推送。
+
+    `max_attachments` 是安全阀：群机器人每分钟只能发 20 条，
+    一天的汇总如果每条待办都带 3 张图，一秒钟就把额度用光，
+    后面真正的提醒反而发不出去了。
+    """
     if not tasks:
         body = "现在没有待办。"
     else:
         lines = [format_task_line(t, i + 1) for i, t in enumerate(tasks)]
         quotes = [f"   ↳ {t.quoted}" for t in tasks if t.quoted]
         body = "\n".join(lines + ([""] + quotes if quotes else []))
-    return PushPayload(channel="console", kind="text", title=title, body=body)
+
+    # 附件：只带前面几条的，且只带真实存在的文件。
+    # 顺带去重 —— 同一张图被挂在两条待办上是常见的。
+    attachments = []
+    seen: set[str] = set()
+    for task in tasks:
+        for item in task.attachments:
+            if len(attachments) >= max_attachments:
+                break
+            if not item.path or item.path in seen or not item.exists():
+                continue
+            seen.add(item.path)
+            attachments.append(item)
+        if len(attachments) >= max_attachments:
+            break
+
+    return PushPayload(channel="console", kind="text", title=title,
+                       body=body, attachments=attachments)

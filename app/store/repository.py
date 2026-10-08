@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import functools
 import sqlite3
 import threading
 from datetime import datetime, timedelta
@@ -50,64 +51,56 @@ def now_text() -> str:
     return datetime.now().strftime(TIME_FORMAT)
 
 
-def open_database(path: str | Path) -> "_LockedConnection":
-    """打开（必要时初始化）数据库。
+def open_database(path: str | Path) -> sqlite3.Connection:
+    """打开（必要时初始化）数据库，返回一条普通连接。
 
     `executescript` 里的 SQL 全是 `CREATE TABLE IF NOT EXISTS`，
     所以这个函数可以放心地每次启动都调用：第一次建表，以后什么都不做。
 
-    返回的不是裸连接，而是一层带锁的包装（见 `_LockedConnection`）。
-    为什么要包装：QQ 消息在后台线程收，界面在主线程读写，两边会用同一个连接。
-    SQLite 默认禁止跨线程用连接，直接抛
-    "SQLite objects created in a thread can only be used in that same thread"。
+    跨线程怎么保证安全：不在连接上做文章，而是由 `SqliteStore`
+    **把每个方法整体加锁**（见 `_synchronized`）。连接上的
+    `check_same_thread=False` 只是关掉"换线程就报错"那道检查，
+    真正的互斥靠那把锁。
     """
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    # check_same_thread=False 只是关掉那道检查，并发安全靠下面那把锁，
-    # 不是靠这个开关本身。
     conn = sqlite3.connect(str(target), timeout=10.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
-    return _LockedConnection(conn)
+    conn.commit()
+    return conn
 
 
-class _LockedConnection:
-    """给 sqlite3 连接套一把可重入锁，让多个线程安全共用同一个连接。
+def _synchronized(method):
+    """把整个方法调用锁起来。
 
-    只暴露项目实际用到的那几个方法（execute / executescript / with / close）。
-    故意不做成"什么方法都转发"的通用代理 —— 那会让调用方以为
-    连接的所有能力都能用，包括不该用的。
+    =====================================================================
+    这里踩过两个坑，两次都只在真机/全量测试时才现形
+    =====================================================================
+    坑一：跨线程用同一条连接，SQLite 直接抛
+        "SQLite objects created in a thread can only be used in that same thread"
+        症状是"消息显示收下了，但库里一条没有"。
 
-    用可重入锁（RLock）的原因：`with conn:` 里面还会调 `conn.execute()`，
-    同一线程要能重复拿锁，不然自己把自己锁死。
+    坑二：以为"给 execute() 加把锁"就够了 —— **不够**。
+        execute() 只锁住"执行 SQL"这一下，拿到的游标是在锁**外面**
+        才 fetchone() 的。两个线程各拿一个游标又同时读同一条连接，
+        Python 的 sqlite3 不支持游标跨线程共享，行数据会串，
+        结果是读到别的查询的行，字段变成 NULL。
+        症状：`int(row["task_id"])` 突然抛 "TypeError: ... not 'NoneType'",
+        十次里只出一次。
+
+    所以锁必须覆盖**整个方法**，从 execute 一路到 fetch 全部结束。
+    RLock 是可重入的，所以方法内部调另一个被装饰的方法不会自己锁死自己。
+
+    代价：所有数据库操作串行。这个项目每分钟也就几条消息，
+    完全无所谓；换来的是"多线程下也对"这件事不用再猜。
     """
-
-    def __init__(self, conn: sqlite3.Connection) -> None:
-        self._conn = conn
-        self._lock = threading.RLock()
-
-    def execute(self, sql: str, parameters: Iterable[Any] = ()) -> sqlite3.Cursor:
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
         with self._lock:
-            return self._conn.execute(sql, parameters)
+            return method(self, *args, **kwargs)
 
-    def executescript(self, script: str) -> sqlite3.Cursor:
-        with self._lock:
-            return self._conn.executescript(script)
-
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()
-
-    def __enter__(self) -> "_LockedConnection":
-        self._lock.acquire()
-        self._conn.__enter__()
-        return self
-
-    def __exit__(self, *exc: Any) -> Any:
-        try:
-            return self._conn.__exit__(*exc)
-        finally:
-            self._lock.release()
+    return wrapper
 
 
 def dedup_key_for(draft: TaskDraft) -> str:
@@ -142,7 +135,10 @@ class SqliteStore(Store):
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
+        # 一把可重入锁，把每个公开方法整体锁住。见 `_synchronized`。
+        self._lock = threading.RLock()
 
+    @_synchronized
     def close(self) -> None:
         """关连接。
 
@@ -155,6 +151,7 @@ class SqliteStore(Store):
             pass
 
     # ------------------------------------------------------------------ 消息
+    @_synchronized
     def save_message(self, message: Message) -> None:
         """把消息存下来。
 
@@ -187,6 +184,7 @@ class SqliteStore(Store):
             )
 
     # ------------------------------------------------------------------ 待办
+    @_synchronized
     def save_drafts(self, message: Message, drafts: Iterable[TaskDraft]) -> list[Task]:
         stored: list[Task] = []
         for draft in drafts:
@@ -261,6 +259,7 @@ class SqliteStore(Store):
         )
 
     # ------------------------------------------------------------------ 查询
+    @_synchronized
     def list_tasks(self, view: str = "open", limit: int = 200) -> list[Task]:
         where, params = self._view_filter(view)
         sql = (
@@ -270,6 +269,7 @@ class SqliteStore(Store):
         rows = self.conn.execute(sql, (*params, int(limit))).fetchall()
         return [self._row_to_task(row) for row in rows]
 
+    @_synchronized
     def count_tasks(self, view: str = "open") -> int:
         where, params = self._view_filter(view)
         row = self.conn.execute(
@@ -305,10 +305,12 @@ class SqliteStore(Store):
             return "1=1", ()
         return "status='open' AND is_archived=0", ()      # open
 
+    @_synchronized
     def get_task(self, task_id: int) -> Task | None:
         row = self.conn.execute("SELECT * FROM tasks WHERE task_id=?", (task_id,)).fetchone()
         return self._row_to_task(row) if row else None
 
+    @_synchronized
     def list_attachments(self, task_id: int) -> list[Attachment]:
         """取一条待办的所有附件。推送和详情面板都靠它。"""
         rows = self.conn.execute(
@@ -347,6 +349,7 @@ class SqliteStore(Store):
         )
 
     # ------------------------------------------------------------------ 状态
+    @_synchronized
     def set_status(self, task_id: int, status: str, reason: str = "") -> None:
         """改状态（完成 / 误判）。
 
@@ -364,6 +367,7 @@ class SqliteStore(Store):
             )
             self._event(task_id, f"status:{status}", reason)
 
+    @_synchronized
     def archive(self, task_id: int, reason: str = "") -> None:
         """归档。归档 ≠ 删除：数据还在，只是不再出现在主列表。"""
         with self.conn:
@@ -374,10 +378,12 @@ class SqliteStore(Store):
             self._event(task_id, "archived", reason)
 
     # ------------------------------------------------------------------ 废件箱
+    @_synchronized
     def log_dropped(self, draft: TaskDraft, reason: str) -> None:
         self.log_dropped_text(draft.title, reason, draft.source_kind,
                               draft.source_name, draft.origin_msg_id)
 
+    @_synchronized
     def log_dropped_text(self, text: str, reason: str, source_kind: str = "",
                          source_name: str = "", msg_id: str = "") -> None:
         """记一条被判为碎片/噪声的原文。翻案、调规则全靠它。
@@ -392,6 +398,7 @@ class SqliteStore(Store):
                 (text[:500], reason, source_kind, source_name, msg_id, now_text()),
             )
 
+    @_synchronized
     def list_dropped(self, limit: int = 200) -> list[dict[str, Any]]:
         """列废件箱，最近丢的排前面。"""
         rows = self.conn.execute(
@@ -400,6 +407,7 @@ class SqliteStore(Store):
         return [dict(row) for row in rows]
 
     # ------------------------------------------------------------------ 维护
+    @_synchronized
     def purge_old_dropped(self) -> int:
         """废件箱记录也要过期清理，否则会一直长。
 
@@ -411,6 +419,7 @@ class SqliteStore(Store):
             cursor = self.conn.execute("DELETE FROM dropped_items WHERE dropped_at < ?", (cutoff,))
         return int(cursor.rowcount or 0)
 
+    @_synchronized
     def stats(self) -> dict[str, int]:
         """几个数字，给 `python run.py --stats` 和以后的状态栏用。"""
         def one(sql: str, *args: Any) -> int:

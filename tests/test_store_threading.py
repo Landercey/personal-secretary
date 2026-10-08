@@ -14,6 +14,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import threading
+import traceback
 import unittest
 from pathlib import Path
 
@@ -53,7 +54,9 @@ class TestCrossThreadAccess(unittest.TestCase):
                 self.store.save_message(message)
                 self.store.save_drafts(message, [TaskDraft(title="交作业")])
             except Exception as exc:
-                errors.append(f"{type(exc).__name__}: {exc}")
+                # 记完整堆栈：并发 bug 只报一句 "TypeError: xxx" 是查不出来的，
+                # 必须知道是哪一行。
+                errors.append(f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}")
 
         thread = threading.Thread(target=worker)
         thread.start()
@@ -76,7 +79,7 @@ class TestCrossThreadAccess(unittest.TestCase):
                     self.store.save_message(message)
                     self.store.save_drafts(message, [TaskDraft(title=f"事 {index}")])
             except Exception as exc:
-                errors.append(f"{type(exc).__name__}: {exc}")
+                errors.append(f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}")
 
         for n in range(12):
             threads.append(threading.Thread(target=worker, args=(n * 1000,)))
@@ -104,7 +107,7 @@ class TestCrossThreadAccess(unittest.TestCase):
                     self.store.save_drafts(message, [TaskDraft(title=f"事 {i}")])
                 stop.set()
             except Exception as exc:
-                errors.append(f"写:{type(exc).__name__}: {exc}")
+                errors.append(f"写:{type(exc).__name__}: {exc}\n{traceback.format_exc()}")
                 stop.set()
 
         thread = threading.Thread(target=writer)
@@ -114,7 +117,7 @@ class TestCrossThreadAccess(unittest.TestCase):
                 self.store.list_tasks("open")          # 边写边读
                 self.store.count_tasks("open")
         except Exception as exc:
-            errors.append(f"读:{type(exc).__name__}: {exc}")
+            errors.append(f"读:{type(exc).__name__}: {exc}\n{traceback.format_exc()}")
         thread.join(timeout=30)
 
         self.assertEqual(errors, [])
@@ -131,7 +134,7 @@ class TestCrossThreadAccess(unittest.TestCase):
                     self.store.save_message(message)
                     self.store.save_drafts(message, [TaskDraft(title="同一件事")])
             except Exception as exc:
-                errors.append(f"{type(exc).__name__}: {exc}")
+                errors.append(f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}")
 
         threads = [threading.Thread(target=worker) for _ in range(4)]
         for t in threads:

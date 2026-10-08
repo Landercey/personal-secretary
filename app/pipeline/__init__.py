@@ -12,5 +12,6 @@
 
 from .chain import Pipeline
 from .chat_filter import ChatNoiseEnricher
+from .file_enricher import FileEnricher
 
-__all__ = ["Pipeline", "ChatNoiseEnricher"]
+__all__ = ["Pipeline", "ChatNoiseEnricher", "FileEnricher"]

@@ -139,11 +139,21 @@ class TestConfigHotReload(unittest.TestCase):
 
     这是 config.toml 抬头里承诺的事。之前那句是假的 ——
     用户改完保存、行为没变，会以为程序坏了。
+
+    注意：这里用 os.utime 显式把修改时间改掉，**不能只靠连续写两次文件**。
+    两次写之间可能只差几微秒，文件系统给出的修改时间一样，
+    测试就会时好时坏 —— 不稳定的测试比没有测试更糟，它会让人不信任整套测试。
     """
 
-    def _write(self, path, value: str) -> None:
+    def _write(self, path, value: str, *, bump_mtime: bool = False) -> None:
         path.write_text(
             f"[title]\nmax_len = {value}\n", encoding="utf-8")
+        if bump_mtime:
+            import os
+            import time
+
+            stamp = time.time() + 10
+            os.utime(path, (stamp, stamp))
 
     def test_picks_up_changes_without_restart(self):
         import tempfile
@@ -156,7 +166,7 @@ class TestConfigHotReload(unittest.TestCase):
             cfg = Config.load(path)
             self.assertEqual(cfg.get("title", "max_len"), 111)
 
-            self._write(path, "222")
+            self._write(path, "222", bump_mtime=True)
             cfg._last_check = 0.0          # 跳过 2 秒节流，测试不用真等
             self.assertEqual(cfg.get("title", "max_len"), 222)
 
@@ -173,6 +183,11 @@ class TestConfigHotReload(unittest.TestCase):
             self.assertEqual(cfg.get("title", "max_len"), 333)
 
             path.write_text("[title\nmax_len = = =", encoding="utf-8")   # 故意写坏
+            import os
+            import time
+
+            stamp = time.time() + 20
+            os.utime(path, (stamp, stamp))
             cfg._last_check = 0.0
             self.assertEqual(cfg.get("title", "max_len"), 333)
 

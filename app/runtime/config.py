@@ -55,6 +55,23 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         # 废件箱记录保留多久。删除记录是日后调规则的案例，不许马上丢。
         "keep_dropped_days": 90,
     },
+    "extract": {
+        # OCR 引擎：
+        #   auto    装了 RapidOCR 就用它，否则用 Windows 自带（默认）
+        #   rapid   只用 RapidOCR
+        #   windows 只用 Windows 自带
+        # 实测 RapidOCR 明显更准（手写黑板也能读），但要拖进 390 MB 的
+        # onnxruntime，所以做成可选。装法：pip install rapidocr_onnxruntime
+        "ocr_engine": "auto",
+        # PDF 最多处理多少页。几十页的教材整本 OCR 会跑到天荒地老。
+        "max_pages": 20,
+        # 扫描件渲染倍数。2 倍对 OCR 够用；调大更清楚但更慢更吃内存。
+        "render_scale": 2.0,
+        # 单张图片识别的超时（秒）。系统 OCR 一张约 1 秒，留足余量。
+        "ocr_timeout_seconds": 180,
+        # 单个附件超过多少 MB 就不处理，防止吃光内存。
+        "max_attachment_mb": 30,
+    },
     "push": {
         # 默认一天两次汇总，用户可改。
         "default_times": ["07:30", "21:30"],
@@ -145,6 +162,14 @@ KEY_COMMENTS: dict[str, str] = {
     # [store]
     "store.attachment_retention_days": "图片/文件保留多少天，过期自动删（0 = 永不删）。",
     "store.keep_dropped_days": "废件箱记录保留多少天。这些是调规则的案例，别留太短。",
+    # [extract]
+    "extract.ocr_engine": "OCR 引擎：auto 自动 / rapid 只用 RapidOCR / windows 只用系统自带。\n"
+                          "#   装了 RapidOCR 会明显更准（手写也能读），但要占 390 MB；\n"
+                          "#   装法：pip install rapidocr_onnxruntime",
+    "extract.max_pages": "PDF 最多处理多少页。整本教材 OCR 会跑到天荒地老。",
+    "extract.render_scale": "扫描件 PDF 渲染倍数。调大更清楚，但更慢、更吃内存。",
+    "extract.ocr_timeout_seconds": "单张图片识别的超时（秒）。",
+    "extract.max_attachment_mb": "单个附件超过多少 MB 就不处理，防止吃光内存。",
     # [push]
     "push.default_times": "每天推送的时间点，24 小时制，想推几次就写几个。",
     "push.quote_max_chars": "推送里附带的原文片段长度（方便你看它为什么被判成待办）。",
