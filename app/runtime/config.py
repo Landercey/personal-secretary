@@ -24,6 +24,7 @@ CONTRACT.md 第五节：代码里不许出现裸数字。要调行为就改这�
 from __future__ import annotations
 
 import os
+import time
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -208,8 +209,10 @@ def render_toml(values: dict[str, dict[str, Any]]) -> str:
     """
     lines = [
         "# 私人秘书 · 用户配置",
-        "# 改完保存即可生效，不用重启（程序每次读取前会看文件有没有变）。",
         "# 这里只放这台机器自己的设置，不要提交到任何仓库、不要发给别人。",
+        "#",
+        "# 改完保存就行 —— 绝大多数设置立即生效，不用重启。",
+        "# 例外：[qq] 那段改动后要重启（端口在启动时就绑好了）。",
         "",
     ]
     for section in sorted(values):
@@ -238,17 +241,62 @@ def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
 
 
 class Config:
-    """读配置。`cfg["parse"]["filter_strength"]` 或 `cfg.get("parse", "filter_strength")`。"""
+    """读配置。`cfg["parse"]["filter_strength"]` 或 `cfg.get("parse", "filter_strength")`。
+
+    会自动盯着配置文件：每次读取前看一眼文件有没有被改过（最多每 2 秒查一次），
+    改了立刻用新的。用户在编辑器里改完保存就能生效，不用重启程序。
+
+    ⚠️ 唯一的例外是 `[qq]` 段：那些值在服务启动时就用来绑端口了，
+    改了必须重启。config.toml 的抬头里写明了这一点。
+    """
 
     def __init__(self, values: dict[str, Any] | None = None, path: Path | None = None) -> None:
         self._values = _merge(DEFAULTS, values or {})
         self.path = path
+        self._mtime = self._read_mtime()
+        self._last_check = 0.0
+
+    # ------------------------------------------------------------------ 热重载
+    def _read_mtime(self) -> float:
+        if not self.path:
+            return 0.0
+        try:
+            return self.path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def _maybe_reload(self) -> None:
+        """每 2 秒最多查一次文件时间，变了就重读。
+
+        不做文件监听（那要引第三方库），轮询足够 ——
+        用户改完配置到生效最多差 2 秒，察觉不到。
+        """
+        if not self.path:
+            return
+        now = time.monotonic()
+        if now - self._last_check < 2.0:
+            return
+        self._last_check = now
+        mtime = self._read_mtime()
+        if not mtime or mtime == self._mtime:
+            return
+        self._mtime = mtime
+        try:
+            with open(self.path, "rb") as handle:
+                fresh = tomllib.load(handle)
+        except (OSError, tomllib.TOMLDecodeError):
+            # 用户改到一半、语法还没写对时会读失败。保留旧值，等他写完再说 ——
+            # 不能因为一次读失败就把正在运行的程序搞乱。
+            return
+        self._values = _merge(DEFAULTS, fresh)
 
     # ------------------------------------------------------------------ 读取
     def __getitem__(self, section: str) -> dict[str, Any]:
+        self._maybe_reload()
         return self._values.get(section, {})
 
     def get(self, section: str, key: str, default: Any = None) -> Any:
+        self._maybe_reload()
         return self._values.get(section, {}).get(key, default)
 
     def as_dict(self) -> dict[str, Any]:

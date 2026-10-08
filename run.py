@@ -135,7 +135,18 @@ def run_qq(store, pipeline) -> int:
         if state.get("error"):
             print(f"  ⚠️ {state['error']}")
 
-    source = QQSource(settings=settings, on_message=on_message, on_status=on_status)
+    def on_reject(reason: str, preview: str) -> None:
+        """被拦下的消息也要留痕迹。
+
+        用户发了一条，程序这边什么都不显示，是最难排查的情况 ——
+        所以这里既打印出来，也写进废件箱（靠 `--list junk` 翻得到）。
+        """
+        print(f"  ✗ 拦下│ {reason}│ {preview[:34]}")
+        store.log_dropped_text(preview, f"QQ 拦下：{reason}",
+                               "qq", "", "")
+
+    source = QQSource(settings=settings, on_message=on_message,
+                      on_status=on_status, on_reject=on_reject)
     if not source.start():
         print("启动失败，看上面的提示。")
         return 1
@@ -152,6 +163,9 @@ def run_qq(store, pipeline) -> int:
     print("  现在去 NapCat 里把上面这个地址配好，然后等它连上来。")
     print("  按 Ctrl+C 停止。")
     print("=" * 62)
+    # 只在数字变化时打一行。每 2 秒重打一遍同样的内容，会把真正有用的
+    # 那几行（收到、拦下）冲到看不见的地方。
+    last_line = ""
     try:
         while True:
             time.sleep(2)
@@ -159,9 +173,16 @@ def run_qq(store, pipeline) -> int:
             if not state.get("running"):
                 continue
             if state.get("connected"):
-                print(f"  [已连接] 登录号 {state.get('self_id') or '?'}｜"
-                      f"收到 {state.get('received', 0)}｜收下 {state.get('accepted', 0)}｜"
-                      f"拦下 {state.get('skipped', 0)}")
+                line = (f"  [已连接] 登录号 {state.get('self_id') or '?'}｜"
+                        f"收到 {state.get('received', 0)}｜收下 {state.get('accepted', 0)}｜"
+                        f"拦下 {state.get('skipped', 0)}"
+                        + (f"｜最后一条被拦原因：{state['last_reason']}"
+                           if state.get("last_reason") else ""))
+            else:
+                line = "  [等待连接] 等 NapCat 连上来…"
+            if line != last_line:
+                print(line)
+                last_line = line
     except KeyboardInterrupt:
         print("\n  停止中…")
     finally:

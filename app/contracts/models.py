@@ -36,6 +36,7 @@ from typing import Any
 SOURCE_MANUAL = "manual"        # 界面粘贴 / 拖文件进来的
 SOURCE_QQ_GROUP = "qq_group"    # QQ 群里别人发的（严格过滤）
 SOURCE_QQ_INBOX = "qq_inbox"    # 自己发给小号的（宽松过滤，微信/短信转发走这条）
+SOURCE_QQ_PRIVATE = "qq_private"  # 别人私下发给你的（严格过滤）
 SOURCE_EMAIL = "email"          # 预留：邮箱插件
 
 # ---------------------------------------------------------------------------

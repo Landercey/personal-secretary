@@ -134,5 +134,58 @@ class TestRuntimeConfigObject(unittest.TestCase):
         self.assertEqual(config.load_error, "")
 
 
+class TestConfigHotReload(unittest.TestCase):
+    """改了配置文件不用重启就要生效。
+
+    这是 config.toml 抬头里承诺的事。之前那句是假的 ——
+    用户改完保存、行为没变，会以为程序坏了。
+    """
+
+    def _write(self, path, value: str) -> None:
+        path.write_text(
+            f"[title]\nmax_len = {value}\n", encoding="utf-8")
+
+    def test_picks_up_changes_without_restart(self):
+        import tempfile
+
+        from app.runtime.config import Config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            self._write(path, "111")
+            cfg = Config.load(path)
+            self.assertEqual(cfg.get("title", "max_len"), 111)
+
+            self._write(path, "222")
+            cfg._last_check = 0.0          # 跳过 2 秒节流，测试不用真等
+            self.assertEqual(cfg.get("title", "max_len"), 222)
+
+    def test_broken_file_keeps_old_values(self):
+        """用户改到一半、语法还没写对时，不能把运行中的程序搞乱。"""
+        import tempfile
+
+        from app.runtime.config import Config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            self._write(path, "333")
+            cfg = Config.load(path)
+            self.assertEqual(cfg.get("title", "max_len"), 333)
+
+            path.write_text("[title\nmax_len = = =", encoding="utf-8")   # 故意写坏
+            cfg._last_check = 0.0
+            self.assertEqual(cfg.get("title", "max_len"), 333)
+
+    def test_missing_file_is_tolerated(self):
+        import tempfile
+
+        from app.runtime.config import Config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Config.load(Path(tmp) / "不存在.toml")
+            cfg._last_check = 0.0
+            self.assertEqual(cfg.get("parse", "filter_strength"), "strict")
+
+
 if __name__ == "__main__":
     unittest.main()

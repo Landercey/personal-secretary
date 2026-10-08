@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
@@ -48,35 +50,86 @@ def now_text() -> str:
     return datetime.now().strftime(TIME_FORMAT)
 
 
-def open_database(path: str | Path) -> sqlite3.Connection:
+def open_database(path: str | Path) -> "_LockedConnection":
     """打开（必要时初始化）数据库。
 
     `executescript` 里的 SQL 全是 `CREATE TABLE IF NOT EXISTS`，
     所以这个函数可以放心地每次启动都调用：第一次建表，以后什么都不做。
+
+    返回的不是裸连接，而是一层带锁的包装（见 `_LockedConnection`）。
+    为什么要包装：QQ 消息在后台线程收，界面在主线程读写，两边会用同一个连接。
+    SQLite 默认禁止跨线程用连接，直接抛
+    "SQLite objects created in a thread can only be used in that same thread"。
     """
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(target), timeout=10.0)
+    # check_same_thread=False 只是关掉那道检查，并发安全靠下面那把锁，
+    # 不是靠这个开关本身。
+    conn = sqlite3.connect(str(target), timeout=10.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
-    return conn
+    return _LockedConnection(conn)
+
+
+class _LockedConnection:
+    """给 sqlite3 连接套一把可重入锁，让多个线程安全共用同一个连接。
+
+    只暴露项目实际用到的那几个方法（execute / executescript / with / close）。
+    故意不做成"什么方法都转发"的通用代理 —— 那会让调用方以为
+    连接的所有能力都能用，包括不该用的。
+
+    用可重入锁（RLock）的原因：`with conn:` 里面还会调 `conn.execute()`，
+    同一线程要能重复拿锁，不然自己把自己锁死。
+    """
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+        self._lock = threading.RLock()
+
+    def execute(self, sql: str, parameters: Iterable[Any] = ()) -> sqlite3.Cursor:
+        with self._lock:
+            return self._conn.execute(sql, parameters)
+
+    def executescript(self, script: str) -> sqlite3.Cursor:
+        with self._lock:
+            return self._conn.executescript(script)
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+    def __enter__(self) -> "_LockedConnection":
+        self._lock.acquire()
+        self._conn.__enter__()
+        return self
+
+    def __exit__(self, *exc: Any) -> Any:
+        try:
+            return self._conn.__exit__(*exc)
+        finally:
+            self._lock.release()
 
 
 def dedup_key_for(draft: TaskDraft) -> str:
-    """去重键：同一天 + 同一件事 → 同一条。
+    """去重键：同一个标题 + 同一个时刻 + 同一个地点 → 同一条。
 
-    只用标题 + 到期日，不用秒级时间：群里同一件事被转两遍是很常见的，
-    但"今天是 10:31 发的、昨天 09:02 又发一遍"不该算两条。
+    为什么不把地点去掉：同一天在同一栋楼的两个地方开会，是两件事。
+
+    为什么用**完整时刻**而不是只取日期（真踩过）：
+      "明天上午十点在图书馆集合"和"明天下午三点在图书馆集合"是同一天的
+      两场活动，只取日期的话，后一条会被当成前一条的重复直接丢掉 ——
+      用户会发现"我发的那条没反应"。
 
     想改去重尺度就改这里：
-      · 觉得太松（两件不同的事被并了）→ 把 due_at 的时分也算进去
-      · 觉得太紧（同一件事还是重复）→ 干脆只留标题，去掉日期
+      · 觉得太紧（同一件事还是生成两条）→ 把 due_at 截成日期
+      · 觉得太松（两件不同的事被并了）→ 把 detail 也一起算进 key
     """
-    body = "".join((draft.title or "").split()).lower()
-    day = (draft.due_at or "")[:10]
+    body = re.sub(r"\s+", "", (draft.title or "")).lower()
     if not body:
         return ""
-    digest = hashlib.sha256(f"{body}|{day}".encode("utf-8")).hexdigest()
+    when = (draft.due_at or "").strip()
+    where = re.sub(r"\s+", "", (draft.location or "")).lower()
+    digest = hashlib.sha256(f"{body}|{when}|{where}".encode("utf-8")).hexdigest()
     return digest[:32]
 
 
@@ -89,6 +142,17 @@ class SqliteStore(Store):
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
+
+    def close(self) -> None:
+        """关连接。
+
+        正常退出和测试里都要调 —— Windows 上不关的话文件还被占着，
+        临时目录删不掉（这个也真踩过：测试报 WinError 32）。
+        """
+        try:
+            self.conn.close()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ 消息
     def save_message(self, message: Message) -> None:
@@ -132,45 +196,48 @@ class SqliteStore(Store):
         return stored
 
     def _insert_draft(self, message: Message, draft: TaskDraft) -> Task | None:
-        """插入一条草稿。重复的返回 None（不新增，但记一笔事件）。"""
-        key = dedup_key_for(draft)
-        if key:
-            row = self.conn.execute(
-                "SELECT task_id FROM tasks WHERE dedup_key = ?", (key,)
-            ).fetchone()
-            if row:
-                # 同一件事又来一遍：不新增，记一笔事件就够。
-                self._event(int(row["task_id"]), "duplicate",
-                            f"重复出现（来源 {message.source_name}）")
-                return None
+        """插入一条草稿。重复的返回 None（不新增，但记一笔事件）。
 
+        ⚠️ 整段"查重 + 插入"必须包在**同一个** `with self.conn:` 里。
+
+        为什么（并发时真踩过）：拆成"先 SELECT 查重、再 INSERT"两段的话，
+        两个线程可以都查到"没有重复"，然后一起插入，撞上 dedup_key 的唯一索引，
+        抛 IntegrityError。锁只保护单次调用，保护不了"两次调用之间"。
+
+        另外还兜了一层 ON CONFLICT：**跨进程**时（用户同时开了两个程序）
+        进程内的锁管不着，那时按"重复"处理，而不是报错崩掉。
+        """
+        key = dedup_key_for(draft)
         stamp = now_text()
-        with self.conn:
+        with self.conn:                      # 锁 + 事务，整段不可分割
+            if key:
+                row = self.conn.execute(
+                    "SELECT task_id FROM tasks WHERE dedup_key = ?", (key,)
+                ).fetchone()
+                if row:
+                    # 同一件事又来一遍：不新增，记一笔事件就够。
+                    self._event(int(row["task_id"]), "duplicate",
+                                f"重复出现（来源 {message.source_name}）")
+                    return None
             cursor = self.conn.execute(
                 """INSERT INTO tasks
                    (title, detail, due_at, location, remind_level, priority,
                     source_kind, source_name, sender, origin_msg_id, confidence,
                     quoted, status, is_archived, dedup_key, created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)""",
-                (
-                    draft.title,
-                    draft.detail,
-                    draft.due_at,
-                    draft.location,
-                    int(draft.remind_level),
-                    int(draft.priority),
-                    draft.source_kind or message.source_kind or SOURCE_MANUAL,
-                    draft.source_name or message.source_name,
-                    draft.sender or message.sender,
-                    draft.origin_msg_id or message.msg_id,
-                    float(draft.confidence),
-                    draft.quoted,
-                    STATUS_OPEN,
-                    key,
-                    stamp,
-                    stamp,
-                ),
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
+                   ON CONFLICT(dedup_key) WHERE dedup_key <> '' DO NOTHING""",
+                (draft.title, draft.detail, draft.due_at, draft.location,
+                 int(draft.remind_level), int(draft.priority),
+                 draft.source_kind or message.source_kind or SOURCE_MANUAL,
+                 draft.source_name or message.source_name,
+                 draft.sender or message.sender,
+                 draft.origin_msg_id or message.msg_id,
+                 float(draft.confidence), draft.quoted,
+                 STATUS_OPEN, key, stamp, stamp),
             )
+            if not cursor.rowcount:
+                # 跨进程撞车：另一个进程刚好插了同一条。当作重复处理。
+                return None
             task_id = int(cursor.lastrowid or 0)
             for attachment in draft.attachments:
                 self._insert_attachment(task_id, message.msg_id, attachment)

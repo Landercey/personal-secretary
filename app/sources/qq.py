@@ -53,6 +53,7 @@ from ..contracts.interfaces import Source
 from ..contracts.models import (
     SOURCE_QQ_GROUP,
     SOURCE_QQ_INBOX,
+    SOURCE_QQ_PRIVATE,
     TIME_FORMAT,
     Message,
 )
@@ -304,9 +305,15 @@ def event_to_message(event: dict[str, Any], settings: "QQSettings",
                    or chat_name or f"群{chat_ref}")
 
     msg_id = str(event.get("message_id") or "")
+    if inbox:
+        source_kind = SOURCE_QQ_INBOX
+    elif chat_kind == KIND_PRIVATE:
+        source_kind = SOURCE_QQ_PRIVATE
+    else:
+        source_kind = SOURCE_QQ_GROUP
     message = Message(
         msg_id=f"{SOURCE_QQ}:{msg_id}" if msg_id else f"{SOURCE_QQ}:{time.time_ns()}",
-        source_kind=SOURCE_QQ_INBOX if inbox else SOURCE_QQ_GROUP,
+        source_kind=source_kind,
         source_name=display,
         sender=nickname,
         is_self=inbox,
@@ -335,6 +342,25 @@ def _event_time(event: dict[str, Any]) -> str:
     except (TypeError, ValueError, OSError, OverflowError):
         pass
     return datetime.now().strftime(TIME_FORMAT)
+
+
+def preview_of(event: dict[str, Any]) -> str:
+    """被拦下的消息也要能看到原文，方便判断是不是误拦。
+
+    拿不到正文就退回会话信息（"私聊 来自 123456"这种），至少能看出是谁发的。
+    """
+    try:
+        text, _mentioned, _images, _voices = flatten_message(event, "")
+    except Exception:
+        text = ""
+    if text.strip():
+        return text.strip()[:200]
+    kind, ref, _name = chat_identity(event)
+    if kind == KIND_GROUP:
+        return f"[群消息 群{ref}]"
+    if kind == KIND_PRIVATE:
+        return f"[私聊 来自 {event.get('user_id') or ref}]"
+    return "[非消息事件]"
 
 
 # ===========================================================================
@@ -452,10 +478,15 @@ class QQSource(Source):
         settings: QQSettings | None = None,
         on_message: Callable[[Message], Any] | None = None,
         on_status: Callable[[dict[str, Any]], None] | None = None,
+        on_reject: Callable[[str, str], None] | None = None,
     ) -> None:
         self.settings = settings or QQSettings.from_config()
         self.on_message = on_message
         self.on_status = on_status
+        # 被拦下的消息也回调一次（原因, 原文片段）。
+        # 为什么需要：用户发了一条消息，程序这边"什么都没发生"，
+        # 是最难排查的情况 —— 必须留下"为什么没收"的痕迹。
+        self.on_reject = on_reject
         self.self_id = ""
         self._status: dict[str, Any] = {
             "running": False,        # 端口在监听吗
@@ -718,6 +749,11 @@ class QQSource(Source):
         message, reason = event_to_message(event, self.settings, self_id)
         if message is None:
             self._set(skipped=self._status["skipped"] + 1, last_reason=reason)
+            if self.on_reject is not None:
+                try:
+                    self.on_reject(reason, preview_of(event))
+                except Exception:
+                    pass
             return None, reason
         self._set(accepted=self._status["accepted"] + 1, last_reason="")
         if self.on_message is not None:

@@ -80,7 +80,7 @@ personal-secretary/
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `msg_id` | str | 全局唯一。格式 `来源kind:原始id`，去重用 |
-| `source_kind` | str | `manual` / `qq_group` / `qq_inbox` / `email` / 插件名 |
+| `source_kind` | str | `manual` / `qq_group` / `qq_private` / `qq_inbox` / `email` / 插件名 |
 | `source_name` | str | 群名 / 邮箱名 / `"手动录入"` |
 | `sender` | str | 发送人昵称或号码 |
 | `is_self` | bool | 是不是自己（本机小号）发的 |
@@ -157,7 +157,8 @@ fetch() -> list[Message]       主动拉取（邮箱用），默认返回空列�
 ```
 
 > 一个来源可以产出**多种** `source_kind`。QQ 源就是这样：群消息标成
-> `qq_group`（要过闲聊过滤），小号收件箱标成 `qq_inbox`（不过滤）。
+> `qq_group`、别人的私聊标成 `qq_private`（这两种都要过闲聊过滤），
+> 小号收件箱标成 `qq_inbox`（不过滤）。
 > `Source.kind` 是来源的标识（`"qq"`），和消息上的 `source_kind` 不是一回事。
 
 ### `TextEnricher` — 理解层·消息级零件
