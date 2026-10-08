@@ -61,8 +61,14 @@ _DATE_REL = re.compile(r"(大后天|后天|今天|今晚|今早|明天|明晚|�
 _DATE_WEEK = re.compile(r"(下周|本周|这周|周|星期)([一二三四五六日天1-7])")
 
 # ---- 时刻 ----
-_TIME_HM = re.compile(r"(\d{1,2})\s*[:：]\s*(\d{2})")
 _TIME_PERIOD = r"(上午|下午|中午|晚上|晚|早上|早晨|凌晨|今晚|明晚|夜里|夜间)?"
+# ⚠️ 这条一定要带 `_TIME_PERIOD` 前缀。
+#
+# 真踩过：原来只写 `(\d{1,2}):(\d{2})`，于是"下午 3:00"被解析成 **03:00**
+# （凌晨三点）—— 因为它压根没看前面那两个字。
+# "下午3点开会"走的是另一条正则（带前缀），反而是对的。
+# 同一种意思两种写法，一个对一个错，这种不一致最难发现。
+_TIME_HM = re.compile(rf"{_TIME_PERIOD}\s*(\d{{1,2}})\s*[:：]\s*(\d{{2}})")
 _TIME_CN = re.compile(rf"{_TIME_PERIOD}\s*(\d{{1,2}})\s*[点時时]\s*(半|\d{{1,2}}\s*分)?")
 
 # ---- 中文数字的时刻：「上午十点」「两点半」「下午三点二十」----
@@ -271,7 +277,8 @@ def resolve_time(text: str) -> tuple[int, int, str] | None:
     """返回 (时, 分, 命中的原文)。"""
     m = _TIME_HM.search(text)
     if m:
-        hour, minute = int(m.group(1)), int(m.group(2))
+        hour = _apply_period(m.group(1), int(m.group(2)))
+        minute = int(m.group(3))
         if 0 <= hour <= 23 and 0 <= minute <= 59:
             return hour, minute, m.group(0)
 
@@ -280,14 +287,24 @@ def resolve_time(text: str) -> tuple[int, int, str] | None:
         period, hour_raw = m.group(1), int(m.group(2))
         tail = (m.group(3) or "").strip()
         minute = 30 if tail.startswith("半") else int(re.sub(r"\D", "", tail) or 0)
-        if period in ("下午", "晚上", "晚", "中午", "今晚", "明晚", "夜里", "夜间") \
-                and hour_raw < 12:
-            hour_raw += 12
-        if period == "凌晨" and hour_raw == 12:
-            hour_raw = 0
+        hour_raw = _apply_period(period, hour_raw)
         if 0 <= hour_raw <= 23 and 0 <= minute <= 59:
             return hour_raw, minute, m.group(0)
     return None
+
+
+# 「下午」类前缀 → 24 小时制。两种写法（"3:00" 和 "3点"）共用这一处逻辑，
+# 免得改了一处忘了另一处 —— 上面那个 03:00 的 bug 就是这么来的。
+_PM_PERIODS = ("下午", "晚上", "晚", "中午", "今晚", "明晚", "夜里", "夜间")
+
+
+def _apply_period(period: str | None, hour: int) -> int:
+    """把"下午3点""晚上7:30"换算成 24 小时制。"""
+    if period in _PM_PERIODS and hour < 12:
+        return hour + 12
+    if period == "凌晨" and hour == 12:
+        return 0
+    return hour
 
 
 def resolve_location(text: str) -> tuple[str | None, str | None]:
@@ -631,6 +648,20 @@ def _merge_block(body: str, lines: list[str],
         #     不加前缀的话标题就是 "周一 8:50-12:00 E1B516（A组）"，
         #     摘掉时间只剩一个"组"字，按定义就是碎片。
         keep = TaskDraft(title=f"表格：{raw}")
+
+    # 挑中的标题那行可能没带时间，但整块里有。
+    # 实测：一张讲座海报合成一条之后，标题是"学术讲座第82期"，
+    # 可海报里明明写着"10月10日下午3:00" —— 不补的话这天该提醒你的事就没人提。
+    #
+    # 表格除外：一张值班表跨好几天，给它安一个"截止时间"是误导。
+    if keep.due_at is None and not table:
+        date_part, _ = resolve_date(body)
+        time_part = resolve_time(body)
+        keep.due_at = _compose_due(date_part, time_part)
+    if keep.location is None and not table:
+        location, _raw = resolve_location(body)
+        keep.location = location
+
     keep.detail = body[:DETAIL_MAX_CHARS]
     results = [keep]
 

@@ -143,6 +143,32 @@ class TestTimeParsing(unittest.TestCase):
         """繁简归一：不归一，繁体里的"點"认不出来，时间会全错。"""
         self.assertEqual(to_simplified("明天早上11點打遊戲"), "明天早上11点打游戏")
 
+    def test_pm_period_applies_to_colon_form_too(self):
+        """回归：`下午3:00` 一度被解析成 **03:00**（凌晨三点）。
+
+        原因：`HH:MM` 那条正则没带"上午/下午"前缀，而"3点"那种写法带了 ——
+        同一个意思两种写法，一个对一个错，最难发现。
+        """
+        cases = {
+            "下午3:00": (15, 0),
+            "下午 3:00": (15, 0),
+            "晚上7:30": (19, 30),
+            "上午9:00": (9, 0),
+            "凌晨1:00": (1, 0),
+            "中午12:30": (12, 30),
+        }
+        for text, (hour, minute) in cases.items():
+            with self.subTest(text=text):
+                found = quick_parse.resolve_time(text)
+                self.assertIsNotNone(found, f"没认出时间：{text}")
+                self.assertEqual((found[0], found[1]), (hour, minute))
+
+    def test_colon_and_dian_agree(self):
+        """"下午3:00"和"下午3点"必须给出同一个时刻。"""
+        colon = quick_parse.resolve_time("下午3:00")
+        dian = quick_parse.resolve_time("下午3点")
+        self.assertEqual((colon[0], colon[1]), (dian[0], dian[1]))
+
 
 class TestNoise(unittest.TestCase):
     def test_noise_lines_rejected(self):
