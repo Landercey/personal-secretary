@@ -213,9 +213,14 @@ class SqliteStore(Store):
                     "SELECT task_id FROM tasks WHERE dedup_key = ?", (key,)
                 ).fetchone()
                 if row:
-                    # 同一件事又来一遍：不新增，记一笔事件就够。
-                    self._event(int(row["task_id"]), "duplicate",
-                                f"重复出现（来源 {message.source_name}）")
+                    # 同一件事又来一遍：**不新增，但也不白来**。
+                    #
+                    # 旧项目是"合并"：把新信息补进已有那条，手动重复录入还会
+                    # 自动加急跳级。我第一版图省事直接丢弃 —— 结果是
+                    # 用户第二次提到某件事时，程序当没看见。
+                    # （真踩过：同一天两场"集合"，改动前的去重键只取日期，
+                    #   第二条被静默丢掉，用户看到的是"我发的那条没反应"。）
+                    self._merge_into(int(row["task_id"]), message, draft)
                     return None
             cursor = self.conn.execute(
                 """INSERT INTO tasks
@@ -241,6 +246,37 @@ class SqliteStore(Store):
                 self._insert_attachment(task_id, message.msg_id, attachment)
             self._event(task_id, "created", f"来自 {draft.source_name or message.source_name}")
         return self.get_task(task_id)
+
+    def _merge_into(self, task_id: int, message: Message, draft: TaskDraft) -> None:
+        """把一条重复的草稿合并进已存在的待办。
+
+        补什么、不补什么，都是有理由的：
+          · detail    —— 新的更长就换新的（信息更全）
+          · due_at    —— **只在原来没有时才补**。原来有就说明已经定过时间，
+                          不能被后一次转发的解析结果覆盖掉
+          · location  —— 同理，缺了才补
+          · remind    —— 取大的（重复出现说明这事更要紧）
+          · 附件      —— 追加，去重靠 sha256
+          · 手动重复  —— 记一笔事件，日后想加"加急跳级"有数据可用
+        """
+        existing = self.get_task(task_id)
+        if existing is None:
+            return
+        detail = draft.detail if len(draft.detail or "") > len(existing.detail or "") \
+            else existing.detail
+        due_at = existing.due_at or draft.due_at
+        location = existing.location or draft.location
+        remind = max(int(existing.remind_level), int(draft.remind_level))
+        with self.conn:
+            self.conn.execute(
+                """UPDATE tasks SET detail=?, due_at=?, location=?, remind_level=?,
+                   updated_at=? WHERE task_id=?""",
+                (detail, due_at, location, remind, now_text(), task_id),
+            )
+            for attachment in draft.attachments:
+                self._insert_attachment(task_id, message.msg_id, attachment)
+            self._event(task_id, "merged",
+                        f"重复出现，已合并（来源 {message.source_name or draft.source_name}）")
 
     def _insert_attachment(self, task_id: int, msg_id: str, item: Attachment) -> None:
         self.conn.execute(
@@ -405,6 +441,45 @@ class SqliteStore(Store):
             "SELECT * FROM dropped_items ORDER BY drop_id DESC LIMIT ?", (int(limit),)
         ).fetchall()
         return [dict(row) for row in rows]
+
+    # ------------------------------------------------------------------ 合并窗口
+    @_synchronized
+    def recent_task_for(self, source_kind: str, source_name: str, sender: str,
+                        seconds: int) -> Task | None:
+        """找"刚才那条消息"建出来的待办。
+
+        用途：先发一句"明天要交作业"，紧接着发一张作业要求的图。
+        第二条自己解析不出待办（就一张图），应该挂到第一条上，
+        而不是变成一条孤零零的图片待办。
+
+        判定条件：同一个来源 + 同一个发送人 + 最近 `seconds` 秒内建的。
+        """
+        if seconds <= 0:
+            return None
+        cutoff = (datetime.now() - timedelta(seconds=int(seconds))).strftime(TIME_FORMAT)
+        row = self.conn.execute(
+            """SELECT * FROM tasks
+               WHERE status='open' AND is_archived=0
+                 AND source_kind=? AND source_name=? AND sender=?
+                 AND created_at >= ?
+               ORDER BY task_id DESC LIMIT 1""",
+            (source_kind, source_name, sender, cutoff),
+        ).fetchone()
+        return self._row_to_task(row) if row else None
+
+    @_synchronized
+    def attach_message_files(self, task_id: int, message: Message) -> int:
+        """把一条消息的附件挂到已有待办上。返回挂了几份。"""
+        if not message.attachments:
+            return 0
+        count = 0
+        with self.conn:
+            for attachment in message.attachments:
+                self._insert_attachment(int(task_id), message.msg_id, attachment)
+                count += 1
+            self._event(int(task_id), "attached",
+                        f"合并了同一时段的消息附件（{message.source_name}）")
+        return count
 
     # ------------------------------------------------------------------ 维护
     @_synchronized

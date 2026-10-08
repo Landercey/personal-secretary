@@ -72,6 +72,11 @@ class FileEnricher(TextEnricher):
 
         if parts:
             self._append_text(message, "\n".join(parts))
+            # 打个标记：这段文字是**文件里读出来的**，不是人敲的。
+            # 理解层看到这个标记就用"严判"—— 文件里大部分内容是资料，
+            # 不是待办（"字数不少于 2000 字"、"成都理工大学"）。
+            # 手动敲进来的仍然宽判，那是你自己记的事。
+            message.raw["text_from_file"] = True
         else:
             note = self._fallback_note(message)
             if note:

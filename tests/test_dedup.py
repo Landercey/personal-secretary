@@ -78,13 +78,71 @@ class TestDedupInStore(unittest.TestCase):
             draft("集合", "2026-10-09 15:00:00", "图书馆门口")])
         self.assertEqual(self.store.count_tasks("open"), 2)
 
-    def test_duplicate_is_recorded_in_events(self):
-        """被去重挡掉不是"什么都没发生"，要留一笔日志。"""
+    def test_duplicate_is_recorded_as_merged(self):
+        """重复不是"什么都没发生"，要留一笔合并日志。"""
         self.store.save_drafts(self.message, [draft("交作业", "2026-10-09 15:00:00")])
         self.store.save_drafts(self.message, [draft("交作业", "2026-10-09 15:00:00")])
         row = self.store.conn.execute(
-            "SELECT COUNT(*) n FROM task_events WHERE kind='duplicate'").fetchone()
+            "SELECT COUNT(*) n FROM task_events WHERE kind='merged'").fetchone()
         self.assertEqual(int(row["n"]), 1)
+
+
+class TestDuplicateMerge(unittest.TestCase):
+    """重复出现时**合并**进已有那条，而不是丢弃。
+
+    为什么：重复出现说明这件事更要紧，丢掉等于用户第二次提到时程序装没看见。
+    旧项目就是合并的，我第一版图省事直接丢，是个退步。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = SqliteStore(open_database(Path(self.tmp.name) / "m.db"))
+        self.message = Message(msg_id="qq:9", source_kind=SOURCE_MANUAL,
+                               source_name="测试群", text="x")
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def test_new_detail_is_kept_when_longer(self):
+        self.store.save_drafts(self.message, [
+            TaskDraft(title="交作业", due_at="2026-10-09 15:00:00", detail="短")])
+        self.store.save_drafts(self.message, [
+            TaskDraft(title="交作业", due_at="2026-10-09 15:00:00",
+                      detail="这次带上了完整的作业要求，比原来长很多")])
+        task = self.store.list_tasks("open")[0]
+        self.assertIn("完整", task.detail)
+
+    def test_existing_due_date_is_not_overwritten(self):
+        """已经定过的时间不能被后一次转发的解析结果覆盖掉。
+
+        同一条通知被转两遍，第二遍可能因为漏看一个字解析出别的时间。
+        """
+        self.store.save_drafts(self.message, [
+            TaskDraft(title="交作业", due_at="2026-10-09 15:00:00")])
+        self.store.save_drafts(self.message, [
+            TaskDraft(title="交作业", due_at="2026-10-10 09:00:00")])
+        self.assertEqual(self.store.list_tasks("open")[0].due_at, "2026-10-09 15:00:00")
+
+    def test_missing_due_date_is_filled_in(self):
+        """原来没时间的，后一次解析出来了就补上。"""
+        self.store.save_drafts(self.message, [TaskDraft(title="交作业")])
+        self.store.save_drafts(self.message, [
+            TaskDraft(title="交作业", due_at="2026-10-09 15:00:00")])
+        self.assertEqual(self.store.list_tasks("open")[0].due_at, "2026-10-09 15:00:00")
+
+    def test_remind_level_takes_the_higher_one(self):
+        self.store.save_drafts(self.message, [
+            TaskDraft(title="交作业", due_at="2026-10-09 15:00:00", remind_level=1)])
+        self.store.save_drafts(self.message, [
+            TaskDraft(title="交作业", due_at="2026-10-09 15:00:00", remind_level=3)])
+        self.assertEqual(self.store.list_tasks("open")[0].remind_level, 3)
+
+    def test_still_only_one_task(self):
+        for _ in range(5):
+            self.store.save_drafts(self.message, [
+                TaskDraft(title="交作业", due_at="2026-10-09 15:00:00")])
+        self.assertEqual(self.store.count_tasks("open"), 1)
 
 
 if __name__ == "__main__":

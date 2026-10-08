@@ -39,113 +39,19 @@ from __future__ import annotations
 from ..contracts.interfaces import DraftEnricher
 from ..contracts.models import SOURCE_QQ_INBOX, Message, TaskDraft
 from ..runtime.config import config
-from .quick_parse import has_time_hint, text_without_time
-
-# ---------------------------------------------------------------------------
-# 明显是闲聊：出现这些词直接不收
-# ---------------------------------------------------------------------------
-IGNORE_WORDS = ("哈哈哈", "哈哈", "笑死", "收到", "好的", "在吗", "早安", "晚安",
-                "谢谢", "表情包", "打卡了", "打卡")
-
-# 太短的内容不成事（"嗯""好的""1"）
-MIN_TEXT_CHARS = 4
-
-# ---------------------------------------------------------------------------
-# 群聊里"看起来像待办"的信号：时间 + 行动词。两个都没有就不当待办。
-# 不加这一条的后果实测过：群里闲聊会全部变成待办。
-# ---------------------------------------------------------------------------
-ACTION_WORDS = (
-    "报名", "开会", "会议", "参加", "提交", "截止", "集合", "打卡", "填写", "确认",
-    "回复", "领取", "缴费", "培训", "评审", "上线", "出发", "聚餐", "作业", "报告",
-    "考试", "面试", "答辩", "通知", "安排", "活动", "记得", "别忘了", "要交", "带上",
-    "准备", "登记", "接龙", "签到", "点到",
+# 判定规则本身搬到了 actionable.py —— 解析器（按行判）和这里（按整条判）
+# 必须用同一把尺子，放两处迟早不一致。
+from .actionable import (          # noqa: F401  （下面 re-export，别处还在用）
+    ACTION_WORDS,
+    DONE_WORDS,
+    EMOTION_WORDS,
+    IGNORE_WORDS,
+    MIN_TEXT_CHARS,
+    QUESTION_WORDS,
+    STRONG_NOTICE,
+    is_actionable,
+    strip_placeholders,
 )
-# 注意：这里**故意不收单字**。"交""去""来""带"这种单字放进来的话，
-# "我去吃饭""来人"这类闲聊全会被判成待办 —— 加词一律加双字以上的词。
-# 想加词：加完必须同时往 tests/test_chat_filter.py 补一条用例。
-
-# ---------------------------------------------------------------------------
-# 情绪 / 吐槽：看着像在说某件事，其实是在闲聊。
-# 实测误收最多的就是这一类 —— "明天考试好慌啊" 有"考试"有"明天"，
-# 光靠时间和行动词判不出来。
-# ---------------------------------------------------------------------------
-EMOTION_WORDS = (
-    "好慌", "慌不慌", "救命", "太难", "好难", "无聊", "有意思", "真好玩", "好玩",
-    "累死", "写不动", "不想", "服了", "无语", "笑死", "哭了", "绝了", "烦躁",
-    "走神", "溜了", "麻了", "好累", "难受",
-)
-
-# ---------------------------------------------------------------------------
-# 完成态：事情已经做完了，不需要再提醒（"作业写完了"）。
-# 但带时间的不算 —— "写完了，明天还要交" 里的"明天"是真事。
-# ---------------------------------------------------------------------------
-DONE_WORDS = (
-    "写完了", "做完了", "考完了", "交完了", "填完了", "报名了", "搞定了", "弄完了",
-    "结束了", "收到了", "看到了", "完了", "好了", "已交", "交了",
-)
-
-# ---------------------------------------------------------------------------
-# 询问：在问问题，不是在下通知（"这周活动是在哪来着"）。
-# ---------------------------------------------------------------------------
-QUESTION_WORDS = (
-    "啥", "咋", "怎么", "在哪", "来着", "什么时候", "几点", "多少",
-    "吗？", "吗?", "吗，", "吗,", "呢？", "呢?",
-)
-
-# ---------------------------------------------------------------------------
-# 强通知标记：带这些的即使像疑问句、带情绪，也按通知处理。
-# 这是"宁可收错也别漏事"的那一侧。
-# ---------------------------------------------------------------------------
-STRONG_NOTICE = (
-    "@全体", "全体成员", "务必", "请各位", "大家注意", "记得", "别忘了",
-    "截止", "集合", "报名参加", "通知", "安排",
-)
-
-# 纯占位符（图片/表情），没有实际文字内容。
-# 前缀匹配的（"[文件"）要用 startswith，见 strip_placeholders()。
-PLACEHOLDER_ONLY = ("[图片]", "[表情]", "[回复]", "[文件", "@我", "@全体", "@某人")
-
-
-def strip_placeholders(text: str) -> str:
-    """去掉聊天占位符，避免 "[回复]" 里的"回复"被当成行动词。
-
-    这是个真踩过的坑："[回复]好的" 里的"回复"命中了 ACTION_WORDS，
-    于是纯闲聊被判成了待办。
-    """
-    result = text or ""
-    for token in PLACEHOLDER_ONLY:
-        result = result.replace(token, " ")
-    for token in ("@全体", "@我", "@某人"):
-        result = result.replace(token, " ")
-    return result.strip()
-
-
-def is_actionable(text: str) -> tuple[bool, str]:
-    """这句话值得变成待办吗？返回 (是否值得, 不值得的原因)。
-
-    判的顺序有意从"狠"到"松"：先把明显不是的排掉，剩下的才考虑收。
-    顺序改了会连带影响误判率 —— 别随手调整。
-    """
-    plain = strip_placeholders(text or "").strip()
-    if len(plain) < MIN_TEXT_CHARS:
-        return False, "只有图片或表情，没有文字"
-
-    strong = any(word in plain for word in STRONG_NOTICE)
-    if not strong:
-        if any(word in plain for word in EMOTION_WORDS):
-            return False, "像在吐槽，不是通知"
-        if any(word in plain for word in DONE_WORDS) and not has_time_hint(plain):
-            return False, "说的是已经做完的事"
-        if any(word in plain for word in QUESTION_WORDS):
-            return False, "像在提问，不是通知"
-        if len(text_without_time(plain)) < 2:
-            return False, "只有时间，没有具体事情"
-
-    if not (has_time_hint(plain)
-            or any(word in plain for word in ACTION_WORDS)
-            or strong):
-        return False, "既没有时间也没有行动词，判定为聊天"
-    return True, ""
 
 
 class ChatNoiseEnricher(DraftEnricher):
@@ -183,10 +89,15 @@ class ChatNoiseEnricher(DraftEnricher):
 
         收件箱（自己发给小号）**不过滤**：那是你专门记给自己的，
         "买牛奶"既没时间也没行动词，但它就是一条待办。
-        手动录入同理 —— 你自己敲的，不用机器判断。
+        手动敲的字同理 —— 你自己敲的，不用机器判断。
 
-        只有群消息和别人的私聊才需要挡闲聊。
+        例外：**附件里读出来的文字要过滤**。文件里大部分内容是资料而不是待办 ——
+        实测一份《实验报告要求.docx》里的"字数不少于 2000 字"、
+        一张讲座海报 OCR 出来的"成都理工大学"，都被当成待办收进去了。
+        判据：FileEnricher 会打上 text_from_file 标记。
         """
+        if message.raw.get("text_from_file"):
+            return True
         if message.is_self:
             return False
         if message.source_kind == SOURCE_QQ_INBOX:

@@ -37,7 +37,8 @@ class RuleParseEnricher(DraftEnricher):
             return drafts          # 已经有草稿了（比如插件提前产出），不重复切
         strict = self._strict(message)
         text = message.text or ""
-        found = quick_parse.parse_text(text, strict=strict)
+        found = quick_parse.parse_text(
+            text, strict=strict, from_file=bool(message.raw.get("text_from_file")))
         self._record_dropped(message, text)
         quote_len = int(config.get("push", "quote_max_chars", 80))
         for draft in found:
@@ -76,9 +77,15 @@ class RuleParseEnricher(DraftEnricher):
           但"拿快递"这种自己敲的三个字，按群里的标准会被当成"没内容"丢掉。
         两边不可能用同一把尺子。
 
+        **文件里读出来的文字也算"别人的材料"**：文件大部分内容是资料，
+        不是待办。实测一份《实验报告要求.docx》里的"字数不少于 2000 字"、
+        一张讲座海报 OCR 出来的"成都理工大学"，都是这么漏进来的。
+
         这里的"严"最终由 quick_parse.is_fragment() 执行，三档过滤强度
         （strict / loose / off）在 config.toml 的 [parse] filter_strength 改。
         """
+        if message.raw.get("text_from_file"):
+            return True
         if message.is_self or message.source_kind == SOURCE_QQ_INBOX:
             return False
         strength = str(config.get("parse", "filter_strength", "strict"))

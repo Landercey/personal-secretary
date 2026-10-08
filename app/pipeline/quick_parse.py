@@ -134,6 +134,29 @@ _FIELD_BARE = re.compile(r"(?:" + _FIELD_NOUNS + r")$")
 # 长到这个份上就是"一整段话"：行数够多、且大半的行压根不像一件事
 PROSE_MIN_LINES = 6
 
+# 合成一条时，原文在 detail 里最多留多少字
+DETAIL_MAX_CHARS = 1000
+
+# 机构名后缀。OCR 出来的海报/通知第一行经常是学校或单位抬头
+# （"成都理工大学"），拿它当标题等于没标题。
+ORG_SUFFIX = ("大学", "学院", "中学", "小学", "学校", "公司", "集团", "协会",
+              "委员会", "中心", "医院", "研究院", "研究所", "工作室", "社团")
+
+
+def my_names() -> list[str]:
+    """用户在配置里填的自己的名字/昵称。
+
+    用途：一张值班表里，属于你的那一行要单独拎出来 ——
+    整张表合成一条之后，你仍然需要一眼看到"我周几值日"。
+    """
+    try:
+        raw = config.get("parse", "my_names", []) or []
+    except Exception:
+        return []
+    if isinstance(raw, str):
+        raw = raw.replace("，", ",").split(",")
+    return [str(item).strip() for item in raw if str(item).strip()]
+
 
 # ======================================================================
 # 中文数字时刻 → 阿拉伯数字
@@ -461,44 +484,108 @@ def _priority(text: str, has_due: bool) -> int:
     return 3
 
 
-def is_prose_block(lines: list[str]) -> bool:
-    """这一堆行是"一整段话"还是"一份清单"？
+def solid_lines(lines: list[str]) -> list[tuple[str, TaskDraft]]:
+    """哪些行**自己就立得住**：带时间线索，而且摘掉时间地点后还有实质内容。
 
-    判据：行数够多，且大半的行摘掉时间后什么都不剩 —— 说明它们共同构成
-    一段话，而不是各自一件事。招募通知、值班表都属于"一整段话"。
+    "下周一前提交实验报告" 立得住；"（A组）""8:50-12:00" 立不住。
+    这是区分"一堆任务"和"一整块材料"的核心判据。
+
+    ⚠️ 判据用的是「有没有时间线索」，**不是**「有没有钟点」。
+    这里踩过一次：一开始要求必须有"几点几分"，结果"下周一前提交实验报告"
+    因为只有日期没有钟点，被判成"立不住"，于是整份文件被合成一条 ——
+    一份有两项作业的清单变成了一条。
     """
-    if len(lines) < PROSE_MIN_LINES:
-        return False
-    solid = 0
+    found: list[tuple[str, TaskDraft]] = []
     for line in lines:
-        if _looks_like_task(line, parse_line(line)):
-            solid += 1
-    return solid * 3 < len(lines)
+        draft = parse_line(line)
+        if draft is None:
+            continue
+        if not has_time_hint(line):
+            continue
+        if is_fragment(draft.title):
+            continue
+        found.append((line, draft))
+    return found
 
 
-def parse_text(text: str, strict: bool = False) -> list[TaskDraft]:
+def is_schedule_block(lines: list[str]) -> bool:
+    """整块是不是一张表（值班表 / 排班表 / 时间表）。
+
+    判据：行数 ≥3，且**每一行都带时间线索**。
+
+    为什么这条能区分"表"和"带时间的清单"：
+      · 清单（"明天交作业""后天开会"）—— 每行摘掉时间后还剩整件事，
+        会被 solid_lines 挑出来，不算表；
+      · 表（"周一 8:50-12:00 E1B516（A组）"）—— 每行都有时间，
+        摘掉之后只剩"（A组）""6C205"这种坐标。
+
+    实测：旧库里 5 行值班表被逐行判成碎片，**一条都没留下** ——
+    用户看到的也是"我发的那张表没反应"。
+    """
+    if len(lines) < 3:
+        return False
+    return all(has_time_hint(line) for line in lines)
+
+
+def should_merge(lines: list[str], from_file: bool) -> bool:
+    """这一堆行要不要合成一条待办。"""
+    solid = solid_lines(lines)
+    if from_file:
+        # 文件里读出来的内容**默认整份一条**：文件大部分是资料，不是清单。
+        # 只有明确出现 ≥2 条能独立成立的待办，才认为它真是一份任务清单。
+        # 实测：一份《实验报告要求.docx》4 行，按行切会切出
+        # "字数不少于 2000 字""交到"这种垃圾。
+        return len(solid) < 2
+    if len(lines) >= PROSE_MIN_LINES and len(solid) * 3 < len(lines):
+        return True
+    return is_schedule_block(lines) and len(solid) < 2
+
+
+def is_prose_block(lines: list[str]) -> bool:
+    """兼容旧叫法：行数够多、且大半的行自己立不住 → 是一整段话。"""
+    return should_merge(lines, from_file=False)
+
+
+def parse_text(text: str, strict: bool = False,
+               from_file: bool = False) -> list[TaskDraft]:
     """整段文本 → 待办草稿。
 
     短清单（用户一行一件事地敲/粘）照旧一行一条；
-    长段落（一眼看去就是一大段话）整条合成一条，正文放进 detail。
+    长段落、时间表、文件里的内容 → 整条合成一条，正文放进 detail。
 
-    strict=True：别人的材料（群消息、群里的截图 OCR）要逐行再过一遍
-    "这行自己像不像一件事"。收件箱（自己发给小号）不走这道 ——
-    随手记"买牛奶"本来就没时间。
+    strict=True：别人的材料要**逐行**再过一遍"这行自己像不像一件事"。
+      适用：群消息、群里的截图 OCR、**文件里读出来的字**。
+      不适用：收件箱（自己发给小号）、自己敲的手动录入 ——
+      随手记"买牛奶"本来就没时间。
+
+    from_file=True：这段文字是附件里读出来的。它决定了"默认合不合成一条"。
     """
     body = to_simplified(text or "").strip()
     if not body:
         return []
     lines = [line for line in body.splitlines() if line.strip()]
-    drafted = [draft for line in lines if (draft := parse_line(line))]
+    pairs = [(line, parse_line(line)) for line in lines]
+    drafted = [draft for _line, draft in pairs if draft]
 
-    if is_prose_block(lines):
-        # 大半的行根本不像一件事 ⇒ 这是一段话，不是清单
-        return _as_one_draft(body, drafted)
+    if should_merge(lines, from_file):
+        return _merge_block(body, lines, drafted)
 
     drafts: list[TaskDraft] = []
     seen: set[str] = set()
-    for draft in drafted:
+    # 延迟导入：actionable 要用本模块的时间识别，
+    # 顶层 import 会变成循环依赖。
+    from .actionable import is_actionable
+
+    for line, draft in pairs:
+        if draft is None:
+            continue
+        if strict:
+            # 逐行再问一遍"这行自己像不像一件事"。
+            # 真踩过的坑：一份 Word 里的"字数不少于 2000 字"、
+            # 一张海报 OCR 出来的"成都理工大学"，都是这么漏进来的。
+            ok, _why = is_actionable(line)
+            if not ok:
+                continue
         key = f"{draft.title}|{draft.due_at or ''}"
         if key in seen:          # 同一段文字里的重复行只取一条
             continue
@@ -507,13 +594,108 @@ def parse_text(text: str, strict: bool = False) -> list[TaskDraft]:
     return drafts
 
 
-def _as_one_draft(body: str, drafted: list[TaskDraft]) -> list[TaskDraft]:
-    """长段落 → 一条待办。标题取第一句像样的话，原文整段留在 detail。"""
-    if not drafted:
+def _merge_block(body: str, lines: list[str],
+                 drafted: list[TaskDraft]) -> list[TaskDraft]:
+    """把一整块内容合成**一条**待办，原文整段留在 detail。
+
+    标题按优先级挑，不直接拿第一行 —— 实测讲座海报的第一行是
+    "成都理工大学"，拿它当标题等于没标题。
+
+      1. 自己能立得住的行（有时间 + 有实质内容）—— 信息最全
+      2. 有实质内容、又不是机构抬头的行
+      3. 实在没有，退回第一行原文（整块就是一张时间表时走这条）
+    """
+    # 时间表/排班表走单独一条路：标题直接说明"这是一张表"。
+    #
+    # 为什么不让某一行当标题：表里偶然有一行带着人名
+    # （"周二 13:50-16:20 E1B412（张三）"），它在 is_fragment 眼里"有内容"
+    # （剩下"张三"两个字），于是整张表的标题变成那一格。
+    # 属于我的那几行由 `_my_lines()` 单独拎出来，不靠标题体现。
+    table = is_schedule_block(lines)
+    solid = solid_lines(lines)
+    keep: TaskDraft | None = None
+    if solid and not table:
+        # 有时间优先；都有时间就取标题长一点的（"下周一前提交实验报告"
+        # 比"提交"信息多）。max 取元组比较，长度先截到 20 免得
+        # "志愿者委员会睡眠医学科专业组"那种长串赢过正经标题。
+        keep = max(solid, key=lambda pair: (
+            pair[1].due_at is not None, min(len(pair[1].title), 20)))[1]
+    if keep is None and not table:
+        keep = _first_meaningful_line(lines)
+    if keep is None:
+        raw = _clean_title(lines[0])[:50] or lines[0][:50]
+        # 走到这里说明整块都是坐标和时段（值班表那种），第一行本身就是碎片。
+        # 加个「表格：」前缀有双重作用：
+        #   · 一眼能看出这是"一张表"，不是一件事；
+        #   · 让它通过"标题不能是碎片"那道闸门 ——
+        #     不加前缀的话标题就是 "周一 8:50-12:00 E1B516（A组）"，
+        #     摘掉时间只剩一个"组"字，按定义就是碎片。
+        keep = TaskDraft(title=f"表格：{raw}")
+    keep.detail = body[:DETAIL_MAX_CHARS]
+    results = [keep]
+
+    # 表里属于自己的那几行单独拎出来。
+    #
+    # 为什么要有这一步：整张值班表合成一条之后，你打开看到的是一整块文字，
+    # 还得自己找"我周几"。用户明确要过这个效果 ——
+    # "可以让用户填自己的名称、昵称，可以拎出来强调"。
+    results.extend(_my_lines(body, lines, keep))
+    return results
+
+
+def _my_lines(body: str, lines: list[str], merged: TaskDraft) -> list[TaskDraft]:
+    """从一张表里挑出含"我"的名字的行，单独做一条待办。
+
+    只有在整块是**表格**（多行同构、逐行都立不住）时才做这件事。
+    一份正常的任务清单不需要 —— 里面每行本来就是独立的事。
+    """
+    names = my_names()
+    if not names:
         return []
-    keep = drafted[0]
-    keep.detail = body[:1000]      # 全文留着，消息就不"缺斤少两"
-    return [keep]
+    if not is_schedule_block(lines):
+        return []
+    found: list[TaskDraft] = []
+    for line in lines:
+        if not any(name in line for name in names):
+            continue
+        draft = parse_line(line)
+        if draft is None:
+            # 这一行本身是碎片（"周一 8:50-12:00 B203"），
+            # 但它带着我的名字，对我就是有效信息 —— 拿原文当标题。
+            title = _clean_title(line)[:60] or line[:60]
+            draft = TaskDraft(title=f"我的：{title}")
+        else:
+            draft.title = f"我的：{draft.title}"
+        draft.detail = body[:DETAIL_MAX_CHARS]
+        # 标一下来源，推送时能看出这条是从哪张表里挑出来的
+        draft.quoted = draft.quoted or merged.quoted
+        found.append(draft)
+    return found
+
+
+def _first_meaningful_line(lines: list[str]) -> TaskDraft | None:
+    """挑第一行"像标题"的内容。
+
+    两条经验：
+      1. **跳过机构抬头** —— OCR 出来的海报第一行经常是"成都理工大学"，
+         拿它当标题等于没标题；
+      2. **不走 parse_line 的噪声过滤** —— 通知的第一行
+         "关于招募志愿者的通知" 会被噪声规则当成寒暄过滤掉，
+         可它恰恰是整份通知的标题。合并成整条时，首行就是标题。
+    """
+    for line in lines:
+        if _FIELD_LINE.match(line.strip()):
+            continue                      # "时间：…""地点：…" 是字段行
+        candidate = _clean_title(
+            _PLACEHOLDER.sub(" ", _BULLET.sub("", line.strip())))[:60]
+        if len(candidate) < 2 or is_fragment(candidate):
+            continue
+        if any(candidate.endswith(suffix) for suffix in ORG_SUFFIX):
+            continue
+        draft = parse_line(line) or TaskDraft(title=candidate)
+        draft.title = candidate
+        return draft
+    return None
 
 
 def _looks_like_task(line: str, draft: TaskDraft | None) -> bool:

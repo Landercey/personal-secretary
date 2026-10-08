@@ -95,6 +95,19 @@ def ingest_message(store, pipeline, message) -> int:
     prepared, drafts = pipeline.run(message)
     stored = store.save_drafts(prepared, drafts)
 
+    # 合并窗口：这条自己没解析出待办，但带着附件 ——
+    # 大概率是"上一条的补充材料"（先发一句"明天要交作业"，
+    # 紧接着发一张作业要求图）。挂到刚才那条上，别变成孤零零一条。
+    if not drafts and prepared.attachments:
+        window = int(config.get("parse", "merge_window_seconds", 60) or 0)
+        recent = store.recent_task_for(prepared.source_kind, prepared.source_name,
+                                       prepared.sender, window)
+        if recent is not None:
+            attached = store.attach_message_files(recent.task_id, prepared)
+            print(f"  ↳ 合并到刚才那条「{recent.title}」（挂了 {attached} 个附件）")
+            store.purge_old_dropped()
+            return 0
+
     # 被闲聊过滤器挡下的
     skip_reason = prepared.raw.get("skip_reason")
     if skip_reason and not drafts:
