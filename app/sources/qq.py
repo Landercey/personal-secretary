@@ -570,6 +570,7 @@ class QQSource(Source):
                 ping_interval=None,        # NapCat 自己会保活，我们别插一脚
                 max_size=4 * 1024 * 1024,
                 max_queue=1024,
+                process_request=self._reject_early,
             )
             self._set(running=True, error="")
             return True
@@ -605,6 +606,29 @@ class QQSource(Source):
             self._server = None
 
     # ------------------------------------------------------------------ 接入校验
+    def _reject_early(self, connection: Any, request: Any) -> Any:
+        """在**握手阶段**就把不合法的连接挡掉，返回一个 HTTP 拒绝响应。
+
+        为什么不在握手之后 close：
+          NapCat 每 15 秒重连一次。如果在握手成功后才断开，它看到的是
+          "连上了、又断了"，然后一直重连 —— 用户完全不知道是令牌错了还是
+          网络问题。在握手阶段直接回 403，客户端能立刻看到明确原因。
+
+        返回 None = 放行，让它继续走 WebSocket 握手。
+        """
+        ok, reason = self._authorized(connection)
+        if ok:
+            return None
+
+        from websockets.datastructures import Headers
+        from websockets.http11 import Response
+
+        self._set(error=f"拒绝了一个连接：{reason}")
+        body = f"拒绝接入：{reason}\n".encode("utf-8")
+        return Response(403, "Forbidden",
+                        Headers([("Content-Type", "text/plain; charset=utf-8")]),
+                        body)
+
     def _authorized(self, connection: Any) -> tuple[bool, str]:
         """三道关：路径、来源 IP、令牌。任何一道不过就拒。
 
