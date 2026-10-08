@@ -481,6 +481,44 @@ class SqliteStore(Store):
                         f"合并了同一时段的消息附件（{message.source_name}）")
         return count
 
+    # ------------------------------------------------------------------ 推送记录
+    @_synchronized
+    def already_pushed(self, batch: str) -> bool:
+        """这个批次（比如 "2026-10-08 07:30"）推过了吗。
+
+        为什么非要记：程序重启、或者用户手动开了第二次，
+        不能把早上那份早报又推一遍 —— 手机响两遍比不推还烦。
+        """
+        row = self.conn.execute(
+            "SELECT push_id FROM push_records WHERE batch=? AND ok=1 LIMIT 1", (batch,)
+        ).fetchone()
+        return row is not None
+
+    @_synchronized
+    def log_push(self, batch: str, channel: str, ok: bool, message: str) -> None:
+        """记一笔推送。**一次推送一行**。
+
+        一开始写成"每条待办一行"，结果一份 50 条待办的汇总塞了 50 行 ——
+        既浪费又难查（`recent_pushes()` 一屏全是同一批次）。
+        我们真正要回答的问题是"这一批推过没有"，一行就够。
+        """
+        with self.conn:
+            self.conn.execute(
+                """INSERT INTO push_records
+                   (task_id, channel, batch, pushed_at, ok, message)
+                   VALUES (NULL,?,?,?,?,?)""",
+                (channel, batch, now_text(), 1 if ok else 0, message[:200]),
+            )
+
+    @_synchronized
+    def recent_pushes(self, limit: int = 20) -> list[dict[str, Any]]:
+        """最近推过什么。排查"为什么没收到"时看这个。"""
+        rows = self.conn.execute(
+            """SELECT * FROM push_records ORDER BY push_id DESC LIMIT ?""",
+            (int(limit),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     # ------------------------------------------------------------------ 维护
     @_synchronized
     def purge_old_dropped(self) -> int:

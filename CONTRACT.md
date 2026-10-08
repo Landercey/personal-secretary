@@ -222,7 +222,9 @@ deliver(payload) -> SinkResult(ok, code, message)
 | `title.min_meaningful_chars` | `2` | 摘掉时间和编号后少于这么多汉字 → 是碎片 |
 | `store.attachment_retention_days` | `30` | 附件保留天数 |
 | `store.keep_dropped_days` | `90` | 废件箱记录保留天数 |
-| `push.default_times` | `["07:30","21:30"]` | 默认一天两次汇总，用户可改 |
+| `push.enabled` | `true` | 定时推送总开关 |
+| `push.times` | `["07:30","21:30"]` | 每天推送时间点；标题按时间自动定 |
+| `push.catch_up_minutes` | `120` | 错过多久以内还补推这一次；0 = 永不补 |
 | `push.quote_max_chars` | `80` | 推送里带的原文片段长度 |
 | `push.fallback_text_chars` | `300` | AI 不可用时的原文保底长度 |
 | `ai.mode` | `conservative` | `conservative` / `aggressive` |
@@ -248,6 +250,17 @@ deliver(payload) -> SinkResult(ok, code, message)
 | `qq.inbox_ids` | `[]` | 小号收件箱：自己发给这些会话的消息也变待办（微信/短信转发靠它） |
 | `qq.only_mention` | `false` | `true` = 群里只有 @我 的才收 |
 | `qq.max_text_chars` | `3000` | 单条消息截断长度，防超长轰炸 |
+
+**第 7 步的调度规则（2026-10-08 完成）**
+
+| 情况 | 行为 | 为什么 |
+|---|---|---|
+| 到了时间点 | 组一份汇总推出去 | — |
+| 程序重启后重跑 | **不重推**（查 `push_records` 的批次号） | 手机响两遍比不推还烦 |
+| 开机比时间点晚了 5 分钟~2 小时 | **补推这一次** | 早上 7:30 关机、9:00 才开，这份早报还值得看 |
+| 开机比时间点晚了超过 2 小时 | **不补** | 晚上 10 点推"今天的早报"是纯打扰 |
+| 内存占用超 `mem_critical_percent` | **一条都不推** | 打游戏时被推送弹到桌面最招人烦 |
+| 推送失败 | 记一笔失败（**不算推过**），下次检查会重试 | 网络抖一下不该让这份汇总永远丢掉 |
 
 ---
 

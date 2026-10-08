@@ -27,6 +27,8 @@
     python run.py --digest                 生成一份汇总并打印到控制台
     python run.py --push                   把汇总真正推送到企业微信
     python run.py --check-push             检查推送通道配置对不对（不发消息）
+    python run.py --schedule               启动定时推送（早报/晚间，Ctrl+C 停止）
+    python run.py --next-push              看下一次什么时候推
     python run.py --check-qq               看 QQ 接入的配置和状态
     python run.py --qq                     启动 QQ 接收（Ctrl+C 停止）
     python run.py --stats                  看统计
@@ -48,6 +50,8 @@ from app.pipeline.chat_filter import ChatNoiseEnricher           # noqa: E402
 from app.pipeline.file_enricher import FileEnricher              # noqa: E402
 from app.pipeline.parse_enricher import RuleParseEnricher        # noqa: E402
 from app.runtime.config import config, default_data_dir          # noqa: E402
+from app.runtime.scheduler import Scheduler, due_slots           # noqa: E402
+from app.runtime.sysmon import describe as mem_describe          # noqa: E402
 from app.sinks.console import build_digest                       # noqa: E402
 from app.sinks.router import build_sink, channel_status          # noqa: E402
 from app.sources.manual import ManualSource                      # noqa: E402
@@ -238,6 +242,50 @@ def run_qq(store, pipeline) -> int:
     return 0
 
 
+def run_scheduler(store, sink) -> int:
+    """跑定时推送，一直跑到 Ctrl+C。"""
+    scheduler = Scheduler(store, sink, on_event=lambda text: print(f"  {text}"))
+    if not scheduler.enabled():
+        print("定时推送已关闭（config.toml 的 [push] enabled = false）。")
+        return 1
+
+    planned = parse_times_or_empty()
+    if not planned:
+        print("没有配置任何推送时间点。")
+        print("打开 config.toml，在 [push] times 里写，例如 [\"07:30\", \"21:30\"]。")
+        return 1
+
+    print("=" * 62)
+    print("  私人秘书 · 定时推送")
+    print("=" * 62)
+    print(f"  {scheduler.describe()}")
+    print(f"  {mem_describe()}")
+    print("  按 Ctrl+C 停止。")
+    print("=" * 62)
+
+    # 启动时先把错过的补上（在补推窗口内的才补）
+    for batch in scheduler.run_once():
+        print(f"  [补推] {batch}")
+
+    scheduler.start()
+    try:
+        while True:
+            time.sleep(5)
+    except KeyboardInterrupt:
+        print("\n  停止中…")
+    finally:
+        scheduler.stop()
+    print("  已停止。")
+    return 0
+
+
+def parse_times_or_empty() -> list[str]:
+    """配置里的推送时间点，规范化后的列表。"""
+    from app.runtime.scheduler import parse_times
+
+    return parse_times(config.get("push", "times", []))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="私人秘书（开发期命令行）")
     parser.add_argument("text", nargs="*", help="要录入的文字")
@@ -249,6 +297,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--push", action="store_true", help="生成汇总并真正推送")
     parser.add_argument("--check-push", action="store_true",
                         help="检查推送通道配置（不发消息）")
+    parser.add_argument("--schedule", action="store_true",
+                        help="启动定时推送（Ctrl+C 停止）")
+    parser.add_argument("--next-push", action="store_true",
+                        help="看下一次什么时候推、有没有错过的")
     parser.add_argument("--check-qq", action="store_true",
                         help="看 QQ 接入的配置和状态")
     parser.add_argument("--qq", action="store_true", help="启动 QQ 接收")
@@ -283,9 +335,35 @@ def main(argv: list[str] | None = None) -> int:
         print("推送通道现状：")
         for line in channel_status():
             print(f"  · {line}")
+        scheduler = Scheduler(store, sink)
+        print(f"  · {scheduler.describe()}")
+        print(f"  · {mem_describe()}")
         print("\n要真正收到推送，需要在 config.toml 里填 [wecom_bot] webhook，"
               "并把 enabled 改成 true。")
         return 0
+
+    if args.next_push:
+        scheduler = Scheduler(store, sink)
+        print(scheduler.describe())
+        print(mem_describe())
+        pending = [slot for slot in due_slots()
+                   if not store.already_pushed(slot.batch)]
+        if pending:
+            print("\n现在就该推的（还没推过）：")
+            for slot in pending:
+                print(f"  · {slot.batch}「{slot.title}」")
+        else:
+            print("\n现在没有该推的。")
+        recent = store.recent_pushes(limit=5)
+        if recent:
+            print("\n最近推过：")
+            for item in recent:
+                mark = "✓" if item["ok"] else "✗"
+                print(f"  {mark} {item['batch']}｜{item['channel']}｜{item['message'][:40]}")
+        return 0
+
+    if args.schedule:
+        return run_scheduler(store, sink)
 
     if args.check_qq:
         settings = QQSettings.from_config()
