@@ -98,6 +98,57 @@ DEFAULTS: dict[str, dict[str, Any]] = {
 # 新建项目必须零真实信息（CONTRACT.md 第十节）。这里只放占位值。
 _PLACEHOLDER_KEYS = {"webhook", "cloud_api_key", "cloud_base_url", "cloud_model", "local_model"}
 
+# ---------------------------------------------------------------------------
+# 生成给用户看的 config.toml 时，每一项上面带一句人话说明。
+# 用户唯一会亲手改的就是这个文件，所以说明写在配置里、而不是只写在代码里。
+# 加了新配置项记得在这里补一句 —— 补漏了不会报错，只是用户看不懂那一项。
+# ---------------------------------------------------------------------------
+KEY_COMMENTS: dict[str, str] = {
+    # [parse] 理解层怎么判
+    "parse.filter_strength": "过滤强度，三档：strict 严格（默认）/ loose 宽松 / off 关闭。\n"
+                             "#   觉得丢太多就改 loose；觉得碎片太多就保持 strict。\n"
+                             "#   有人说碎片其实是暗号（学号、房间号），那就改 off。",
+    "parse.confidence_min": "可信度低于这个数的待办会进废件箱，不推送。",
+    "parse.merge_window_seconds": "同一个人在同一个群里，这个秒数内连续发的东西算一件事。",
+    "parse.due_default_hour": "只说了哪天、没说几点时，算当天的几点。默认当天最后一分钟。",
+    # [title]
+    "title.max_len": "标题最多多少字，超了截断。",
+    "title.min_meaningful_chars": "摘掉时间和编号后少于这么多汉字，就当成碎片丢掉。\n"
+                                  "#   这是「拿快递」和「（A组）」之间的分界线，\n"
+                                  "#   调小了会漏掉真待办，调大了会放进碎片。",
+    # [store]
+    "store.attachment_retention_days": "图片/文件保留多少天，过期自动删（0 = 永不删）。",
+    "store.keep_dropped_days": "废件箱记录保留多少天。这些是调规则的案例，别留太短。",
+    # [push]
+    "push.default_times": "每天推送的时间点，24 小时制，想推几次就写几个。",
+    "push.quote_max_chars": "推送里附带的原文片段长度（方便你看它为什么被判成待办）。",
+    "push.fallback_text_chars": "AI 用不了时，推送原文的前多少字作为保底。",
+    # [ai]
+    "ai.mode": "AI 处理长文档的尺度：conservative 保守（默认，只挑明确要做的事）\n"
+               "#   / aggressive 激进（允许重写归纳，读着舒服但可能漏或编）。",
+    "ai.cloud_priority": "true = 优先用云端（质量好、要花钱或额度）；false = 优先用本地模型。",
+    "ai.cloud_base_url": "云端接口地址。留空 = 不用云端。",
+    "ai.cloud_api_key": "云端密钥。⚠️ 这是你的钱包，别把填好的文件发人、别传网盘。",
+    "ai.cloud_model": "云端模型名。⚠️ 免费模型名会变，换服务商时记得改这里。",
+    "ai.token_budget_per_day": "每天最多用多少 token，0 = 不限制。防止意外烧钱用。",
+    "ai.local_model": "本地模型名（要装 Ollama）。留空 = 不用本地模型。",
+    # [resource]
+    "resource.mem_critical_percent": "内存占用超过这个百分比时，只记待办不分析不推送（别在打游戏时抢资源）。",
+    "resource.mem_resume_percent": "内存降到这个百分比以下，恢复正常工作。",
+    # [risk]
+    "risk.require_secondary_account": "启动时必须确认「我用的是小号」。别关。",
+    "risk.confirmed_secondary_account": "你已经确认过了。程序自己写的，不用管。",
+    # [wecom_bot]
+    "wecom_bot.enabled": "改成 true 才会真的推送。没配好时推送会打印在屏幕上，不会静默丢消息。",
+    "wecom_bot.webhook": "企业微信群的 Webhook 地址，整条贴进来。\n"
+                         "#   怎么拿：企业微信 → 进一个群（自己建个只有自己的群也行）\n"
+                         "#          → 右上角「…」→ 群机器人 → 添加 → 创建完复制地址。",
+    "wecom_bot.max_per_minute": "企业微信的硬限制就是每分钟 20 条，改了没用，放这里是为了看得见。",
+    "wecom_bot.retry_times": "网络抖动时重试几次。",
+    "wecom_bot.timeout": "单次请求等多久算超时（秒）。",
+    "wecom_bot.send_attachments": "推送时要不要连图片/文件原件一起发到手机。嫌手机响得勤就改 false。",
+}
+
 
 def _toml_value(value: Any) -> str:
     if isinstance(value, bool):
@@ -110,7 +161,11 @@ def _toml_value(value: Any) -> str:
 
 
 def render_toml(values: dict[str, dict[str, Any]]) -> str:
-    """把配置渲染成带注释头的 TOML 文本。"""
+    """把配置渲染成带逐项说明的 TOML 文本。
+
+    说明来自 KEY_COMMENTS。用户会亲手改这个文件，所以每一项上面都要有
+    "这是什么、改了会怎样"，而不是一串看不懂的键名。
+    """
     lines = [
         "# 私人秘书 · 用户配置",
         "# 改完保存即可生效，不用重启（程序每次读取前会看文件有没有变）。",
@@ -118,8 +173,15 @@ def render_toml(values: dict[str, dict[str, Any]]) -> str:
         "",
     ]
     for section in sorted(values):
+        lines.append(f"# {'=' * 66}")
+        lines.append(f"# [{section}]")
+        lines.append(f"# {'=' * 66}")
         lines.append(f"[{section}]")
         for key in sorted(values[section]):
+            comment = KEY_COMMENTS.get(f"{section}.{key}")
+            if comment:
+                for piece in comment.split("\n"):
+                    lines.append(piece if piece.lstrip().startswith("#") else f"# {piece}")
             lines.append(f"{key} = {_toml_value(values[section][key])}")
         lines.append("")
     return "\n".join(lines)
