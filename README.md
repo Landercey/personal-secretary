@@ -19,7 +19,7 @@
 | 1 | 空壳骨架 + 契约自检 | ✅ 完成 |
 | 2 | 第一条竖直切片：粘贴文字 → 解析 → 存库 → 打印 | ✅ 完成 |
 | 3 | 接企微推送 | ✅ 完成 |
-| 4 | 接 QQ 来源 | ⬜ 待做 |
+| 4 | 接 QQ 来源 | ✅ 完成 |
 | 5 | 文件解析 + 附件 | ⬜ 待做 |
 | 6 | 去重 + 时间解析增强（碎片率 <3%） | ⬜ 待做 |
 | 7 | 定时调度 | ⬜ 待做 |
@@ -43,6 +43,8 @@ python run.py --list junk         看废件箱（没收下的原文都在这里�
 python run.py --digest            生成一份汇总打印出来
 python run.py --push              把汇总真正推送到企业微信
 python run.py --check-push        检查推送通道配置（不发消息）
+python run.py --check-qq          看 QQ 接入的配置和状态
+python run.py --qq                启动 QQ 接收（Ctrl+C 停止）
 python run.py --done 3            标记某条完成
 python run.py --stats             看统计
 ```
@@ -69,6 +71,8 @@ python -m unittest discover -s tests -t . -v
 | 推送时间 | `config.toml` 的 `[push] default_times` |
 | 加一个新的消息来源 | 新写一个 `app/sources/xxx.py`，然后在 `run.py` 的 `build()` 里注册 |
 | 加一个新推送通道 | 新写一个 `app/sinks/xxx.py`，然后在 `app/sinks/router.py` 里登记 |
+| 群里什么算闲聊、什么算通知 | `app/pipeline/chat_filter.py` 里的那几张词表 |
+| QQ 怎么连（端口、令牌、收哪些群） | `config.toml` 的 `[qq]` 段 |
 
 改完一定要跑一遍：
 
@@ -102,10 +106,10 @@ python -m unittest discover -s tests -t .
 
 ```
 app/contracts/   四种数据格式 + 五个接口
-app/sources/     手动录入（QQ 群、小号收件箱在第 4 步接入）
-app/pipeline/    繁简归一、规则解析、管线
+app/sources/     手动录入、QQ 群消息、小号收件箱
+app/pipeline/    闲聊过滤、繁简归一、规则解析、管线
 app/store/       SQLite
-app/sinks/       控制台（企微在第 3 步接入）
+app/sinks/       企微群机器人、控制台
 app/runtime/     配置中心（所有阈值集中在这里，代码里不写裸数字）
 ```
 

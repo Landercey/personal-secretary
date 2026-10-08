@@ -1,0 +1,202 @@
+"""群噪声过滤（理解层第一个零件，order 5）。
+
+=====================================================================
+这个文件在干什么
+=====================================================================
+群里的消息绝大多数是闲聊，不能条条变待办。这里回答一个问题：
+    「这句话值得变成待办吗？」
+答"不值得"的，一条都不产生，只记一笔日志（进废件箱）。
+
+=====================================================================
+想改这里的话，先看这张地图
+=====================================================================
+  群里闲聊还是被判成待办      → 往 IGNORE_WORDS / EMOTION_WORDS / QUESTION_WORDS 加词
+  真通知被误杀了              → 往 ACTION_WORDS / STRONG_NOTICE 加词
+  吐槽类误收（"明天考试好慌"）→ 往 EMOTION_WORDS 加词
+  已经做完的事被收（"作业写完了"）→ 往 DONE_WORDS 加词
+  小号收件箱也开始过滤了      → 看 `_is_inbox()`
+  所有这些词的判据             → `is_actionable()`
+
+**改词表是最安全的改法**：只影响判"值不值得"，不影响时间识别。
+改完必须跑 python -m unittest discover -s tests -t .
+
+=====================================================================
+为什么这个文件在 pipeline 而不是 sources
+=====================================================================
+它要用时间识别（"只有时间没有事情"那种碎片判断），而时间识别属理解层。
+放在 sources 里会让"来源"依赖"理解"，模块边界就破了
+（tests/test_contract_integrity.py 会直接报错）。
+来源只负责把外面的东西搬进来，判"值不值得"是理解层的活。
+
+=====================================================================
+词表来源：下面这些词不是想出来的，是从真实群里一条条捞出来总结的。
+每一条都对应一次实际误判。删词之前先想清楚为什么当初加它。
+=====================================================================
+"""
+
+from __future__ import annotations
+
+from ..contracts.interfaces import DraftEnricher
+from ..contracts.models import SOURCE_QQ_INBOX, Message, TaskDraft
+from ..runtime.config import config
+from .quick_parse import has_time_hint, text_without_time
+
+# ---------------------------------------------------------------------------
+# 明显是闲聊：出现这些词直接不收
+# ---------------------------------------------------------------------------
+IGNORE_WORDS = ("哈哈哈", "哈哈", "笑死", "收到", "好的", "在吗", "早安", "晚安",
+                "谢谢", "表情包", "打卡了", "打卡")
+
+# 太短的内容不成事（"嗯""好的""1"）
+MIN_TEXT_CHARS = 4
+
+# ---------------------------------------------------------------------------
+# 群聊里"看起来像待办"的信号：时间 + 行动词。两个都没有就不当待办。
+# 不加这一条的后果实测过：群里闲聊会全部变成待办。
+# ---------------------------------------------------------------------------
+ACTION_WORDS = (
+    "报名", "开会", "会议", "参加", "提交", "截止", "集合", "打卡", "填写", "确认",
+    "回复", "领取", "缴费", "培训", "评审", "上线", "出发", "聚餐", "作业", "报告",
+    "考试", "面试", "答辩", "通知", "安排", "活动", "记得", "别忘了", "要交", "带上",
+    "准备", "登记", "接龙", "签到", "点到",
+)
+# 注意：这里**故意不收单字**。"交""去""来""带"这种单字放进来的话，
+# "我去吃饭""来人"这类闲聊全会被判成待办 —— 加词一律加双字以上的词。
+# 想加词：加完必须同时往 tests/test_chat_filter.py 补一条用例。
+
+# ---------------------------------------------------------------------------
+# 情绪 / 吐槽：看着像在说某件事，其实是在闲聊。
+# 实测误收最多的就是这一类 —— "明天考试好慌啊" 有"考试"有"明天"，
+# 光靠时间和行动词判不出来。
+# ---------------------------------------------------------------------------
+EMOTION_WORDS = (
+    "好慌", "慌不慌", "救命", "太难", "好难", "无聊", "有意思", "真好玩", "好玩",
+    "累死", "写不动", "不想", "服了", "无语", "笑死", "哭了", "绝了", "烦躁",
+    "走神", "溜了", "麻了", "好累", "难受",
+)
+
+# ---------------------------------------------------------------------------
+# 完成态：事情已经做完了，不需要再提醒（"作业写完了"）。
+# 但带时间的不算 —— "写完了，明天还要交" 里的"明天"是真事。
+# ---------------------------------------------------------------------------
+DONE_WORDS = (
+    "写完了", "做完了", "考完了", "交完了", "填完了", "报名了", "搞定了", "弄完了",
+    "结束了", "收到了", "看到了", "完了", "好了", "已交", "交了",
+)
+
+# ---------------------------------------------------------------------------
+# 询问：在问问题，不是在下通知（"这周活动是在哪来着"）。
+# ---------------------------------------------------------------------------
+QUESTION_WORDS = (
+    "啥", "咋", "怎么", "在哪", "来着", "什么时候", "几点", "多少",
+    "吗？", "吗?", "吗，", "吗,", "呢？", "呢?",
+)
+
+# ---------------------------------------------------------------------------
+# 强通知标记：带这些的即使像疑问句、带情绪，也按通知处理。
+# 这是"宁可收错也别漏事"的那一侧。
+# ---------------------------------------------------------------------------
+STRONG_NOTICE = (
+    "@全体", "全体成员", "务必", "请各位", "大家注意", "记得", "别忘了",
+    "截止", "集合", "报名参加", "通知", "安排",
+)
+
+# 纯占位符（图片/表情），没有实际文字内容。
+# 前缀匹配的（"[文件"）要用 startswith，见 strip_placeholders()。
+PLACEHOLDER_ONLY = ("[图片]", "[表情]", "[回复]", "[文件", "@我", "@全体", "@某人")
+
+
+def strip_placeholders(text: str) -> str:
+    """去掉聊天占位符，避免 "[回复]" 里的"回复"被当成行动词。
+
+    这是个真踩过的坑："[回复]好的" 里的"回复"命中了 ACTION_WORDS，
+    于是纯闲聊被判成了待办。
+    """
+    result = text or ""
+    for token in PLACEHOLDER_ONLY:
+        result = result.replace(token, " ")
+    for token in ("@全体", "@我", "@某人"):
+        result = result.replace(token, " ")
+    return result.strip()
+
+
+def is_actionable(text: str) -> tuple[bool, str]:
+    """这句话值得变成待办吗？返回 (是否值得, 不值得的原因)。
+
+    判的顺序有意从"狠"到"松"：先把明显不是的排掉，剩下的才考虑收。
+    顺序改了会连带影响误判率 —— 别随手调整。
+    """
+    plain = strip_placeholders(text or "").strip()
+    if len(plain) < MIN_TEXT_CHARS:
+        return False, "只有图片或表情，没有文字"
+
+    strong = any(word in plain for word in STRONG_NOTICE)
+    if not strong:
+        if any(word in plain for word in EMOTION_WORDS):
+            return False, "像在吐槽，不是通知"
+        if any(word in plain for word in DONE_WORDS) and not has_time_hint(plain):
+            return False, "说的是已经做完的事"
+        if any(word in plain for word in QUESTION_WORDS):
+            return False, "像在提问，不是通知"
+        if len(text_without_time(plain)) < 2:
+            return False, "只有时间，没有具体事情"
+
+    if not (has_time_hint(plain)
+            or any(word in plain for word in ACTION_WORDS)
+            or strong):
+        return False, "既没有时间也没有行动词，判定为聊天"
+    return True, ""
+
+
+class ChatNoiseEnricher(DraftEnricher):
+    """理解层第一个零件：先把群里的闲聊挡掉。
+
+    跑在切分之前（order 5 < 10）。挡掉的话不产生任何草稿，
+    原因写进 message.raw["skip_reason"]，由装配点决定要不要记日志。
+    """
+
+    name = "chat-filter"
+    order = 5
+
+    def process(self, message: Message, drafts: list[TaskDraft]) -> list[TaskDraft]:
+        if drafts:
+            return drafts
+        if not self._should_filter(message):
+            return drafts
+
+        text = message.text or ""
+        if len(strip_placeholders(text)) < MIN_TEXT_CHARS:
+            message.raw["skip_reason"] = "只有表情或空消息"
+            return []
+        if any(word in text for word in IGNORE_WORDS):
+            message.raw["skip_reason"] = "闲聊内容"
+            return []
+        ok, why = is_actionable(text)
+        if not ok:
+            message.raw["skip_reason"] = why
+            return []
+        return drafts
+
+    @staticmethod
+    def _should_filter(message: Message) -> bool:
+        """哪些来源要过这道关。
+
+        收件箱（自己发给小号）**不过滤**：那是你专门记给自己的，
+        "买牛奶"既没时间也没行动词，但它就是一条待办。
+        手动录入同理 —— 你自己敲的，不用机器判断。
+
+        只有群消息和别人的私聊才需要挡闲聊。
+        """
+        if message.is_self:
+            return False
+        if message.source_kind == SOURCE_QQ_INBOX:
+            return False
+        return True
+
+    def enabled(self) -> bool:
+        """过滤开关。关掉之后所有消息都进待办（排查误杀时用）。
+
+        和 quick_parse 的碎片过滤共用同一个三档开关：
+        strict / loose = 开，off = 关。
+        """
+        return str(config.get("parse", "filter_strength", "strict")) != "off"

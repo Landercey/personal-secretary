@@ -13,6 +13,19 @@
 业务规则在各自的零件文件里。
 
 =====================================================================
+一条重要的约定：**否决标记**
+=====================================================================
+一个零件如果想表达"这条消息到此为止，后面别处理了"，
+就在 `message.raw["skip_reason"]` 里写一句原因。管线看到这个标记会立刻停下，
+后面的零件一律不跑。
+
+为什么需要这个标记（真踩过的坑）：
+  过滤器判"这是闲聊"时返回空列表 []，可下一个零件看到 [] 会以为
+  "还没有人产出草稿"，于是又老老实实解析了一遍 —— 结果闲聊、
+  吐槽、碎片全都进了待办，过滤器形同虚设。
+  "拒绝"和"还没轮到"用同一个空列表表达，是分不出来的，必须另有标记。
+
+=====================================================================
 固定顺序执行（CONTRACT.md 第四节）：
   消息级零件（按 order 从小到大）→ 草稿级零件（按 order 从小到大）
 
@@ -72,6 +85,8 @@ class Pipeline:
                 current.raw.setdefault("enricher_errors", []).append(
                     f"{getattr(enricher, 'name', '?')}: {type(exc).__name__}"
                 )
+            if current.raw.get("skip_reason"):
+                break            # 被否决了，后面的零件不用跑
         return current
 
     def extract(self, message: Message, drafts: list[TaskDraft] | None = None) -> list[TaskDraft]:
@@ -90,6 +105,8 @@ class Pipeline:
                 message.raw.setdefault("enricher_errors", []).append(
                     f"{getattr(enricher, 'name', '?')}: {type(exc).__name__}"
                 )
+            if message.raw.get("skip_reason"):
+                break            # 被否决了，后面的零件不用跑
         return current
 
     def run(self, message: Message) -> tuple[Message, list[TaskDraft]]:

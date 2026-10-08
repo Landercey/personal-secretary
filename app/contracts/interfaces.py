@@ -64,7 +64,12 @@ class TextEnricher(ABC):
 
 
 class DraftEnricher(ABC):
-    """理解层·草稿级：吃消息吐草稿，或对已有草稿做加工。链式执行。"""
+    """理解层·草稿级：吃消息吐草稿，或对已有草稿做加工。链式执行。
+
+    想"否决"这条消息、让后面的零件别跑了，就写
+        message.raw["skip_reason"] = "为什么否决"
+    然后返回空列表。光返回空列表是不够的 —— 下一个零件会以为"还没轮到它"。
+    """
 
     name: str = "draft-enricher"
     order: int = 50                 # 切分 10 → 时间识别 20 → 去重 30 → AI 90

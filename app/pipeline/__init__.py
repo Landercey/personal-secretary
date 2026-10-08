@@ -11,5 +11,6 @@
 """
 
 from .chain import Pipeline
+from .chat_filter import ChatNoiseEnricher
 
-__all__ = ["Pipeline"]
+__all__ = ["Pipeline", "ChatNoiseEnricher"]

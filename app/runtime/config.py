@@ -93,6 +93,31 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         # 推送里要不要带附件（图片原图、文档原件）。手机上看截图靠它。
         "send_attachments": True,
     },
+    "qq": {
+        # ===== 接入地址 =====
+        # NapCat 会主动连到下面这个地址（叫"反向 WebSocket"：由我们监听，
+        # 它来连我们）。改了这里，NapCat 那边的配置也要跟着改。
+        "enabled": False,                 # 改成 true 才开始收 QQ 消息
+        "bind_host": "127.0.0.1",         # 只监听本机，不接受外面的连接
+        "bind_port": 18080,
+        "path": "/onebot/v11/ws",
+        # 首次启用时程序会自动生成一串随机令牌，照抄到 NapCat 配置里。
+        # 它的作用是：万一有别的程序也能连本机端口，没有令牌就进不来。
+        "token": "",
+        # ===== 收哪些消息（默认一个都不收，必须显式勾选）=====
+        # 群里闲聊太多，默认不接收是对的：不勾就一条都不进。
+        "group_ids": [],                  # 要监控的群号，例如 [123456, 789012]
+        "receive_all": False,             # true = 所有群都收（不推荐，噪声和费用都会失控）
+        "private_ids": [],                # 要监控的私聊对象 QQ 号
+        "receive_private_all": False,
+        # 小号收件箱：你自己发给这些会话的消息也会变成待办。
+        # 微信/短信截图转发到这里，就等于丢进收件箱。
+        "inbox_ids": [],
+        "only_mention": False,            # true = 群里只有 @我 的消息才收
+        # ===== 安全阀 =====
+        "max_text_chars": 3000,           # 单条消息最多留多少字，防超长轰炸
+        "keep_every_message": False,      # true = 连闲聊也存进库（排查用，平时关着）
+    },
 }
 
 # 新建项目必须零真实信息（CONTRACT.md 第十节）。这里只放占位值。
@@ -147,6 +172,21 @@ KEY_COMMENTS: dict[str, str] = {
     "wecom_bot.retry_times": "网络抖动时重试几次。",
     "wecom_bot.timeout": "单次请求等多久算超时（秒）。",
     "wecom_bot.send_attachments": "推送时要不要连图片/文件原件一起发到手机。嫌手机响得勤就改 false。",
+    # [qq]
+    "qq.enabled": "改成 true 才开始收 QQ 消息。改完要重启程序。",
+    "qq.bind_host": "监听地址。默认 127.0.0.1 只接受本机连接，一般不用改。",
+    "qq.bind_port": "监听端口。和 NapCat 那边配的端口要一致。",
+    "qq.path": "监听路径。和 NapCat 那边配的路径要一致。",
+    "qq.token": "访问令牌。首次启用时程序会自动生成一串，照抄到 NapCat 配置里。",
+    "qq.group_ids": "要监控的群号，写成 [123456, 789012]。不填就一个群都不收。",
+    "qq.receive_all": "true = 所有群都收。不推荐：闲聊噪声多，接 AI 的话费用也会失控。",
+    "qq.private_ids": "要监控的私聊对象 QQ 号，写法同上。",
+    "qq.receive_private_all": "true = 所有私聊都收。",
+    "qq.inbox_ids": "小号收件箱：你自己发给这些会话的消息也变成待办。\n"
+                    "#   把微信/短信截图转发到这个会话，就等于丢进收件箱。",
+    "qq.only_mention": "true = 群里只有 @我 的消息才收。群太吵可以打开。",
+    "qq.max_text_chars": "单条消息最多保留多少字，防超长内容刷屏。",
+    "qq.keep_every_message": "true = 连判为闲聊的消息也存进库（排查「为什么没收下」时用）。",
 }
 
 

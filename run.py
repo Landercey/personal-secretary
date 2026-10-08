@@ -25,6 +25,8 @@
     python run.py --digest                 生成一份汇总并打印到控制台
     python run.py --push                   把汇总真正推送到企业微信
     python run.py --check-push             检查推送通道配置对不对（不发消息）
+    python run.py --check-qq               看 QQ 接入的配置和状态
+    python run.py --qq                     启动 QQ 接收（Ctrl+C 停止）
     python run.py --stats                  看统计
     python run.py --selftest               检查契约与环境
 """
@@ -33,17 +35,20 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from app.contracts.models import STATUS_DONE, STATUS_DROPPED     # noqa: E402
 from app.pipeline.chain import Pipeline                          # noqa: E402
+from app.pipeline.chat_filter import ChatNoiseEnricher           # noqa: E402
 from app.pipeline.parse_enricher import RuleParseEnricher        # noqa: E402
 from app.runtime.config import config, default_data_dir          # noqa: E402
 from app.sinks.console import build_digest                       # noqa: E402
 from app.sinks.router import build_sink, channel_status          # noqa: E402
 from app.sources.manual import ManualSource                      # noqa: E402
+from app.sources.qq import QQSettings, QQSource, ensure_token    # noqa: E402
 from app.store.repository import SqliteStore, open_database      # noqa: E402
 
 
@@ -58,25 +63,34 @@ def build(database: str | Path | None = None):
     db_path = Path(database) if database else default_data_dir() / "secretary.db"
     store = SqliteStore(open_database(db_path))
     source = ManualSource()
-    pipeline = Pipeline(draft_enrichers=[RuleParseEnricher()])
+    # 理解层的零件按 order 跑：闲聊过滤(5) → 规则解析(10) →（以后）去重(30) → AI(90)
+    pipeline = Pipeline(draft_enrichers=[
+        ChatNoiseEnricher(),
+        RuleParseEnricher(),
+    ])
     sink = build_sink()          # 配了企微就走企微，没配就退回控制台
     return store, source, pipeline, sink
 
 
-def ingest(store, source, pipeline, text: str) -> int:
-    """一段文字 → 待办。返回新入库的条数。
+def ingest_message(store, pipeline, message) -> int:
+    """一条标准消息 → 待办。返回新入库的条数。
 
-    这就是整条流水线的样子，一共五步：
-      1. 来源产出 Message
-      2. 存原始消息（留证据，出问题能回查）
-      3. 理解层跑一遍：消息 → 草稿
-      4. 草稿入库（重复的会被自动挡掉）
-      5. 没收下的碎片记进废件箱
+    整条流水线一共五步（QQ 和手动录入走的是同一条）：
+      1. 存原始消息（留证据，出问题能回查"这条到底收没收到"）
+      2. 理解层跑一遍：消息 → 草稿
+      3. 草稿入库（重复的会被自动挡掉）
+      4. 被判为闲聊/碎片的，记进废件箱（不推送，但留证据）
+      5. 顺手清掉过期记录
     """
-    message = source.from_text(text)
     store.save_message(message)
     prepared, drafts = pipeline.run(message)
     stored = store.save_drafts(prepared, drafts)
+
+    # 被闲聊过滤器挡下的
+    skip_reason = prepared.raw.get("skip_reason")
+    if skip_reason and not drafts:
+        store.log_dropped_text(prepared.text or "", f"闲聊：{skip_reason}",
+                               prepared.source_kind, prepared.source_name, prepared.msg_id)
 
     # 被判为碎片/噪声的行记一笔：不推送，但留证据。
     # 由解析器告诉我们具体是哪几行（见 RuleParseEnricher._record_dropped），
@@ -86,6 +100,74 @@ def ingest(store, source, pipeline, text: str) -> int:
                                prepared.source_kind, prepared.source_name, prepared.msg_id)
     store.purge_old_dropped()
     return len(stored)
+
+
+def ingest(store, source, pipeline, text: str) -> int:
+    """一段文字 → 待办（手动录入的快捷方式）。"""
+    return ingest_message(store, pipeline, source.from_text(text))
+
+
+def run_qq(store, pipeline) -> int:
+    """启动 QQ 接收，一直跑到用户按 Ctrl+C。
+
+    为什么放在这里而不是 app 里：起服务、接线、打印状态是"装配"的活，
+    全项目只有 run.py 负责装配。
+    """
+    settings = QQSettings.from_config()
+    if not settings.enabled:
+        print("QQ 接入没有启用。")
+        print("打开 config.toml，把 [qq] 下面的 enabled 改成 true，再运行一次。")
+        return 1
+
+    token = ensure_token(settings.token)
+    if token != settings.token:
+        print("⚠️ [qq] token 还是空的。config.toml 里要填这个（程序已生成）：")
+        print(f"   token = \"{token}\"")
+        print("   把上面这行贴进 config.toml 的 [qq] 段，再重启一次。")
+        return 1
+
+    def on_message(message) -> None:
+        added = ingest_message(store, pipeline, message)
+        mark = "✓ 入待办" if added else "· 已看过"
+        print(f"  {mark}│ {message.source_name}│ {message.text[:40]}")
+
+    def on_status(state) -> None:
+        if state.get("error"):
+            print(f"  ⚠️ {state['error']}")
+
+    source = QQSource(settings=settings, on_message=on_message, on_status=on_status)
+    if not source.start():
+        print("启动失败，看上面的提示。")
+        return 1
+
+    print("=" * 62)
+    print("  私人秘书 · QQ 接收")
+    print("=" * 62)
+    print(f"  监听：       {settings.bind_host}:{settings.bind_port}{settings.path}")
+    print(f"  接收范围：   {settings.summary()}")
+    print(f"  NapCat 需要填的地址：")
+    print(f"      ws://{settings.bind_host}:{settings.bind_port}{settings.path}"
+          f"?access_token={settings.token}")
+    print()
+    print("  现在去 NapCat 里把上面这个地址配好，然后等它连上来。")
+    print("  按 Ctrl+C 停止。")
+    print("=" * 62)
+    try:
+        while True:
+            time.sleep(2)
+            state = source.status()
+            if not state.get("running"):
+                continue
+            if state.get("connected"):
+                print(f"  [已连接] 登录号 {state.get('self_id') or '?'}｜"
+                      f"收到 {state.get('received', 0)}｜收下 {state.get('accepted', 0)}｜"
+                      f"拦下 {state.get('skipped', 0)}")
+    except KeyboardInterrupt:
+        print("\n  停止中…")
+    finally:
+        source.stop()
+    print("  已停止。")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -99,6 +181,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--push", action="store_true", help="生成汇总并真正推送")
     parser.add_argument("--check-push", action="store_true",
                         help="检查推送通道配置（不发消息）")
+    parser.add_argument("--check-qq", action="store_true",
+                        help="看 QQ 接入的配置和状态")
+    parser.add_argument("--qq", action="store_true", help="启动 QQ 接收")
     parser.add_argument("--stats", action="store_true", help="看统计")
     parser.add_argument("--selftest", action="store_true", help="检查契约与环境")
     parser.add_argument("--db", help="数据库路径（默认 data/secretary.db）")
@@ -131,6 +216,23 @@ def main(argv: list[str] | None = None) -> int:
         print("\n要真正收到推送，需要在 config.toml 里填 [wecom_bot] webhook，"
               "并把 enabled 改成 true。")
         return 0
+
+    if args.check_qq:
+        settings = QQSettings.from_config()
+        print("QQ 接入现状：")
+        print(f"  启用：     {settings.enabled}")
+        print(f"  监听：     {settings.bind_host}:{settings.bind_port}{settings.path}")
+        print(f"  接收范围： {settings.summary()}")
+        print(f"  Token：    {'已设置' if settings.token else '还没设置'}")
+        if not settings.group_ids and not settings.receive_all and not settings.inbox_ids:
+            print()
+            print("  ⚠️ 一个群都没勾，也没有收件箱 —— 现在什么都不会收。")
+            print("     在 config.toml 的 [qq] group_ids 里填群号，")
+            print("     或者在 inbox_ids 里填小号会话。")
+        return 0
+
+    if args.qq:
+        return run_qq(store, pipeline)
 
     if args.digest or args.push:
         tasks = store.list_tasks("open")
