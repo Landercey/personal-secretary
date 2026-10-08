@@ -44,6 +44,8 @@ class FakeClock:
 class TestWebhookParsing(unittest.TestCase):
     """用户复制地址时出的岔子，都得认。"""
 
+    # 故意用假的。⚠️ 测试里永远不许用真密钥 ——
+    # 源码要开源，放真密钥等于把群机器人的发消息权限交给所有人。
     KEY = "00000000-1111-2222-3333-444444444444"
 
     def test_full_url(self):
