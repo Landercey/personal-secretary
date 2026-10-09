@@ -279,7 +279,84 @@ class TestBridge(unittest.TestCase):
 
     def test_sync_now_uses_the_injected_action(self):
         api = Api(None, actions={"sync": lambda: 3})
-        self.assertEqual(api.sync_now(), {"ok": True, "added": 3})
+        self.assertEqual(api.sync_now(), {"ok": True, "added": 3, "notes": []})
+
+
+class _FakeStore:
+    """只用到 recent_pushes 一个方法，别为了测一条建议去开真数据库。"""
+
+    def __init__(self, pushes):
+        self._pushes = pushes
+
+    def recent_pushes(self, limit: int = 20):
+        return self._pushes[:limit]
+
+
+class TestPushTimeSuggestion(unittest.TestCase):
+    """**什么时候让用户去设推送时间** —— 这是本轮要解决的问题。
+
+    答案不是"首次启动就问"：那会儿用户还没收到过任何推送，
+    不知道这东西长什么样，让他选时间等于让他凭空决定，他只会乱点。
+    要**等第一条推送真的到了手机上**再问，这时候他才有判断依据。
+
+    "已经问过没有"不用存标记：推送时间还是默认值 = 他没改过 = 继续提醒；
+    他改了，这条建议自己就消失了。一个状态都不用存。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "config.toml"
+        self.path.write_text(OWN_FILE, encoding="utf-8")
+        self._original = config_module.config
+
+    def tearDown(self):
+        config_module.config = self._original
+        self.tmp.cleanup()
+
+    def use_config(self, times=None):
+        values = {"push": {"times": times}} if times else {}
+        config_module.config = Config(values, self.path)
+
+    def test_no_suggestion_before_the_first_push(self):
+        self.use_config()
+        api = Api(_FakeStore([]))
+        self.assertIsNone(api.setup_state()["suggestion"])
+
+    def test_suggestion_appears_after_a_successful_push(self):
+        self.use_config()
+        api = Api(_FakeStore([{"ok": 1}]))
+        suggestion = api.setup_state()["suggestion"]
+
+        self.assertIsNotNone(suggestion)
+        self.assertEqual(suggestion["section"], "push")   # 点一下能跳到对应设置
+        self.assertIn("07:30", suggestion["text"])        # 得把当前值告诉他才谈得上改
+
+    def test_failed_push_does_not_count(self):
+        """推失败和推成功是两回事：没收到东西就谈不上"想换时间"。"""
+        self.use_config()
+        self.assertIsNone(Api(_FakeStore([{"ok": 0}])).setup_state()["suggestion"])
+
+    def test_suggestion_disappears_once_he_changed_the_times(self):
+        self.use_config(times=["06:30", "22:00"])
+        self.assertIsNone(Api(_FakeStore([{"ok": 1}])).setup_state()["suggestion"])
+
+    def test_no_store_is_not_an_error(self):
+        """有些地方（比如测试、或者界面单独起）没有 store，不能因此炸。"""
+        self.use_config()
+        self.assertIsNone(Api(None).setup_state()["suggestion"])
+
+    def test_sync_carries_notes_back_to_the_ui(self):
+        """同步时的提醒必须能传回界面 —— 只 print 的话界面用户看不到。"""
+        api = Api(None, actions={"sync": lambda: {
+            "added": 2, "notes": ["课表里有单双周但没填开学第一周"]}})
+        result = api.sync_now()
+
+        self.assertEqual(result["added"], 2)
+        self.assertEqual(result["notes"], ["课表里有单双周但没填开学第一周"])
+
+    def test_sync_tolerates_the_old_int_return(self):
+        api = Api(None, actions={"sync": lambda: 3})
+        self.assertEqual(api.sync_now(), {"ok": True, "added": 3, "notes": []})
 
 
 if __name__ == "__main__":

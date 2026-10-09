@@ -77,6 +77,15 @@ class TestWiring(unittest.TestCase):
                        "ingest_drop", "peek_drop", "discard_drop", "dropmask"):
             self.assertTrue(anchor in self.html, f"界面里找不到：{anchor}")
 
+    def test_suggestions_and_sync_notes_have_a_place_to_show(self):
+        """「等时机到了才出现」的建议、和同步带回来的提醒，都得有地方显示。
+
+        这两样都只能飘一句 toast 的话等于没说 —— 用户正在看别处，两秒就过去了。
+        """
+        for anchor in ("state.suggestion", "syncNotes", "guide tip", "guide warn",
+                       "wireGuide"):
+            self.assertTrue(anchor in self.html, f"界面里找不到：{anchor}")
+
     def test_risk_confirmation_is_not_skippable_by_default(self):
         """契约红线：首次启动必须确认过。遮罩一开始不能是 on 之外的可关闭状态。"""
         self.assertIn('class="mask" id="riskMask"', self.html)

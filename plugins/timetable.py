@@ -635,10 +635,16 @@ class TimetableSource(Source):
     kind = "timetable"
     title = TITLE
 
+    def __init__(self) -> None:
+        # 上次拉取时"有话要跟用户说"的内容，界面拿它显示。
+        # 存在实例上是因为装配时只 new 一次，之后一直复用同一个实例。
+        self.notes: list[str] = []
+
     def submit(self, message: Message) -> Message:
         return message        # 课表只有"拉"，没有"推"
 
     def fetch(self) -> list[Message]:
+        self.notes = []
         targets = [
             str(config.get("timetable", key, "") or "").strip()
             for key in ("url", "file")
@@ -655,14 +661,29 @@ class TimetableSource(Source):
 
         out: list[Message] = []
         for target in targets:
-            lessons, skipped = lessons_from_text(read_target(target), target,
-                                                 now, horizon)
+            text = read_target(target)
+            lessons, skipped = lessons_from_text(text, target, now, horizon)
             if skipped:
                 # 不静默：用户看到"课表怎么少了几门"时得能自己查出来
                 print(f"  ⚠️ 有 {skipped} 条循环规则不是「每周重复」，"
                       f"没有展开（只支持 FREQ=WEEKLY）")
+            if not str(config.get("timetable", "term_start", "") or "").strip() \
+                    and has_week_info(text):
+                # 这条也要说出去：不说的话，用户永远不知道有节课时间排错了
+                self.notes.append(
+                    "课表里写了「单周 / 双周 / 周次」，但没填开学第一周的周一 —— "
+                    "现在按每周都上处理。到「设置 → 收消息 → 课表」补一下会更准。")
             out.extend(message_for(lesson) for lesson in lessons)
         return out
+
+
+def has_week_info(text: str) -> bool:
+    """这份课表里有没有"第几周 / 单双周"这类信息。
+
+    有的话，不知道开学第一周是哪天就只能当成"每周都上"，
+    单双周排课会排错 —— 所以要提示用户去补 `term_start`。
+    """
+    return bool(_WEEK_LIST.search(text or "")) or "单周" in text or "双周" in text
 
 
 def register(registry) -> None:

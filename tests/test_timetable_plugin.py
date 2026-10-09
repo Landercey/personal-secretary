@@ -16,6 +16,7 @@ from __future__ import annotations
 import datetime as dt
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from app.pipeline.chain import Pipeline                           # noqa: E402
 from app.pipeline.chat_filter import ChatNoiseEnricher            # noqa: E402
 from app.pipeline.parse_enricher import RuleParseEnricher         # noqa: E402
 from app.runtime import plugins                                   # noqa: E402
+from app.runtime.config import Config as _Config                  # noqa: E402
 
 
 def load_plugin():
@@ -70,6 +72,16 @@ JSON_COURSES = """[
 def window(days: int = 7):
     """以周一为起点的窗口，方便算期望值。"""
     return MONDAY - dt.timedelta(hours=1), MONDAY + dt.timedelta(days=days)
+
+
+def _write(name: str, text: str) -> Path:
+    folder = Path(tempfile.mkdtemp(prefix="ps-timetable-"))
+    path = folder / name
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+TABLE_FILE = _write("课表.csv", TABLE)
 
 
 class TestIcsBasics(unittest.TestCase):
@@ -352,6 +364,60 @@ class TestPluginSlots(unittest.TestCase):
             self.assertEqual(timetable.TimetableSource().fetch(), [])
         finally:
             timetable.config = original
+
+
+class TestTermStartNudge(unittest.TestCase):
+    """课表里有"单双周/第几周"、但没填开学第一周时，必须**说一声**。
+
+    不说的话，用户永远不知道有节课排错了 —— 只会觉得这软件算得不准。
+    这是"什么时候让用户去配时间"的一个例子：不是一上来就问，
+    而是**等这件事真的发生了**（他导了一份带周次的课表）再问。
+    """
+
+    def test_week_information_is_detected(self):
+        self.assertTrue(timetable.has_week_info("高等数学,周一,08:00,,,1-16周"))
+        self.assertTrue(timetable.has_week_info("单周上体育"))
+        self.assertTrue(timetable.has_week_info("双周"))
+        self.assertFalse(timetable.has_week_info("高等数学,周一,08:00,09:40,6A-305"))
+        self.assertFalse(timetable.has_week_info(""))
+
+    def test_fetch_notes_when_weeks_but_no_term_start(self):
+        original = timetable.config
+        timetable.config = _Config({"timetable": {"file": str(TABLE_FILE),
+                                                  "term_start": ""}})
+        try:
+            source = timetable.TimetableSource()
+            source.fetch()
+        finally:
+            timetable.config = original
+
+        self.assertEqual(len(source.notes), 1)
+        self.assertIn("开学第一周", source.notes[0])
+
+    def test_no_note_once_term_start_is_filled(self):
+        original = timetable.config
+        timetable.config = _Config({"timetable": {"file": str(TABLE_FILE),
+                                                  "term_start": "2026-09-01"}})
+        try:
+            source = timetable.TimetableSource()
+            source.fetch()
+        finally:
+            timetable.config = original
+
+        self.assertEqual(source.notes, [])
+
+    def test_no_note_for_tables_without_week_info(self):
+        path = _write("plain.csv",
+                      "课程,星期,开始时间,结束时间,地点\n高等数学,周一,08:00,09:40,6A-305\n")
+        original = timetable.config
+        timetable.config = _Config({"timetable": {"file": str(path), "term_start": ""}})
+        try:
+            source = timetable.TimetableSource()
+            source.fetch()
+        finally:
+            timetable.config = original
+
+        self.assertEqual(source.notes, [])
 
 
 if __name__ == "__main__":

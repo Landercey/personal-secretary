@@ -206,7 +206,39 @@ class Api:
              "ok": has("ai", "cloud_base_url") or has("ai", "local_model")},
         ]
         return {"checks": checks,
-                "done": all(item["ok"] for item in checks if not item.get("optional"))}
+                "done": all(item["ok"] for item in checks if not item.get("optional")),
+                "suggestion": self._suggestion()}
+
+    def _suggestion(self) -> dict | None:
+        """一条**等时机到了才出现**的建议：现在该去调推送时间了。
+
+        为什么不在首次启动就问：用户还没收到过任何推送，不知道这东西长什么样，
+        让他选时间等于让他凭空决定 —— 他只会乱点，或者卡在这一步不走了。
+        **等第一条推送真的到了手机上**，他才知道"哦，是这么一个东西"，
+        这时候问才有意义。
+
+        为什么不用记一个"问过了"的标记：**推送时间还是默认值就说明他没改过**。
+        他一改，这条建议自然消失。一个状态都不用存。
+        """
+        from ..runtime.config import DEFAULTS, config
+
+        if not self._pushed_once():
+            return None
+        current = list(config.get("push", "times", []) or [])
+        if current != list(DEFAULTS["push"]["times"]):
+            return None
+        return {"section": "push",
+                "text": f"手机应该收到过推送了。现在是每天 {' / '.join(current)}，"
+                        f"想换时间点就点这里"}
+
+    def _pushed_once(self) -> bool:
+        """有没有**成功**推出去过至少一次。"""
+        if self.store is None:
+            return False
+        try:
+            return any(item.get("ok") for item in self.store.recent_pushes(limit=5))
+        except Exception:
+            return False
 
     def confirm_risk(self) -> dict:
         """用户在风控提示上点了「我知道了」。
@@ -232,9 +264,12 @@ class Api:
 
     def sync_now(self) -> dict:
         """立刻拉一遍插件来源（课表这类需要主动去拿的）。"""
-        added = self._act("sync") or 0
+        result = self._act("sync") or {}
+        if not isinstance(result, dict):          # 兜底：老装配点只返回条数
+            result = {"added": result, "notes": []}
         self._revision += 1
-        return {"ok": True, "added": added}
+        return {"ok": True, "added": int(result.get("added") or 0),
+                "notes": list(result.get("notes") or [])}
 
     # ------------------------------------------------------------------ 拖进来的东西
     def stage_drop(self, name: str, data_base64: str) -> dict:

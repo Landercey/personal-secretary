@@ -514,13 +514,18 @@ def list_plugins(statuses) -> int:
     return 0
 
 
-def sync_sources(store, pipeline, sources) -> int:
+def sync_sources(store, pipeline, sources) -> dict:
     """拉一遍插件来源（课表订阅这类），结果当普通消息走同一条管线。
 
     一个来源挂了不影响别的：它自己报一句错，其余的照拉 ——
     跟"坏插件不影响启动"是同一条规矩，只是发生在运行期。
+
+    返回 `{"added": 新增条数, "notes": [这次有什么值得告诉用户的]}`。
+    **notes 不能省**：像"课表里有单双周但没填学期起点"这种事，
+    不带回来的话用户永远不知道有节课排错了，只会觉得这软件算得不准。
     """
     added = 0
+    notes: list[str] = []
     for source in sources:
         label = getattr(source, "title", None) or getattr(source, "kind", "?")
         try:
@@ -528,13 +533,14 @@ def sync_sources(store, pipeline, sources) -> int:
         except Exception as exc:
             print(f"  ✗ {label} 拉取失败：{type(exc).__name__}: {exc}")
             continue
+        notes.extend(list(getattr(source, "notes", None) or []))
         if not messages:
             print(f"  · {label}：这次没有新的")
             continue
         print(f"  · {label}：拿到 {len(messages)} 条")
         for message in messages:
             added += ingest_message(store, pipeline, message)
-    return added
+    return {"added": added, "notes": notes}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -591,8 +597,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"（插件放在 {plugin_dir(Path(__file__).resolve().parent)}，"
                   "课表插件要在 config.toml 的 [timetable] 里填 url）")
             return 0
-        added = sync_sources(store, pipeline, registry.sources)
-        print(f"\n同步完成：新待办 {added} 条")
+        result = sync_sources(store, pipeline, registry.sources)
+        for note in result["notes"]:
+            print(f"  ⚠️ {note}")
+        print(f"\n同步完成：新待办 {result['added']} 条")
         return 0
 
     if args.done:

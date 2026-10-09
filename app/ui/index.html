@@ -136,6 +136,19 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
 .guide li.todo .mk { color: var(--today) }
 .guide li .go { margin-left: auto; font-size: 11.5px; color: var(--accent) }
 
+/* 「时机到了才出现」的一句话建议：第一次推送成功后提示调推送时间 */
+.guide.tip {
+  display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+  font-size: 12.5px; color: var(--text-2); line-height: 1.6; cursor: pointer;
+}
+.guide.tip:hover { background: #fbfbfd }
+.guide.tip .go { margin-left: auto; flex: none; font-size: 11.5px; color: var(--accent) }
+
+/* 拉课表时冒出来的提醒（比如有单双周但没填学期起点） */
+.guide.warn { padding: 12px 16px; font-size: 12.5px; line-height: 1.75; color: var(--today) }
+.guide.warn p { margin: 0 0 4px; color: inherit }
+.guide.warn p:last-child { margin-bottom: 0 }
+
 /* ---------- 右侧：详情 / 设置 ---------- */
 .detail {
   width: 0; flex: none; overflow: hidden; background: var(--panel);
@@ -358,6 +371,7 @@ let riskDismissed = false;  // 这一轮先不弹风控（下次开程序还会�
 let guideStamp = '';
 let dropped = null;         // 拖进来的东西：{id,name,size} 或 {text}
 let dropMaxMb = 12;         // 拖进来的文件上限，后端也会拦一道
+let syncNotes = [];         // 最近一次「同步」冒出来的提醒，显示完就留着
 
 const $ = (id) => document.getElementById(id);
 
@@ -840,6 +854,16 @@ function openSettings(section) {
 }
 
 /* ---------- 上手清单 ---------- */
+function wireGuide() {
+  $('guide').querySelectorAll('li.todo, .guide.tip').forEach(node => {
+    node.onclick = () => {
+      const section = node.dataset.section;
+      if (section === 'risk') { $('riskMask').classList.add('on'); return; }
+      openSettings(section);
+    };
+  });
+}
+
 async function renderGuide() {
   const state = await call('setup_state');
   if (!state) return;
@@ -850,29 +874,38 @@ async function renderGuide() {
     $('riskMask').classList.add('on');
   }
 
-  if (state.done) {
-    if (guideStamp !== 'done') { guideStamp = 'done'; $('guide').innerHTML = ''; }
-    return;
+  const parts = [];
+
+  // 拉课表时冒出来的提醒。不说出来的话，用户永远不知道有节课时间排错了，
+  // 只会觉得"这软件算得不准"。
+  if (syncNotes.length) {
+    parts.push(`<div class="guide warn">${
+      syncNotes.map(note => `<p>⚠️ ${esc(note)}</p>`).join('')}</div>`);
   }
-  const rows = state.checks.map(c => c.ok
-    ? `<li class="ok"><i class="mk">✓</i>${esc(c.label)}</li>`
-    : `<li class="todo" data-section="${esc(c.section)}"><i class="mk">○</i>${esc(c.label)}
-         <span class="go">去设置 ›</span></li>`).join('');
-  const html = `<div class="guide">
-      <h3>还没弄完这几步</h3>
-      <p>弄完前面两条就能收到第一条推送了。点哪一条直接跳过去。</p>
-      <ul>${rows}</ul>
-    </div>`;
+
+  // 等时机到了才出现的建议（第一次推送成功之后，提示可以调推送时间了）
+  if (state.suggestion) {
+    parts.push(`<div class="guide tip" data-section="${esc(state.suggestion.section)}">
+        <span>${esc(state.suggestion.text)}</span><span class="go">去设置 ›</span></div>`);
+  }
+
+  if (!state.done) {
+    const rows = state.checks.map(c => c.ok
+      ? `<li class="ok"><i class="mk">✓</i>${esc(c.label)}</li>`
+      : `<li class="todo" data-section="${esc(c.section)}"><i class="mk">○</i>${esc(c.label)}
+           <span class="go">去设置 ›</span></li>`).join('');
+    parts.push(`<div class="guide">
+        <h3>还没弄完这几步</h3>
+        <p>弄完前面两条就能收到第一条推送了。点哪一条直接跳过去。</p>
+        <ul>${rows}</ul>
+      </div>`);
+  }
+
+  const html = parts.join('');
   if (html !== guideStamp) {
     guideStamp = html;
     $('guide').innerHTML = html;
-    $('guide').querySelectorAll('li.todo').forEach(li => {
-      li.onclick = () => {
-        const section = li.dataset.section;
-        if (section === 'risk') { $('riskMask').classList.add('on'); return; }
-        openSettings(section);
-      };
-    });
+    wireGuide();
   }
 }
 
@@ -942,6 +975,9 @@ window.addEventListener('pywebviewready', () => {
     e.target.disabled = false;
     if (!res) return;
     toast(res.added ? `同步完成，新增 ${res.added} 条` : '同步完成，没有新的');
+    // 同步带回来的提醒要留在界面上，不能只用一句飘过去的提示 ——
+    // 用户正在看别的地方，一条 toast 两秒就没了，等于没说。
+    syncNotes = Array.isArray(res.notes) ? res.notes : [];
     refresh();
   };
   $('btnRiskOk').onclick = async () => {
