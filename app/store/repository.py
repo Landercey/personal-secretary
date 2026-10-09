@@ -279,6 +279,16 @@ class SqliteStore(Store):
                         f"重复出现，已合并（来源 {message.source_name or draft.source_name}）")
 
     def _insert_attachment(self, task_id: int, msg_id: str, item: Attachment) -> None:
+        # 同一个文件挂到同一条待办上只留一份。
+        # （原注释写着"去重靠 sha256"，但代码是直接 append —— 注释在骗人，
+        #   同一个文件被转发三次，库里就有三条一模一样的附件记录。）
+        if item.sha256:
+            exists = self.conn.execute(
+                "SELECT 1 FROM attachments WHERE task_id=? AND sha256=? LIMIT 1",
+                (task_id, item.sha256),
+            ).fetchone()
+            if exists:
+                return
         self.conn.execute(
             """INSERT INTO attachments
                (task_id, msg_id, name, path, mime, size, kind, sha256)
@@ -358,6 +368,10 @@ class SqliteStore(Store):
                     " AND due_at < ?"), (now,)
         if view == "archive":
             return "is_archived=1", ()
+        # 做完的。**以前没有这一格**：打勾之后那条从所有列表里消失，
+        # 用户第二天想确认"我昨天做完了没"就查不到了。
+        if view == "done":
+            return "status='done' AND is_archived=0", ()
         if view == "junk":
             return "status='dropped'", ()
         if view == "all":
@@ -380,6 +394,85 @@ class SqliteStore(Store):
                        size=int(r["size"]), kind=r["kind"], sha256=r["sha256"])
             for r in rows
         ]
+
+    # ------------------------------------------------------------------ 手改与查找
+    @_synchronized
+    def update_fields(self, task_id: int, fields: dict[str, Any]) -> None:
+        """改标题 / 时间 / 地点 / 正文 / 提醒等级。界面上手改用的。
+
+        为什么只认这几样、不给一个万能 update：
+        状态走 `set_status`、归档走 `archive`，各有各的副作用要记
+        （完成时间、误判原因、归档原因）。混在一个万能方法里，
+        以后没人说得清"这条到底被谁改过什么"。
+        """
+        allowed = ("title", "detail", "due_at", "location", "remind_level")
+        changes = {key: value for key, value in (fields or {}).items() if key in allowed}
+        if not changes:
+            return
+        with self.conn:
+            # ⚠️ 手改了标题/时间/地点，**去重键必须跟着重算**。
+            # 不重算的话：他把"交实验报告"改成"交实验报告（明天）"，
+            # 下次群里再说同一件事，程序会当成新的一条再建一次。
+            if any(key in changes for key in ("title", "due_at", "location")):
+                row = self.conn.execute(
+                    "SELECT title, due_at, location FROM tasks WHERE task_id=?",
+                    (task_id,),
+                ).fetchone()
+                if row is not None:
+                    changes["dedup_key"] = dedup_key_for(TaskDraft(
+                        title=str(changes.get("title", row["title"]) or ""),
+                        due_at=changes.get("due_at", row["due_at"]),
+                        location=changes.get("location", row["location"]),
+                    ))
+            sets = ", ".join(f"{key}=?" for key in changes)
+            self.conn.execute(
+                f"UPDATE tasks SET {sets}, updated_at=? WHERE task_id=?",
+                (*changes.values(), now_text(), task_id),
+            )
+            self._event(task_id, "edited", "；".join(f"{k}={v}" for k, v in changes.items()))
+
+    @_synchronized
+    def search(self, keyword: str, limit: int = 100) -> list[Task]:
+        """按关键字找。标题、正文、地点、原始片段都搜。
+
+        为什么原始片段也进搜索范围：用户记得的往往是**原话**
+        （"老师说那个实验报告"），不是我们提炼出来的标题。
+        归档的也搜得到 —— 找旧东西时没人希望它凭空消失。
+        """
+        word = str(keyword or "").strip()
+        if not word:
+            return []
+        like = f"%{word}%"
+        rows = self.conn.execute(
+            """SELECT * FROM tasks
+               WHERE title LIKE ? OR detail LIKE ? OR location LIKE ? OR quoted LIKE ?
+               ORDER BY is_archived, (due_at IS NULL), due_at DESC, task_id DESC
+               LIMIT ?""",
+            (like, like, like, like, int(limit)),
+        ).fetchall()
+        return [self._row_to_task(row) for row in rows]
+
+    # ------------------------------------------------------------------ meta
+    @_synchronized
+    def set_meta(self, key: str, value: str) -> None:
+        """记一笔程序自己的状态（现在是心跳用）。
+
+        为什么不塞进 config.toml：那是**用户**的文件，机器自己的心跳
+        不该混进去；而且它每几秒写一次，写配置会一直触发重载。
+        """
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO meta(key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (str(key), str(value)),
+            )
+
+    @_synchronized
+    def get_meta(self, key: str, default: str = "") -> str:
+        row = self.conn.execute(
+            "SELECT value FROM meta WHERE key=?", (str(key),)
+        ).fetchone()
+        return str(row["value"]) if row else default
 
     def _row_to_task(self, row: sqlite3.Row) -> Task:
         return Task(

@@ -20,7 +20,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from ..contracts.models import STATUS_DONE, STATUS_DROPPED
+from ..contracts.models import STATUS_DONE, STATUS_DROPPED, STATUS_OPEN
 
 
 def _human_due(due_at: str | None) -> tuple[str, str]:
@@ -54,6 +54,23 @@ def _human_due(due_at: str | None) -> tuple[str, str]:
     return moment.strftime("%m-%d %H:%M"), "later"
 
 
+def _normalize_due(text: str) -> str:
+    """把界面上的日期时间值变成库里统一的写法。
+
+    浏览器 `<input type="datetime-local">` 给的是 "2026-10-12T09:00"，
+    库里统一用 "YYYY-MM-DD HH:MM:SS"。只给日期（"2026-10-12"）时按当天
+    最后一分钟算 —— 跟解析器"只说了哪天没说几点"的约定保持一致。
+    """
+    raw = str(text or "").strip().replace("T", " ")
+    if not raw:
+        return ""
+    if len(raw) == 16:
+        return raw + ":00"
+    if len(raw) == 10:
+        return raw + " 23:59:00"
+    return raw
+
+
 class Api:
     """网页能调到的全部方法。加方法不用改别的，网页那边直接调。"""
 
@@ -79,28 +96,41 @@ class Api:
         """一个分组下的待办。
 
         view: open / today / tomorrow / **week（本周一~周日）** /
-              **next_week（下周一~周日）** / overdue / archive / junk
+              **next_week（下周一~周日）** / overdue / **done（已完成）** /
+              archive / junk
         """
         rows = self.store.list_tasks(view, limit=500)
-        items = []
-        for task in rows:
-            due_text, urgency = _human_due(task.due_at)
-            items.append({
-                "id": task.task_id,
-                "title": task.title,
-                "due": due_text,
-                "urgency": urgency,
-                "location": task.location or "",
-                "source": task.source_name or "",
-                "sender": task.sender or "",
-                "quoted": task.quoted or "",
-                "detail": task.detail or "",
-                "remind": int(task.remind_level),
-                "attachments": len(task.attachments),
-                "status": task.status,
-            })
         self._revision += 1
-        return {"items": items, "revision": self._revision}
+        return {"items": [self._task_dict(t) for t in rows], "revision": self._revision}
+
+    @staticmethod
+    def _task_dict(task) -> dict:
+        """一条待办 → 界面要的形状。列表、搜索、废件箱共用一个。"""
+        due_text, urgency = _human_due(task.due_at)
+        return {
+            "id": task.task_id,
+            "title": task.title,
+            "due": due_text,
+            # 时间给界面编辑用（datetime-local 要 "YYYY-MM-DDTHH:MM"）
+            "due_raw": (task.due_at or "")[:16].replace(" ", "T"),
+            "urgency": urgency,
+            "location": task.location or "",
+            "source": task.source_name or "",
+            "sender": task.sender or "",
+            "quoted": task.quoted or "",
+            "detail": task.detail or "",
+            "remind": int(task.remind_level),
+            "attachments": len(task.attachments),
+            "files": [{"name": a.name, "path": a.path, "size": int(a.size),
+                       "kind": a.kind} for a in task.attachments],
+            "status": task.status,
+            "done": task.status == STATUS_DONE,
+        }
+
+    def search(self, keyword: str) -> dict:
+        """找待办。用户记得的往往是原话，所以标题/正文/地点/原文都搜。"""
+        rows = self.store.search(keyword, limit=200)
+        return {"items": [self._task_dict(t) for t in rows], "keyword": str(keyword or "")}
 
     def counts(self) -> dict:
         """左侧导航上的数字。"""
@@ -111,15 +141,42 @@ class Api:
             "week": self.store.count_tasks("week"),
             "next_week": self.store.count_tasks("next_week"),
             "overdue": self.store.count_tasks("overdue"),
+            "done": self.store.count_tasks("done"),
             "archive": self.store.count_tasks("archive"),
+            "junk": self.store.count_tasks("junk"),
         }
 
     def stats(self) -> dict:
         return self.store.stats()
 
     def dropped(self) -> dict:
-        """废件箱：没收下的原文。用来回答"我发的那条为什么没反应"。"""
-        return {"items": self.store.list_dropped(limit=200)}
+        """废件箱：**两样东西合在一起**。
+
+        ① 你点过「这不是待办」的待办（tasks 里 status='dropped'）
+        ② 被规则拦下的原文（dropped_items 表）
+
+        为什么要合（真踩过）：以前界面只显示 ②，于是用户点完「这不是待办」，
+        那条就**哪儿都找不到了** —— 数据明明在库里，是界面没给口。
+        合在一起之后还能点「恢复」把它放回主列表。
+        """
+        items: list[dict] = []
+        for task in self.store.list_tasks("junk", limit=100):
+            items.append({
+                "kind": "task", "id": task.task_id, "text": task.title,
+                "reason": task.drop_reason or "你标成了「不是待办」",
+                "source": task.source_name or "", "at": task.updated_at or "",
+            })
+        for row in self.store.list_dropped(limit=100):
+            items.append({
+                "kind": "text", "id": int(row.get("drop_id") or 0),
+                "text": str(row.get("text") or ""),
+                "reason": str(row.get("reason") or ""),
+                "source": str(row.get("source_name") or ""),
+                "at": str(row.get("dropped_at") or ""),
+            })
+        # 谁新谁排前面。两边的字段名不一样，但都是 "YYYY-MM-DD HH:MM:SS"，能直接比。
+        items.sort(key=lambda item: item["at"], reverse=True)
+        return {"items": items[:200]}
 
     # ------------------------------------------------------------------ 写
     def complete(self, task_id: int) -> dict:
@@ -135,18 +192,105 @@ class Api:
         self.store.archive(int(task_id), "界面里归档")
         return {"ok": True}
 
+    def restore(self, task_id: int) -> dict:
+        """把误判、或者手滑完成的待办放回主列表。
+
+        没有这个出口的话，用户点错一次「这不是待办」就再也找不回来了 ——
+        数据还在库里，可他看不到、也点不着。
+        """
+        self.store.set_status(int(task_id), STATUS_OPEN, "用户从废件箱/已完成里恢复")
+        self._revision += 1
+        return {"ok": True}
+
+    def edit_task(self, task_id: int, title: str, due: str, location: str) -> dict:
+        """手动改一条待办。
+
+        为什么需要：解析错了一个时间，用户唯一的办法是"判误判再重新发一遍" ——
+        这太蠢了。时间用浏览器的日期时间选择器（不用记格式），留空 = 没有截止时间。
+        """
+        from ..runtime.config import config
+
+        clean = str(title or "").strip()
+        if not clean:
+            return {"ok": False, "message": "标题不能空"}
+        limit = int(config.get("title", "max_len", 200) or 200)
+        self.store.update_fields(int(task_id), {
+            "title": clean[:limit],
+            "due_at": _normalize_due(due) or None,
+            "location": str(location or "").strip()[:100] or None,
+        })
+        self._revision += 1
+        return {"ok": True}
+
+    def push_history(self) -> dict:
+        """最近推过什么。用户问"手机上怎么没收到"时，第一眼看这里。"""
+        return {"items": [{
+            "batch": str(row.get("batch") or ""),
+            "channel": str(row.get("channel") or ""),
+            "at": str(row.get("pushed_at") or ""),
+            "ok": bool(row.get("ok")),
+            "message": str(row.get("message") or "")[:120],
+        } for row in self.store.recent_pushes(limit=20)]}
+
+    # ------------------------------------------------------------------ 附件
+    def attachment_preview(self, task_id: int, path: str) -> dict:
+        """给附件出个缩略图（图片才有）。界面里光写"📎1"是没法用的。"""
+        import base64
+
+        target = self._known_attachment(task_id, path)
+        suffix = target.suffix.lower()
+        mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".bmp": "image/bmp", ".webp": "image/webp",
+                ".gif": "image/gif"}.get(suffix)
+        if not mime:
+            return {"ok": True, "image": "", "note": "这种文件没法预览，点「打开」"}
+        if target.stat().st_size > 3 * 1024 * 1024:
+            return {"ok": True, "image": "", "note": "图太大，点「打开」看原图"}
+        blob = base64.b64encode(target.read_bytes()).decode("ascii")
+        return {"ok": True, "image": f"data:{mime};base64,{blob}", "note": ""}
+
+    def open_attachment(self, task_id: int, path: str) -> dict:
+        """用系统默认程序打开附件。这是用户自己的文件，双击本来也能开。"""
+        import os
+
+        target = self._known_attachment(task_id, path)
+        os.startfile(str(target))          # 项目只支持 Windows
+        return {"ok": True}
+
+    def _known_attachment(self, task_id: int, path: str) -> Path:
+        """只允许碰**库里记着的**那个附件。
+
+        界面上传回来的路径如果直接交给系统去打开，不校验就是一个
+        "让程序打开任意文件"的后门。只认这条待办自己名下的附件。
+        """
+        wanted = str(path or "")
+        for item in self.store.list_attachments(int(task_id)):
+            if item.path != wanted:
+                continue
+            target = Path(item.path)
+            if not target.is_file():
+                raise ValueError("文件不在了（可能被移走或删掉了）")
+            return target
+        raise ValueError("这个附件不在库里")
+
     # ------------------------------------------------------------------ 环境
     def config_summary(self) -> dict:
         """界面上显示"现在什么状态"用。"""
         from ..runtime.config import config
+        from ..runtime.heartbeat import state as beat_state
         from ..runtime.sysmon import describe as mem_describe
 
+        receiver = beat_state(self.store)
         return {
             "memory": mem_describe(),
             "qq_groups": len(config.get("qq", "group_ids", []) or []),
             "push_times": config.get("push", "times", []),
             # 界面拖文件时先在前端拦一道，免得白传一遍几十 MB
             "drop_max_mb": int(config.get("ui", "drop_max_mb", 12) or 12),
+            # ⚠️ 这是**状态**，不是配置：收消息的进程还在不在。
+            # 上面那个 qq_groups 只是"你配了几个群"，跟进程活没活着没关系。
+            "receiver": receiver,
+            "qq_enabled": bool(config.get("qq", "enabled")),
             "db": str(getattr(self.store, "conn", "")),
         }
 

@@ -119,6 +119,34 @@ class Store(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def update_fields(self, task_id: int, fields: dict) -> None:
+        """改标题 / 时间 / 地点这些**内容**字段。界面上手改用的。
+
+        和 set_status 分开是有意的：状态变化有副作用要记
+        （完成时间、误判原因、归档原因），内容修改没有。
+        混成一个万能 update，以后就没人说得清"这条被谁改过什么"。
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def search(self, keyword: str, limit: int = 100) -> list[Task]:
+        """按关键字找待办。标题、正文、地点、原始片段都要能搜到。"""
+        raise NotImplementedError
+
+    @abstractmethod
+    def set_meta(self, key: str, value: str) -> None:
+        """记一笔程序自己的状态（现在用来存"收消息的进程还活着"的心跳）。
+
+        为什么不写进 config.toml：那是**用户**的文件。
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_meta(self, key: str, default: str = "") -> str:
+        """读 set_meta 存的东西。没有就返回 default。"""
+        raise NotImplementedError
+
+    @abstractmethod
     def log_dropped(self, draft: TaskDraft, reason: str) -> None:
         """废件箱 + 删除记录。这些记录就是日后调规则的案例，不许丢。
 

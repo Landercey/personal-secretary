@@ -54,6 +54,7 @@ from app.pipeline.chat_filter import ChatNoiseEnricher           # noqa: E402
 from app.pipeline.file_enricher import FileEnricher              # noqa: E402
 from app.pipeline.parse_enricher import RuleParseEnricher        # noqa: E402
 from app.runtime.config import config, default_data_dir          # noqa: E402
+from app.runtime import heartbeat                                # noqa: E402
 from app.runtime.plugins import (                                # noqa: E402
     Registry, load as load_plugins, plugin_dir,
 )
@@ -273,6 +274,12 @@ def run_qq(store, pipeline) -> int:
         while True:
             time.sleep(2)
             state = source.status()
+            # 每 10 秒往库里记一笔"我还活着"（heartbeat 自己节流）。
+            # 界面靠它区分"你没配 QQ"和"配了但进程没起来" ——
+            # 没有这个，界面左下角那个"11 个群"会一直显示得一切正常。
+            heartbeat.beat(store, (
+                f"登录号 {state.get('self_id') or '?'}｜收到 {state.get('received', 0)}"
+                if state.get("connected") else "等 NapCat 连上来"))
             if not state.get("running"):
                 continue
             if state.get("connected"):

@@ -73,12 +73,22 @@ nav .gap { height: 14px }
 
 /* pre-line: 下面几行状态是拿 \n 拼的，默认会把换行吞成一个空格 */
 .foot { padding: 10px 6px 0; font-size: 11px; line-height: 1.7; color: var(--text-3); white-space: pre-line }
+/* 收消息的进程没在跑 —— 这是**状态**，得让它显眼，不然用户只会觉得"发了没反应" */
+.foot.warn { color: var(--today) }
 
 /* ---------- 中间：列表 ---------- */
 main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22px 20px 0 8px }
 .head { display: flex; align-items: baseline; gap: 12px; padding: 0 4px 14px }
 .head h1 { font-size: 21px; font-weight: 600; margin: 0; letter-spacing: .2px }
 .head .sub { font-size: 12.5px; color: var(--text-3) }
+.head .hint { font-size: 12px; color: var(--today) }
+/* 搜索框贴右边，不抢标题的位置 */
+#q {
+  margin-left: auto; width: 190px; padding: 6px 10px; font-size: 12.5px;
+  border: 1px solid var(--line); border-radius: 7px; background: #fcfcfd;
+  color: var(--text); outline: none;
+}
+#q:focus { border-color: var(--accent); background: #fff; width: 240px }
 
 .list { flex: 1; overflow-y: auto; padding: 2px 4px 24px; }
 .list::-webkit-scrollbar, nav::-webkit-scrollbar { width: 9px }
@@ -103,6 +113,9 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
   cursor: pointer; transition: border-color .12s, background .12s;
 }
 .tick:hover { border-color: var(--accent); background: var(--accent-bg) }
+/* 废件箱里的：点勾没意义，但又不想让那一列空着不好看 */
+.tick.ghost { border-style: dashed; border-color: #e2e2e6; cursor: default }
+.tick.ghost:hover { border-color: #e2e2e6; background: none }
 
 .body { flex: 1; min-width: 0 }
 .title { font-size: 14px; line-height: 1.45; word-break: break-word }
@@ -172,6 +185,18 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
   font-size: 12.5px; line-height: 1.75; color: var(--text-2); white-space: pre-wrap; word-break: break-word
 }
 .quote em { display: block; font-style: normal; font-size: 11px; color: var(--text-3); margin-bottom: 5px }
+
+/* 附件：光写"📎1"是没法用的，得能看见、能打开 */
+.files { margin-top: 14px; display: flex; flex-direction: column; gap: 8px }
+.file {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 9px 11px; border-radius: 8px; background: #fafafa;
+}
+.file .finfo { flex: 1; min-width: 0 }
+.file .finfo b { display: block; font-weight: 500; font-size: 12.5px; word-break: break-all }
+.file .finfo span { font-size: 11px; color: var(--text-3) }
+.file .fimg { flex-basis: 100% }
+.file .fimg img { max-width: 100%; border-radius: 6px; display: block; margin-top: 6px }
 
 button {
   font: inherit; font-size: 12.5px; padding: 7px 13px; border-radius: 7px;
@@ -307,7 +332,12 @@ details.adv[open] > summary::before { content: "▾ " }
   </aside>
 
   <main>
-    <div class="head"><h1 id="viewTitle">今天</h1><span class="sub" id="viewSub"></span></div>
+    <div class="head">
+      <h1 id="viewTitle">今天</h1>
+      <span class="sub" id="viewSub"></span>
+      <span class="hint" id="viewHint"></span>
+      <input id="q" type="search" placeholder="搜标题、正文、地点、原话…">
+    </div>
     <div id="guide"></div>
     <div class="list" id="list"></div>
   </main>
@@ -350,6 +380,7 @@ const VIEWS = [
   { id: 'overdue',  label: '逾期' },
   { gap: true },
   { id: 'open',     label: '全部未完成' },
+  { id: 'done',     label: '已完成' },
   { id: 'archive',  label: '已归档' },
   { id: 'junk',     label: '废件箱' },
 ];
@@ -375,6 +406,10 @@ let guideStamp = '';
 let dropped = null;         // 拖进来的东西：{id,name,size} 或 {text}
 let dropMaxMb = 12;         // 拖进来的文件上限，后端也会拦一道
 let syncNotes = [];         // 最近一次「同步」冒出来的提醒，显示完就留着
+let keyword = '';           // 搜索词。非空时中间那列显示搜索结果
+let editing = false;        // 详情面板是不是在编辑模式
+let jumped = false;         // 第一次进来做过"今天没安排"的自动跳转没有
+let viewHint = '';          // 标题旁边那句小提示
 
 const $ = (id) => document.getElementById(id);
 
@@ -425,6 +460,10 @@ function renderNav() {
     a.onclick = () => {
       current = a.dataset.view;
       selected = null;
+      editing = false;
+      keyword = '';                 // 点分组 = 退出搜索
+      viewHint = '';                // "今天没安排"那句也别赖着
+      $('q').value = '';
       setPanel(null);
       refresh();
     };
@@ -441,8 +480,10 @@ function renderList() {
     return;
   }
   box.innerHTML = items.map(t => `
-    <div class="row ${t.id === selected ? 'sel' : ''}" data-id="${t.id}">
-      <i class="tick" data-done="${t.id}" title="标记完成"></i>
+    <div class="row ${String(t.id) === String(selected) ? 'sel' : ''}" data-id="${esc(String(t.id))}">
+      ${t.junk
+        ? '<i class="tick ghost" title="这是废件箱里的"></i>'
+        : `<i class="tick" data-done="${t.id}" title="标记完成"></i>`}
       <div class="body">
         <div class="title">${esc(t.title)}</div>
         <div class="meta">
@@ -457,7 +498,12 @@ function renderList() {
   box.querySelectorAll('.row').forEach(row => {
     row.onclick = (e) => {
       if (e.target.dataset.done) return;
-      selected = Number(row.dataset.id);
+      // 废件箱那条的 id 是字符串（"task-7" / "text-3"），待办是数字，
+      // 所以统一按字符串找，别用 Number()。
+      const found = items.find(x => String(x.id) === row.dataset.id);
+      if (!found) return;
+      selected = found.id;
+      editing = false;              // 换一条就退出编辑，别把改到一半的串到另一条上
       setPanel('detail');
       renderList();
       renderPanel(true);
@@ -497,9 +543,36 @@ function renderPanel(force) {
 }
 
 /* ---------- 待办详情 ---------- */
+function editTask() {
+  editing = true;
+  renderPanel(true);
+}
+
 function drawDetail() {
-  const t = items.find(x => x.id === selected);
+  const t = items.find(x => String(x.id) === String(selected));
   if (!t) { $('detail').classList.remove('open'); panel = null; drawnPanel = null; return; }
+  if (editing) return drawEdit(t);
+
+  // 废件箱里的东西：不推送、不进主列表。这里要能看出"它为什么在这儿"，
+  // 而且如果是用户自己点错的，得能给条回来的路。
+  if (t.junk) {
+    $('detailInner').innerHTML = `
+      <h2>${esc(t.title)}</h2>
+      <div class="kv"><b>为什么在这</b><span>${esc(t.due)}</span></div>
+      ${t.source ? `<div class="kv"><b>来源</b><span>${esc(t.source)}</span></div>` : ''}
+      <p class="hint" style="margin-top:14px">
+        这里的东西不推送、不进主列表。留着是为了让你回头看"这条为什么没变成待办"，
+        也是以后调规则的案例。</p>
+      <div class="acts">
+        ${t.junkKind === 'task'
+          ? '<button class="primary block" id="btnRestore">恢复成待办</button>'
+          : ''}
+      </div>`;
+    const back = $('btnRestore');
+    if (back) back.onclick = () => act('restore', t.junkId);
+    return;
+  }
+
   $('detailInner').innerHTML = `
     <h2>${esc(t.title)}</h2>
     <div class="kv"><b>时间</b><span>${esc(t.due)}</span></div>
@@ -508,20 +581,83 @@ function drawDetail() {
     ${t.attachments ? `<div class="kv"><b>附件</b><span>${t.attachments} 个</span></div>` : ''}
     ${t.quoted ? `<div class="quote"><em>原始消息（判错了你能看出为什么）</em>${esc(t.quoted)}</div>` : ''}
     ${t.detail ? `<div class="quote">${esc(t.detail).slice(0, 800)}</div>` : ''}
+    ${(t.files && t.files.length) ? '<div class="files" id="files"></div>' : ''}
     <div class="acts">
-      <button class="primary block" onclick="act('complete')">标记完成</button>
+      ${t.done
+        ? '<button class="primary block" id="btnRestore">撤销完成，放回列表</button>'
+        : `<button class="primary block" onclick="act('complete')">标记完成</button>`}
       <div class="two">
+        <button onclick="editTask()">改内容</button>
         <button onclick="act('archive')">归档</button>
-        <button onclick="act('drop')">这不是待办</button>
       </div>
+      <button class="block" onclick="act('drop')">这不是待办</button>
     </div>`;
+  const back = $('btnRestore');
+  if (back) back.onclick = () => act('restore', t.id);
+  if (t.files && t.files.length) renderFiles(t);
 }
 
-async function act(kind) {
-  if (!selected) return;
-  const res = await call(kind, selected);
+function drawEdit(t) {
+  $('detailInner').innerHTML = `
+    <div class="panelhead"><h2>改内容</h2></div>
+    <p class="note">解析错了就这儿改 —— 不用"判误判、再重新发一遍"。</p>
+    <div class="field"><label for="eTitle">标题</label>
+      <input type="text" id="eTitle" value="${esc(t.title)}"></div>
+    <div class="field"><label for="eDue">截止时间</label>
+      <input type="datetime-local" id="eDue" value="${esc(t.due_raw || '')}">
+      <p class="hint">留空 = 没有截止时间。改完这里，同一条消息再来也不会重复建。</p></div>
+    <div class="field"><label for="eLoc">地点</label>
+      <input type="text" id="eLoc" value="${esc(t.location)}"></div>
+    <div class="acts">
+      <button class="primary block" id="btnSaveEdit">保存</button>
+      <button class="block" id="btnCancelEdit">取消</button>
+    </div>`;
+  $('btnCancelEdit').onclick = () => { editing = false; renderPanel(true); };
+  $('btnSaveEdit').onclick = async () => {
+    const res = await call('edit_task', t.id, $('eTitle').value,
+                           $('eDue').value, $('eLoc').value);
+    if (!res) return;
+    if (!res.ok) { toast(res.message || '没改成'); return; }
+    editing = false;
+    toast('已保存');
+    refresh();
+  };
+}
+
+async function renderFiles(t) {
+  const box = $('files');
+  if (!box) return;
+  box.innerHTML = t.files.map((f, index) => `
+    <div class="file">
+      <div class="finfo"><b>${esc(f.name)}</b><span>${fmtSize(f.size)}</span></div>
+      <button data-open="${index}">打开</button>
+      <div class="fimg" id="fimg-${index}"></div>
+    </div>`).join('');
+  box.querySelectorAll('[data-open]').forEach(btn => {
+    btn.onclick = async () => {
+      const file = t.files[Number(btn.dataset.open)];
+      const res = await call('open_attachment', t.id, file.path);
+      if (res) toast('已用系统默认程序打开');
+    };
+  });
+  // 只有图片才去要缩略图 —— 别的类型问了也只会回一句"没法预览"
+  for (let index = 0; index < t.files.length; index += 1) {
+    const file = t.files[index];
+    if (!/\.(png|jpe?g|bmp|webp|gif)$/i.test(file.name)) continue;
+    const res = await call('attachment_preview', t.id, file.path);
+    const slot = $(`fimg-${index}`);
+    if (slot && res && res.image) slot.innerHTML = `<img src="${res.image}" alt="">`;
+    else if (slot && res && res.note) slot.innerHTML = `<span class="hint">${esc(res.note)}</span>`;
+  }
+}
+
+async function act(kind, id) {
+  const target = id === undefined ? selected : id;
+  if (target === undefined || target === null || target === '') return;
+  const res = await call(kind, target);
   if (!res) return;                       // 失败了就别假装成功、也别清空选中
-  toast({ complete: '已完成', archive: '已归档', drop: '已记为误判' }[kind]);
+  toast({ complete: '已完成', archive: '已归档', drop: '已记为误判',
+          restore: '已放回列表' }[kind] || '好了');
   selected = null;
   setPanel(null);
   refresh();
@@ -824,6 +960,25 @@ function drawSettings() {
   $('btnSave').onclick = saveSettings;
   wireUnlock();
 
+  // 「推送到手机」那一页底部挂一条推送记录。
+  // 用户问"我手机上怎么没收到"时第一眼看这里 —— 而不是让他去命令行敲 --next-push。
+  const pushPane = $('detailInner').querySelector('.tabpane[data-g="group_push"]');
+  if (pushPane) {
+    pushPane.insertAdjacentHTML('beforeend',
+      `<details class="sec"><summary>最近推过什么<i>手机上没收到时先看这里</i></summary>
+         <div id="pushLog"><p class="hint">正在读…</p></div></details>`);
+    call('push_history').then(res => {
+      const box = $('pushLog');
+      if (!box) return;
+      const rows = (res && res.items) || [];
+      box.innerHTML = rows.length
+        ? rows.map(r => `<div class="kv"><b>${r.ok ? '✓' : '✗'}</b><span>${
+            esc(r.at.slice(5, 16))}｜${esc(r.channel)}｜${
+            esc(r.message || r.batch)}</span></div>`).join('')
+        : '<p class="hint">还没推过。到点会自动推。</p>';
+    });
+  }
+
   // 从"还没弄完这几步"点进来时，跳到对应的那一段并展开它
   if (openSection) {
     const target = $('detailInner').querySelector(`details[data-section="${openSection}"]`);
@@ -922,30 +1077,54 @@ async function renderGuide() {
 /* ---------- 统一刷新 ---------- */
 async function refresh() {
   const mine = ++refreshToken;
-  const view = current === 'junk' ? null : current;
-  let fresh = [];
-  if (view) {
-    const res = await call('tasks', view);
+  const load = async (fn) => {
+    const res = await call(...fn);
+    return res;
+  };
+
+  // 搜索优先：搜的时候不管当前停在哪个分组
+  if (keyword) {
+    const res = await load(['search', keyword]);
     if (mine !== refreshToken) return;      // 有人抢先刷新了，我这份作废
-    fresh = (res && res.items) || [];
-  } else {
-    const res = await call('dropped');
+    items = (res && res.items) || [];
+  } else if (current === 'junk') {
+    const res = await load(['dropped']);
     if (mine !== refreshToken) return;
-    fresh = ((res && res.items) || []).map(d => ({
-      id: 'junk-' + d.drop_id, title: d.text, due: d.reason,
-      urgency: 'later', location: '', source: d.source_name || '',
-      sender: '', quoted: '', detail: '', attachments: 0, junk: true,
+    // 废件箱是**两样东西合起来的**：你标成误判的待办 + 被规则拦下的原文。
+    // 以前只显示后者，所以点了"这不是待办"那条就找不回来了。
+    items = ((res && res.items) || []).map(d => ({
+      id: `junk-${d.kind}-${d.id}`, junkId: d.id, junkKind: d.kind,
+      title: d.text, due: d.reason, urgency: 'later', location: '',
+      source: d.source || '', sender: '', quoted: '', detail: '',
+      attachments: 0, files: [], junk: true,
     }));
+  } else {
+    const res = await load(['tasks', current]);
+    if (mine !== refreshToken) return;
+    items = (res && res.items) || [];
   }
-  items = fresh;
 
   const c = await call('counts');
   if (mine !== refreshToken) return;
   counts = c || counts;
 
+  // 第一眼别给一片白：默认落在「今天」，要是今天空着，自动退到「全部未完成」。
+  // 只在**第一次**这么做 —— 之后用户自己点回「今天」，就别再把他弹走。
+  if (!jumped && !keyword) {
+    jumped = true;
+    if (current === 'today' && !items.length && (counts.open || 0) > 0) {
+      current = 'open';
+      viewHint = '今天没有安排，下面是全部未完成的';
+      const res = await load(['tasks', current]);
+      if (mine !== refreshToken) return;
+      items = (res && res.items) || [];
+    }
+  }
+
   const meta = VIEWS.find(v => v.id === current) || {};
-  $('viewTitle').textContent = meta.label || '今天';
+  $('viewTitle').textContent = keyword ? `搜索：${keyword}` : (meta.label || '今天');
   $('viewSub').textContent = items.length ? `${items.length} 条` : '';
+  $('viewHint').textContent = keyword ? '' : viewHint;
   renderNav();
   renderList();
   renderPanel(false);
@@ -958,6 +1137,24 @@ async function refresh() {
   const bad = list.filter(p => !p.ok);
   if (env.drop_max_mb) dropMaxMb = Number(env.drop_max_mb) || dropMaxMb;
   const parts = [];
+
+  // 收消息的进程到底还活着没有 —— 这是**状态**，
+  // 和下面那个"你配了几个群"完全不是一回事。
+  // 以前界面上只有后者，所以进程没起来时界面照样显示得一切正常。
+  let receiverBad = false;
+  if (env.qq_enabled) {
+    const receiver = env.receiver || {};
+    if (receiver.alive) {
+      parts.push(`✅ ${receiver.detail || 'QQ 接收中'}`);
+    } else {
+      receiverBad = true;
+      const waited = Math.max(1, Math.round((receiver.age_seconds || 0) / 60));
+      parts.push(receiver.age_seconds == null
+        ? '⚠️ QQ 接收没在跑（要另外开 python run.py --qq）'
+        : `⚠️ QQ 接收已经 ${waited} 分钟没动静了`);
+    }
+  }
+
   if (env.push_times && env.push_times.length) {
     parts.push(`推送 ${env.push_times.join(' / ')}`);
   }
@@ -970,6 +1167,7 @@ async function refresh() {
     $('foot').title = list.map(p => `${p.title}：正常`).join('\n');
   }
   $('foot').textContent = parts.join('\n');
+  $('foot').classList.toggle('warn', receiverBad);
 }
 
 /* ---------- 接线 ---------- */
@@ -998,6 +1196,20 @@ window.addEventListener('pywebviewready', () => {
   };
 
   wireDrop();
+
+  // 搜索：输入停 250 毫秒再查，别每敲一个字就打一次桥
+  let searchTimer = null;
+  $('q').oninput = () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      keyword = $('q').value.trim();
+      selected = null;
+      editing = false;
+      setPanel(null);
+      refresh();
+    }, 250);
+  };
+
   refresh();
   // 后台收了新消息时自动刷新：定时重取，比做推送通道简单得多
   setInterval(refresh, 5000);
