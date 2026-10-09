@@ -115,3 +115,38 @@ def create_shortcut(root: Path | None = None) -> tuple[bool, str]:
                             name=SHORTCUT_NAME)
     ok, output = _run_powershell(script)
     return ok, output
+
+
+# 从 PowerShell 的输出里把目标路径捞出来的标记。
+# 为什么要标记：PowerShell 有时会在输出前后混进 CLIXML（首次加载模块的进度记录），
+# 直接取"最后一行"会被那些噪声顶掉。
+_TARGET_MARK = "PSTARGET:"
+
+
+def resolve_shortcut(path: Path) -> Path | None:
+    """把 `.lnk` 快捷方式解析成它真正指向的文件。解析不出来返回 None。
+
+    **为什么需要**：用户从桌面上拖进来的常常是快捷方式（1 KB 的二进制指路牌），
+    它自己当然一个字的正文都没有。Windows 双击时会跟过去，
+    我们也得跟过去 —— 不然用户只会想"我拖的就是那个 PPT，怎么读不出来"。
+
+    **为什么用 PowerShell 而不是自己解 .lnk 的二进制**：快捷方式有十几种
+    （MSI 广告式、UNC 路径、相对路径、控制面板项……），自己写总有一种解不出来；
+    而 WScript.Shell 就是 Windows 自己的实现，它解不出来的通常也没救了。
+    """
+    quoted = str(path).replace("'", "''")
+    script = (
+        "$ErrorActionPreference = 'Stop'\n"
+        "$ProgressPreference = 'SilentlyContinue'\n"
+        "$shell = New-Object -ComObject WScript.Shell\n"
+        f"$link = $shell.CreateShortcut('{quoted}')\n"
+        f"Write-Output ('{_TARGET_MARK}' + $link.TargetPath)\n"
+    )
+    ok, output = _run_powershell(script)
+    if not ok:
+        return None
+    for line in output.splitlines():
+        if line.startswith(_TARGET_MARK):
+            value = line[len(_TARGET_MARK):].strip()
+            return Path(value) if value else None
+    return None

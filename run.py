@@ -168,14 +168,21 @@ def explicit_file_message(source, path: str):
     return message
 
 
-def extract_preview(path: str) -> str:
-    """只把文件里的字读出来，不入库（界面上「只看写了什么」用）。"""
+def extract_preview(path: str) -> dict:
+    """只把文件里的字读出来，不入库（界面上「只看写了什么」用）。
+
+    连**为什么没读出来**一起返回。只回一个空字符串的话，用户看到的
+    永远是"这个文件里没读出文字"，分不清是扫描件、旧版 Office、
+    还是不支持的格式 —— 那他就只能来问作者。
+    """
     from app.pipeline.extract import extract_text
 
     target = Path(path)
     if not target.is_file():
-        return ""
-    return extract_text(target).text or ""
+        return {"ok": False, "text": "", "note": "文件不在了", "method": ""}
+    result = extract_text(target)
+    return {"ok": bool(result.ok), "text": result.text or "",
+            "note": result.note or "", "method": result.method or ""}
 
 
 def read_file(path: str) -> int:

@@ -277,25 +277,63 @@ class Api:
         为什么先挪：暂存区是临时的，待办要是指着暂存区，哪天清理就把附件清了。
         挪的是同一个盘、同一次改名，不花时间也不占双份空间。
         """
+        import shutil
+
         from ..runtime.config import default_data_dir
 
-        path = self._drop_path(token)
+        staged = self._drop_path(token)
+        path, _note = self._dropped_file(token)
         archive = default_data_dir() / "attachments"
         archive.mkdir(parents=True, exist_ok=True)
-        target = archive / path.name
+        # 文件名沿用暂存的那个"时间戳-指纹-原名"，重名也不会互相覆盖
+        prefix = "-".join(staged.name.split("-", 2)[:2])
+        target = archive / f"{prefix}-{path.name}"
         try:
-            path.replace(target)
+            if path == staged:
+                path.replace(target)          # 我们自己的暂存副本，挪走
+            else:
+                shutil.copy2(path, target)    # 快捷方式指向的是用户的原件，只复制
         except OSError:
-            target = path          # 挪不动就用原地，总比入库失败强
+            target = path                     # 挪不动就用原地，总比入库失败强
         added = self._act("ingest_file", str(target)) or 0
         self._revision += 1
         return {"ok": True, "added": added}
 
     def peek_drop(self, token: str) -> dict:
-        """只把文件里的字读出来，不入库（界面上"只看写了什么"）。"""
+        """只把文件里的字读出来，不入库（界面上"只看写了什么"）。
+
+        连**为什么没读出来**一起返回。只回一个空字符串的话，
+        用户看到的永远是"这个文件里没读出文字"，
+        分不清是扫描件、旧版 Office，还是不支持的格式。
+        """
+        path, note = self._dropped_file(token)
+        result = self._act("read_file_text", str(path))
+        if not isinstance(result, dict):          # 兜底：老的 action 只返回字符串
+            result = {"ok": bool(result), "text": str(result or ""), "note": ""}
+        text = str(result.get("text") or "")
+        return {"ok": True, "chars": len(text), "text": text[:1500],
+                "note": str(result.get("note") or ""),
+                "method": str(result.get("method") or ""),
+                "source": note}
+
+    def _dropped_file(self, token: str) -> tuple[Path, str]:
+        """暂存的那份 → 真正要读的文件。
+
+        拖进来的经常是**桌面上的快捷方式**（.lnk，1 KB 的指路牌），
+        它自己当然没字。Windows 双击会跟过去，这里也跟过去。
+        """
         path = self._drop_path(token)
-        text = str(self._act("read_file_text", str(path)) or "")
-        return {"ok": True, "chars": len(text), "text": text[:1500]}
+        if path.suffix.lower() != ".lnk":
+            return path, ""
+
+        from ..runtime.desktop import resolve_shortcut
+
+        target = resolve_shortcut(path)
+        if target is None:
+            raise ValueError("这是一份快捷方式（.lnk），但读不出它指向哪儿")
+        if not target.is_file():
+            raise ValueError(f"这份快捷方式指向的不是文件：{target}")
+        return target, f"这是一份快捷方式，真正读的是：{target}"
 
     def discard_drop(self, token: str) -> dict:
         """算了，不处理了 —— 把暂存的那份删掉。"""

@@ -186,5 +186,104 @@ class TestDropStaging(unittest.TestCase):
             config_module.config = original
 
 
+def make_lnk(target: Path, lnk: Path) -> bool:
+    """造一个**真的** .lnk（交给 Windows 自己的 WScript.Shell 去写）。
+
+    为什么要真造而不是塞几个字节：我们解析靠的也是 Windows 的实现，
+    假文件测不出"链路通不通"。造不出来（非 Windows / 没 PowerShell）就返回 False，
+    调用方 skip —— 这个项目只支持 Windows，但测试不该在别处直接炸。
+    """
+    import base64
+    import subprocess
+
+    if os.name != "nt":
+        return False
+    quote = lambda value: str(value).replace("'", "''")      # noqa: E731
+    script = (
+        "$ProgressPreference = 'SilentlyContinue'\n"
+        "$shell = New-Object -ComObject WScript.Shell\n"
+        f"$link = $shell.CreateShortcut('{quote(lnk)}')\n"
+        f"$link.TargetPath = '{quote(target)}'\n"
+        "$link.Save()\n"
+    )
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive",
+                        "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
+                       capture_output=True, timeout=60, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return lnk.is_file()
+
+
+class TestShortcutIsFollowed(unittest.TestCase):
+    """用户从桌面拖进来的常常是**快捷方式**，不是文件本身。
+
+    真出过这事：拖了一个"抗美援朝军事理论课-PPT.lnk"（1 KB 的指路牌），
+    程序说"没读出文字" —— 它当然没字。Windows 双击会跟过去，我们也得跟过去。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self._old_home = os.environ.get("SECRETARY_HOME")
+        os.environ["SECRETARY_HOME"] = str(self.base / "home")
+        self.real = self.base / "讲座 PPT.pptx"
+        self.real.write_bytes(b"PK\x03\x04 fake pptx")
+        self.lnk = self.base / "讲座 PPT.lnk"
+        if not make_lnk(self.real, self.lnk):
+            self.tmp.cleanup()
+            self.skipTest("造不出 .lnk（这台机器上没有 PowerShell？）")
+
+        import base64
+
+        self.seen: list[str] = []
+        self.api = Api(None, actions={
+            "ingest_file": lambda path: (self.seen.append(path), 1)[1],
+            "read_file_text": lambda path: (self.seen.append(path), {
+                "ok": True, "text": "幻灯片里的字",
+                "note": "", "method": "stdlib.pptx"})[1],
+        })
+        self.staged = self.api.stage_drop(
+            self.lnk.name, base64.b64encode(self.lnk.read_bytes()).decode("ascii"))
+
+    def tearDown(self):
+        if self._old_home is None:
+            os.environ.pop("SECRETARY_HOME", None)
+        else:
+            os.environ["SECRETARY_HOME"] = self._old_home
+        self.tmp.cleanup()
+
+    def test_resolve_finds_the_real_file(self):
+        from app.runtime.desktop import resolve_shortcut
+
+        self.assertEqual(resolve_shortcut(self.lnk), self.real)
+
+    def test_peek_reads_the_target_not_the_pointer(self):
+        result = self.api.peek_drop(self.staged["id"])
+
+        self.assertEqual(result["text"], "幻灯片里的字")
+        self.assertIn("快捷方式", result["source"])          # 得告诉用户读了哪个
+        self.assertEqual(self.seen[-1], str(self.real))       # 读的是真文件
+
+    def test_ingest_copies_the_target_and_keeps_the_original(self):
+        self.api.ingest_drop(self.staged["id"])
+        archived = Path(self.seen[-1])
+
+        self.assertTrue(archived.is_file())
+        self.assertEqual(archived.parent.name, "attachments")
+        self.assertEqual(archived.suffix, ".pptx")            # 附件是 PPT，不是 .lnk
+        self.assertTrue(self.real.is_file())                  # 用户的原件一动不动
+
+    def test_normal_file_is_not_touched(self):
+        """只有 .lnk 才跟；普通文件还是原来那条路（挪暂存件）。"""
+        import base64
+
+        staged = self.api.stage_drop(
+            "笔记.txt", base64.b64encode("买牛奶".encode()).decode("ascii"))
+        self.api.ingest_drop(staged["id"])
+        self.assertTrue(Path(self.seen[-1]).name.endswith("笔记.txt"))
+
+
 if __name__ == "__main__":
     unittest.main()
