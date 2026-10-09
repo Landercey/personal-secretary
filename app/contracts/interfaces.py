@@ -105,7 +105,8 @@ class Store(ABC):
           open      没做完的
           today     今天到期
           tomorrow  明天到期
-          week      七天内到期
+          week      本周到期（自然周，周一到周日）
+          next_week 下周到期
           overdue   已经过期还没做
           archive   已归档
           junk      废件箱

@@ -62,6 +62,7 @@ python run.py --schedule          启动定时推送（Ctrl+C 停止）
 python run.py --setup --account 你的QQ号   只装 NapCat（约 2.5 分钟）
 python run.py --deploy --account 你的QQ号  装 + 启动（先起接收端再起 QQ）
 python run.py --ui                打开界面
+python run.py --shortcut          在桌面建快捷方式
 python run.py --check-qq          看 QQ 接入的配置和状态
 python run.py --qq                启动 QQ 接收（Ctrl+C 停止）
 python run.py --done 3            标记某条完成

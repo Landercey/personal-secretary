@@ -59,7 +59,11 @@ class Api:
 
     # ------------------------------------------------------------------ 读
     def tasks(self, view: str = "open") -> dict:
-        """一个分组下的待办。view: open/today/tomorrow/week/overdue/archive/junk"""
+        """一个分组下的待办。
+
+        view: open / today / tomorrow / **week（本周一~周日）** /
+              **next_week（下周一~周日）** / overdue / archive / junk
+        """
         rows = self.store.list_tasks(view, limit=500)
         items = []
         for task in rows:
@@ -88,6 +92,7 @@ class Api:
             "today": self.store.count_tasks("today"),
             "tomorrow": self.store.count_tasks("tomorrow"),
             "week": self.store.count_tasks("week"),
+            "next_week": self.store.count_tasks("next_week"),
             "overdue": self.store.count_tasks("overdue"),
             "archive": self.store.count_tasks("archive"),
         }

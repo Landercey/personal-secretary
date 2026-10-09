@@ -22,13 +22,26 @@ from app.contracts.models import STATUS_DONE, SOURCE_MANUAL, Message, TaskDraft 
 from app.store.repository import SqliteStore, open_database                       # noqa: E402
 
 ALL_VIEWS = ("open", "today", "tomorrow", "week", "overdue",
-             "archive", "junk", "all")
+             "next_week", "archive", "junk", "all")
 
 
 def stamp(days: int, hour: int = 9) -> str:
     moment = datetime.now() + timedelta(days=days)
     return moment.replace(hour=hour, minute=0, second=0,
                           microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def this_monday() -> "datetime":
+    """本周一（周一是一周的第一天）。"""
+    now = datetime.now()
+    return (now - timedelta(days=now.weekday())).replace(
+        hour=9, minute=0, second=0, microsecond=0)
+
+
+def on(day_offset_from_this_monday: int, hour: int = 9) -> str:
+    """从"本周一"往后数第几天，返回时间字符串。"""
+    moment = this_monday() + timedelta(days=day_offset_from_this_monday)
+    return moment.replace(hour=hour).strftime("%Y-%m-%d %H:%M:%S")
 
 
 class TestViews(unittest.TestCase):
@@ -85,7 +98,6 @@ class TestViews(unittest.TestCase):
     def test_week_includes_today_but_not_last_week(self):
         titles = {t.title for t in self.store.list_tasks("week")}
         self.assertIn("今天的事", titles)
-        self.assertIn("后天的事", titles)
         self.assertNotIn("上周欠的", titles)
 
     def test_open_excludes_done(self):
@@ -101,6 +113,57 @@ class TestViews(unittest.TestCase):
 
     def test_all_view_sees_everything(self):
         self.assertEqual(self.store.count_tasks("all"),
+                         self.store.count_tasks("open"))
+
+
+class TestCalendarWeeks(unittest.TestCase):
+    """本周/下周按**自然周**算，周一是一周的第一天。
+
+    为什么强调：第一版写的是"今天往后七天"（滚动窗口），于是周三打开
+    "本周"会一路排到下周三 —— 那不是用户说的"本周"。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = SqliteStore(open_database(Path(self.tmp.name) / "w.db"))
+        message = Message(msg_id="m:1", source_kind=SOURCE_MANUAL, text="x")
+        self.store.save_message(message)
+        # 用"本周一"当原点，不管哪天跑结果都一样
+        self.store.save_drafts(message, [
+            TaskDraft(title="本周一的事", due_at=on(0)),
+            TaskDraft(title="本周日的事", due_at=on(6)),
+            TaskDraft(title="下周一的事", due_at=on(7)),
+            TaskDraft(title="下周日的事", due_at=on(13)),
+            TaskDraft(title="下下周一的事", due_at=on(14)),
+            TaskDraft(title="上周一的事", due_at=on(-7, hour=23)),
+        ])
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def titles(self, view: str) -> set[str]:
+        return {t.title for t in self.store.list_tasks(view, limit=500)}
+
+    def test_week_is_monday_through_sunday(self):
+        week = self.titles("week")
+        self.assertIn("本周一的事", week)
+        self.assertIn("本周日的事", week)
+        self.assertNotIn("上周一的事", week)
+        self.assertNotIn("下周一的事", week)
+
+    def test_next_week_is_the_following_monday_through_sunday(self):
+        nxt = self.titles("next_week")
+        self.assertIn("下周一的事", nxt)
+        self.assertIn("下周日的事", nxt)
+        self.assertNotIn("本周日的事", nxt)
+        self.assertNotIn("下下周一的事", nxt)
+
+    def test_the_two_weeks_do_not_overlap(self):
+        self.assertEqual(self.titles("week") & self.titles("next_week"), set())
+
+    def test_unknown_view_still_falls_back(self):
+        self.assertEqual(self.store.count_tasks("next_week_"),
                          self.store.count_tasks("open"))
 
 

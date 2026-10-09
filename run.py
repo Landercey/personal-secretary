@@ -433,7 +433,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="私人秘书（开发期命令行）")
     parser.add_argument("text", nargs="*", help="要录入的文字")
     parser.add_argument("--list", nargs="?", const="open", default=None,
-                        help="列出待办：open/today/tomorrow/week/overdue/archive/junk")
+                        help="列出待办：open/today/tomorrow/week/next_week/"
+                             "overdue/archive/junk")
     parser.add_argument("--done", type=int, help="把某条标记为完成")
     parser.add_argument("--drop", type=int, help="把某条标记为误判（日后调规则的案例）")
     parser.add_argument("--digest", action="store_true", help="生成汇总并打印")
@@ -455,6 +456,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="要登录的 QQ 号（NapCat 按号找配置文件，必须给）")
     parser.add_argument("--dir", help="NapCat 装到哪个目录（默认 data/napcat）")
     parser.add_argument("--ui", action="store_true", help="打开界面窗口")
+    parser.add_argument("--shortcut", action="store_true",
+                        help="在桌面创建快捷方式")
     parser.add_argument("--file", help="把一个文件（图片/Word/PPT/PDF）变成待办")
     parser.add_argument("--read", help="只看这个文件能提出什么字，不入库")
     parser.add_argument("--stats", action="store_true", help="看统计")
@@ -550,6 +553,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.ui:
         return run_ui(store)
+
+    if args.shortcut:
+        from app.runtime.desktop import create_shortcut
+
+        ok, message = create_shortcut()
+        print(("已创建：" if ok else "创建失败：") + message)
+        if ok:
+            print("注意：快捷方式只打开界面；后台收消息要另外跑 python run.py --qq")
+        return 0 if ok else 1
 
     if args.deploy or args.setup:
         account = args.account

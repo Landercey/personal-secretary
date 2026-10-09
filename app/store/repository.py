@@ -318,18 +318,35 @@ class SqliteStore(Store):
 
         想改"今天"的口径（比如把逾期也算进今天），就改这里。
         返回 (WHERE 子句, 参数)。参数用 ? 占位是防注入的，不要拼字符串。
+
+        **"本周/下周"按自然周算，周一是一周的第一天**，不是"今天往后七天"。
+        理由：用户说"本周要做的事"，指的是这个日历周，不是滚动的七天 ——
+        周三打开看到的"本周"不该一路排到下周三。
         """
         today = datetime.now().strftime("%Y-%m-%d")
         tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-        week_end = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
         now = now_text()
+
+        # 本周一 → 本周日 → 下周一 → 下周日
+        # Python 的 weekday()：周一=0，周日=6
+        monday = (datetime.now() - timedelta(days=datetime.now().weekday())).date()
+        this_sunday = monday + timedelta(days=6)
+        next_monday = monday + timedelta(days=7)
+        next_sunday = monday + timedelta(days=13)
+        this_week = (monday.isoformat(), this_sunday.isoformat())
+        next_week = (next_monday.isoformat(), next_sunday.isoformat())
+        WEEK_SQL = ("status='open' AND is_archived=0 AND due_at IS NOT NULL"
+                    " AND substr(due_at,1,10) BETWEEN ? AND ?")
+
         if view == "today":
             return "status='open' AND is_archived=0 AND substr(due_at,1,10)=?", (today,)
         if view == "tomorrow":
             return "status='open' AND is_archived=0 AND substr(due_at,1,10)=?", (tomorrow,)
         if view == "week":
-            return ("status='open' AND is_archived=0 AND due_at IS NOT NULL"
-                    " AND substr(due_at,1,10) BETWEEN ? AND ?"), (today, week_end)
+            return WEEK_SQL, this_week
+        if view == "next_week":
+            return WEEK_SQL, next_week
+
         if view == "overdue":
             # ⚠️ 别把这一行拆成两行。写成
             #     return ("...< ?"),
