@@ -52,13 +52,22 @@ def _human_due(due_at: str | None) -> tuple[str, str]:
 class Api:
     """网页能调到的全部方法。加方法不用改别的，网页那边直接调。"""
 
-    def __init__(self, store, plugins=()) -> None:
+    def __init__(self, store, plugins=(), actions=None) -> None:
         self.store = store
         # 插件加载结果由 run.py 装配时递进来。界面不自己扫文件夹 ——
         # 扫一遍等于把插件又 import 一次，副作用会来两遍。
         self._plugins = list(plugins)
+        # 要用到理解层的活（手动录入、拉课表）也由 run.py 装好再递进来。
+        # 界面不自己 import 那些模块：全项目只有 run.py 一个装配点。
+        self._actions = dict(actions or {})
         # 网页轮询用：每次返回一个自增号，界面上"数据变了没"靠它判断
         self._revision = 0
+
+    def _act(self, name: str, *args):
+        handler = self._actions.get(name)
+        if handler is None:
+            raise RuntimeError(f"「{name}」没接上，重启一下程序就好了")
+        return handler(*args)
 
     # ------------------------------------------------------------------ 读
     def tasks(self, view: str = "open") -> dict:
@@ -140,3 +149,82 @@ class Api:
             {"name": p.name, "title": p.title, "ok": p.ok, "error": p.error}
             for p in self._plugins
         ]}
+
+    # ------------------------------------------------------------------ 设置
+    def settings(self) -> dict:
+        """设置面板要的全部内容：有哪些段、每段有哪些项、当前值和说明。
+
+        清单直接从 config 的默认值生成，所以界面**不会漏项** ——
+        以后加了新配置，界面上自动就出现。
+        """
+        from ..runtime.config import config
+
+        return {"sections": config.schema(), "path": str(config.path or "")}
+
+    def save_settings(self, updates: dict) -> dict:
+        """把界面上改动过的项写回 config.toml。写回是按行改，不动用户的注释。"""
+        from ..runtime.config import config
+
+        changed: list[str] = []
+        for dotted, value in (updates or {}).items():
+            section, _, key = str(dotted).partition(".")
+            if not section or not key:
+                continue
+            config.set(section, key, value)
+            changed.append(dotted)
+        self._revision += 1
+        return {"ok": True, "changed": changed, "path": str(config.path or "")}
+
+    # ------------------------------------------------------------------ 新手引导
+    def setup_state(self) -> dict:
+        """还差哪几件事没做。界面拿它决定"新手引导"留不留。"""
+        from ..runtime.config import config
+
+        def has(section: str, key: str) -> bool:
+            return bool(str(config.get(section, key, "") or "").strip())
+
+        checks = [
+            {"key": "risk", "section": "risk", "label": "看过风控提示（小号还是大号）",
+             "ok": bool(config.get("risk", "confirmed_secondary_account"))},
+            {"key": "wecom", "section": "wecom_bot",
+             "label": "填了企业微信机器人的 Webhook",
+             "ok": has("wecom_bot", "webhook")},
+            {"key": "qq", "section": "qq", "label": "选了要收的群或私聊",
+             "ok": bool(config.get("qq", "group_ids") or config.get("qq", "private_ids")
+                        or config.get("qq", "inbox_ids")
+                        or config.get("qq", "receive_all"))},
+            # AI 是选配：不装也能用，所以不算"没做完"
+            {"key": "ai", "section": "ai", "optional": True,
+             "label": "配了 AI（可选，不填也能用）",
+             "ok": has("ai", "cloud_base_url") or has("ai", "local_model")},
+        ]
+        return {"checks": checks,
+                "done": all(item["ok"] for item in checks if not item.get("optional"))}
+
+    def confirm_risk(self) -> dict:
+        """用户在风控提示上点了「我知道了」。
+
+        这是契约第七节的红线：首次启动必须确认过。
+        写进配置之后，以后不再弹。
+        """
+        from ..runtime.config import config
+
+        config.set("risk", "confirmed_secondary_account", True)
+        self._revision += 1
+        return {"ok": True}
+
+    # ------------------------------------------------------------------ 录入选
+    def add_text(self, text: str) -> dict:
+        """手动粘贴一条。走的是和 QQ 消息**完全相同**的那条管线。"""
+        text = str(text or "").strip()
+        if not text:
+            return {"ok": False, "message": "先写点什么，再点添加"}
+        added = self._act("add_text", text) or 0
+        self._revision += 1
+        return {"ok": True, "added": added}
+
+    def sync_now(self) -> dict:
+        """立刻拉一遍插件来源（课表这类需要主动去拿的）。"""
+        added = self._act("sync") or 0
+        self._revision += 1
+        return {"ok": True, "added": added}

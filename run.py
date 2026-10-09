@@ -423,12 +423,15 @@ def run_deploy(store, pipeline, account: int) -> int:
     return 0
 
 
-def run_ui(store, plugins=()) -> int:
+def run_ui(store, plugins=(), actions=None) -> int:
     """打开界面窗口。
 
     ⚠️ 界面和"收消息"是**两个独立进程**，共用同一个 SQLite 库。
     好处：界面关掉不影响后台收消息；后台也不用为了显示而常驻一个窗口。
     这也解释了为什么值得用网页界面 —— 那 400 多 MB 只在窗口开着时占。
+
+    `actions` 是界面要用的"理解层动作"（手动录入、拉课表）。
+    用参数递进去而不是让界面 import 那些模块 —— 全项目只有这里能装配。
     """
     try:
         import webview
@@ -457,7 +460,7 @@ def run_ui(store, plugins=()) -> int:
 
     icon = Path(__file__).resolve().parent / "assets" / "app.ico"
     webview.create_window("私人秘书", str(page), width=1040, height=680,
-                          min_size=(820, 520), js_api=Api(store, plugins))
+                          min_size=(820, 520), js_api=Api(store, plugins, actions))
     # 标题栏图标。pywebview 的 create_window 不收这个参数，只有 start 收。
     webview.start(icon=str(icon) if icon.is_file() else None)
     return 0
@@ -645,7 +648,10 @@ def main(argv: list[str] | None = None) -> int:
         return run_qq(store, pipeline)
 
     if args.ui:
-        return run_ui(store, registry.status)
+        return run_ui(store, registry.status, {
+            "add_text": lambda text: ingest(store, source, pipeline, text),
+            "sync": lambda: sync_sources(store, pipeline, registry.sources),
+        })
 
     if args.shortcut:
         from app.runtime.desktop import create_shortcut

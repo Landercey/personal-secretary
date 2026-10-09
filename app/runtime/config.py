@@ -24,6 +24,7 @@ CONTRACT.md 第五节：代码里不许出现裸数字。要调行为就改这�
 from __future__ import annotations
 
 import os
+import re
 import time
 import tomllib
 from pathlib import Path
@@ -266,6 +267,68 @@ KEY_COMMENTS: dict[str, str] = {
 }
 
 
+# --------------------------------------------------------------------------
+# 界面上「设置」面板的分段顺序和标题。
+# 这里只排顺序和起名，**每一项的说明直接用 KEY_COMMENTS** ——
+# 配置文件和界面共用同一句话，不会出现"文件里写了、界面上没写"的漂移。
+# 加了新配置段记得在这里补一行，补漏了也不会报错，只是那段排到最后。
+# --------------------------------------------------------------------------
+SECTION_TITLES: tuple[tuple[str, str, str], ...] = (
+    ("wecom_bot", "企业微信推送", "推到哪去。新用户第一件要填的就是这里"),
+    ("push", "提醒时间", "一天推几次、什么时候推"),
+    ("qq", "QQ 接入", "收哪些群、哪些私聊；二维码登录也在这里看"),
+    ("timetable", "课表", "把课表变成待办（不用就留空）"),
+    ("ai", "AI 增强", "可选。不填就只用规则解析，功能照常"),
+    ("parse", "识别与过滤", "什么样的消息算待办、碎片怎么处理"),
+    ("extract", "文件解析", "图片 / PDF / Office 怎么读"),
+    ("store", "数据保留", "附件和废件箱留多久"),
+    ("resource", "资源占用", "打游戏时别跟你抢资源"),
+    ("risk", "风险提示", "小号还是大号，想清楚再挂机"),
+    ("title", "标题规则", "很少需要动"),
+)
+
+
+def _kind(value: Any) -> str:
+    """这个配置项在界面上用什么控件。
+
+    类型直接从默认值推 —— 不用再维护一张"哪个键是哪种类型"的表，
+    加了新配置项界面自动就对。
+    """
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, list):
+        return "list"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    return "text"
+
+
+def coerce(section: str, key: str, value: Any) -> Any:
+    """界面传回来的值（基本是字符串）转成配置该有的类型。
+
+    为什么必须转：TOML 里 `[123, 456]` 和 `["123", "456"]` 是两回事，
+    后者会让"群号比对"永远不相等 —— 表现为"我明明填了群，一条都收不到"。
+    """
+    kind = _kind(DEFAULTS[section][key])
+    if kind == "bool":
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in ("1", "true", "yes", "on", "是", "开")
+    if kind == "int":
+        return int(float(value))
+    if kind == "float":
+        return float(value)
+    if kind == "list":
+        items = value if isinstance(value, list) else re.split(r"[,，\n]", str(value))
+        items = [str(item).strip() for item in items if str(item).strip()]
+        # 全是数字就当数字（群号、QQ 号）；否则当字符串（时间点、名字）
+        if items and all(item.isdigit() for item in items):
+            return [int(item) for item in items]
+        return items
+    return str(value)
+
 def _toml_value(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -376,6 +439,82 @@ class Config:
 
     def as_dict(self) -> dict[str, Any]:
         return {k: dict(v) for k, v in self._values.items()}
+
+    # ------------------------------------------------------------------ 界面
+    def schema(self) -> list[dict[str, Any]]:
+        """给设置界面用的清单：有哪些段、每段有哪些项、当前值是什么、怎么填。
+
+        直接从 DEFAULTS + KEY_COMMENTS 生成，所以不存在"界面漏了一项"
+        —— 加了新配置项，界面上自动就出现。
+        """
+        sections: list[dict[str, Any]] = []
+        ordered = [name for name, _title, _desc in SECTION_TITLES]
+        rest = [name for name in sorted(DEFAULTS) if name not in ordered]
+        titles = {name: (title, desc) for name, title, desc in SECTION_TITLES}
+
+        for section in ordered + rest:
+            if section not in DEFAULTS:
+                continue
+            title, desc = titles.get(section, (section, ""))
+            keys = []
+            for key in sorted(DEFAULTS[section]):
+                value = self.get(section, key)
+                keys.append({
+                    "key": key,
+                    "value": value,
+                    "kind": _kind(DEFAULTS[section][key]),
+                    "hint": KEY_COMMENTS.get(f"{section}.{key}", ""),
+                })
+            sections.append({"name": section, "title": title, "desc": desc, "keys": keys})
+        return sections
+
+    def set(self, section: str, key: str, value: Any) -> None:
+        """改一项配置，并写回 config.toml。
+
+        写回是**一行一行改**的，不是整个文件重新生成 ——
+        用户可能自己在里面加过注释，整个重写会把那些全冲掉。
+        段不存在就补段，键不存在就补键（补在那一段的末尾）。
+        """
+        if section not in DEFAULTS or key not in DEFAULTS[section]:
+            raise KeyError(f"没有这一项配置：{section}.{key}")
+        value = coerce(section, key, value)
+        self._values.setdefault(section, {})[key] = value
+        if not self.path:
+            return
+
+        try:
+            text = self.path.read_text(encoding="utf-8")
+        except OSError:
+            return
+
+        lines = text.splitlines()
+        header = f"[{section}]"
+        line_re = re.compile(r"^\s*" + re.escape(key) + r"\s*=")
+        new_line = f"{key} = {_toml_value(value)}"
+
+        start = next((i for i, raw in enumerate(lines)
+                      if raw.strip() == header), None)
+        if start is None:
+            lines += ["", header, new_line]
+        else:
+            end = next((i for i in range(start + 1, len(lines))
+                        if lines[i].lstrip().startswith("[")), len(lines))
+            hit = next((i for i in range(start + 1, end) if line_re.match(lines[i])),
+                       None)
+            if hit is not None:
+                lines[hit] = new_line
+            else:
+                while end > start + 1 and not lines[end - 1].strip():
+                    end -= 1
+                lines.insert(end, new_line)
+
+        try:
+            self.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except OSError:
+            return
+        # 自己刚写的那一下不该被当成"用户改了文件"，否则会白白重读一遍
+        self._mtime = self._read_mtime()
+        self._last_check = time.monotonic()
 
     # ------------------------------------------------------------------ 加载
     @classmethod

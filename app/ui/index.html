@@ -38,12 +38,13 @@ body {
   overflow: hidden;
   user-select: none;
 }
+input, textarea { user-select: text; font: inherit; }
 
 .app { display: flex; height: 100%; }
 
 /* ---------- 左侧：智能列表 ---------- */
 aside {
-  width: 208px; flex: none; padding: 18px 12px;
+  width: 208px; flex: none; padding: 18px 12px 14px;
   display: flex; flex-direction: column; gap: 2px;
 }
 .brand {
@@ -51,6 +52,7 @@ aside {
   padding: 0 10px 18px; color: var(--text);
 }
 .brand small { display:block; font-weight:400; font-size:11px; color:var(--text-3); margin-top:3px; letter-spacing:0 }
+nav { flex: 1; overflow-y: auto; min-height: 0 }
 nav a {
   display: flex; align-items: center; gap: 9px;
   padding: 7px 10px; border-radius: 7px; cursor: default;
@@ -63,8 +65,14 @@ nav a .dot { width: 5px; height: 5px; border-radius: 50%; background: currentCol
 nav a .n { margin-left: auto; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums }
 nav a.on .n { color: var(--accent); opacity: .75 }
 nav .gap { height: 14px }
-  /* pre-line: 下面几行状态是拿 \n 拼的，默认会把换行吞成一个空格 */
-  .foot { margin-top: auto; padding: 10px; font-size: 11px; line-height: 1.7; color: var(--text-3); white-space: pre-line }
+
+/* 底部三个入口：新建 / 同步 / 设置。都收在一处，不散在界面各个角落 */
+.tools { padding: 10px 4px 0; display: flex; flex-direction: column; gap: 6px }
+.tools .two { display: flex; gap: 6px }
+.tools button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px }
+
+/* pre-line: 下面几行状态是拿 \n 拼的，默认会把换行吞成一个空格 */
+.foot { padding: 10px 6px 0; font-size: 11px; line-height: 1.7; color: var(--text-3); white-space: pre-line }
 
 /* ---------- 中间：列表 ---------- */
 main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22px 20px 0 8px }
@@ -73,8 +81,10 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
 .head .sub { font-size: 12.5px; color: var(--text-3) }
 
 .list { flex: 1; overflow-y: auto; padding: 2px 4px 24px; }
-.list::-webkit-scrollbar { width: 9px }
-.list::-webkit-scrollbar-thumb { background: rgba(0,0,0,.13); border-radius: 99px; border: 3px solid transparent; background-clip: content-box }
+.list::-webkit-scrollbar, nav::-webkit-scrollbar { width: 9px }
+.list::-webkit-scrollbar-thumb, nav::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,.13); border-radius: 99px; border: 3px solid transparent; background-clip: content-box
+}
 .list::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,.24); background-clip: content-box }
 
 /* 卡片：一条待办 */
@@ -106,7 +116,27 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
 
 .empty { text-align: center; color: var(--text-3); padding: 60px 20px; font-size: 13px; line-height: 2 }
 
-/* ---------- 右侧：详情 ---------- */
+/* ---------- 上手清单：没弄完就别藏起来 ---------- */
+.guide {
+  background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 15px 17px; margin: 0 4px 14px;
+}
+.guide h3 { margin: 0 0 4px; font-size: 13.5px; font-weight: 600 }
+.guide p { margin: 0 0 10px; font-size: 12px; color: var(--text-3); line-height: 1.7 }
+.guide ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px }
+.guide li {
+  display: flex; align-items: center; gap: 9px; padding: 6px 8px;
+  border-radius: 7px; font-size: 13px; color: var(--text-2);
+}
+.guide li.todo { cursor: pointer }
+.guide li.todo:hover { background: rgba(0,0,0,.035) }
+.guide li .mk { width: 15px; flex: none; text-align: center; font-size: 12px }
+.guide li.ok { color: var(--text-3) }
+.guide li.ok .mk { color: #16a34a }
+.guide li.todo .mk { color: var(--today) }
+.guide li .go { margin-left: auto; font-size: 11.5px; color: var(--accent) }
+
+/* ---------- 右侧：详情 / 设置 ---------- */
 .detail {
   width: 0; flex: none; overflow: hidden; background: var(--panel);
   border-left: 1px solid transparent;
@@ -114,6 +144,11 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
 }
 .detail.open { width: 320px; border-left-color: var(--line) }
 .detail .inner { width: 320px; padding: 22px 20px; height: 100%; overflow-y: auto }
+.detail.wide.open { width: 420px }
+.detail.wide .inner { width: 420px }
+.detail .inner::-webkit-scrollbar { width: 9px }
+.detail .inner::-webkit-scrollbar-thumb { background: rgba(0,0,0,.13); border-radius: 99px; border: 3px solid transparent; background-clip: content-box }
+
 .detail h2 { font-size: 16px; font-weight: 600; margin: 0 0 16px; line-height: 1.5; word-break: break-word }
 .kv { display: flex; gap: 10px; font-size: 12.5px; line-height: 1.8; padding: 6px 0; border-bottom: 1px solid var(--line) }
 .kv:last-of-type { border-bottom: 0 }
@@ -124,7 +159,7 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
   font-size: 12.5px; line-height: 1.75; color: var(--text-2); white-space: pre-wrap; word-break: break-word
 }
 .quote em { display: block; font-style: normal; font-size: 11px; color: var(--text-3); margin-bottom: 5px }
-.acts { margin-top: 18px; display: flex; gap: 8px }
+
 button {
   font: inherit; font-size: 12.5px; padding: 7px 13px; border-radius: 7px;
   border: 1px solid var(--line); background: var(--panel); color: var(--text-2);
@@ -133,12 +168,66 @@ button {
 button:hover { background: #fafafa; border-color: #dedee2 }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff }
 button.primary:hover { background: #4338ca }
+button:disabled { opacity: .5; cursor: default }
+
+/* 详情里的三个动作：主要的占满一行，另两个并排 —— 一眼能看出哪个是常用操作 */
+.acts { margin-top: 18px; display: flex; flex-direction: column; gap: 7px }
+.acts .two { display: flex; gap: 7px }
+.acts .two button { flex: 1 }
+.acts button.block { width: 100% }
+
+/* ---------- 设置面板 ---------- */
+.panelhead { display: flex; align-items: center; gap: 10px; margin-bottom: 4px }
+.panelhead h2 { margin: 0; flex: 1 }
+.savepath { font-size: 11px; color: var(--text-3); line-height: 1.6; margin: 0 0 14px; word-break: break-all }
+.note { font-size: 12px; color: var(--text-2); line-height: 1.8; margin: 0 0 14px }
+
+details.sec { border-top: 1px solid var(--line); padding: 2px 0 }
+details.sec > summary {
+  list-style: none; cursor: pointer; padding: 11px 2px;
+  font-size: 13.5px; font-weight: 600; display: flex; align-items: baseline; gap: 8px
+}
+details.sec > summary::-webkit-details-marker { display: none }
+details.sec > summary i { font-style: normal; font-weight: 400; font-size: 11.5px; color: var(--text-3) }
+details.sec > summary::before { content: "›"; color: var(--text-3); transition: transform .15s }
+details.sec[open] > summary::before { content: "⌄" }
+
+.field { padding: 0 2px 12px }
+.field label { display: block; font-size: 12.5px; color: var(--text-2); margin-bottom: 5px }
+.field input[type=text], .field input[type=number], .field textarea {
+  width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px;
+  background: #fcfcfd; color: var(--text); outline: none;
+}
+.field input:focus, .field textarea:focus { border-color: var(--accent); background: #fff }
+.field textarea { resize: vertical; min-height: 76px; line-height: 1.6 }
+.field .hint { margin: 5px 0 0; font-size: 11px; color: var(--text-3); line-height: 1.65; white-space: pre-line }
+.field.check { display: flex; align-items: flex-start; gap: 9px }
+.field.check input { margin-top: 2px; width: 15px; height: 15px; accent-color: var(--accent); flex: none }
+.field.check label { margin: 0 }
+.field.check .hint { margin-top: 3px }
+
+/* ---------- 风控确认（契约红线：首次启动必须确认过） ---------- */
+.mask {
+  position: fixed; inset: 0; background: rgba(20,20,24,.42);
+  display: none; align-items: center; justify-content: center; z-index: 40;
+}
+.mask.on { display: flex }
+.dialog {
+  width: 520px; max-width: calc(100vw - 60px); max-height: calc(100vh - 80px);
+  overflow-y: auto; background: var(--panel); border-radius: 14px;
+  box-shadow: 0 12px 48px rgba(16,16,20,.24); padding: 26px 28px;
+}
+.dialog h2 { font-size: 17px; font-weight: 600; margin: 0 0 14px }
+.dialog p { font-size: 13px; line-height: 1.9; color: var(--text-2); margin: 0 0 12px }
+.dialog p b { color: var(--text) }
+.dialog .acts { flex-direction: row; margin-top: 20px }
+.dialog .acts button { flex: 1 }
 
 .toast {
   position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 12px);
   background: rgba(28,28,30,.92); color: #fff; font-size: 12.5px;
   padding: 9px 16px; border-radius: 8px; opacity: 0; pointer-events: none;
-  transition: opacity .18s, transform .18s;
+  transition: opacity .18s, transform .18s; z-index: 50;
 }
 .toast.on { opacity: 1; transform: translate(-50%, 0) }
 </style>
@@ -148,11 +237,19 @@ button.primary:hover { background: #4338ca }
   <aside>
     <div class="brand">私人秘书<small>群消息 → 待办 → 手机</small></div>
     <nav id="nav"></nav>
+    <div class="tools">
+      <button id="btnNew">＋ 新建待办</button>
+      <div class="two">
+        <button id="btnSync" title="拉一遍课表等插件来源">⟳ 同步</button>
+        <button id="btnSettings" title="推送时间、企业微信、AI…">⚙ 设置</button>
+      </div>
+    </div>
     <div class="foot" id="foot">正在连接…</div>
   </aside>
 
   <main>
     <div class="head"><h1 id="viewTitle">今天</h1><span class="sub" id="viewSub"></span></div>
+    <div id="guide"></div>
     <div class="list" id="list"></div>
   </main>
 
@@ -160,6 +257,24 @@ button.primary:hover { background: #4338ca }
     <div class="inner" id="detailInner"></div>
   </section>
 </div>
+
+<div class="mask" id="riskMask">
+  <div class="dialog">
+    <h2>挂 QQ 之前，先把这件事想清楚</h2>
+    <p>这个程序要一直挂着你的 QQ 才能收消息。用哪个号，代价不一样 ——
+       作者只能给你事实，不能给你保证：</p>
+    <p><b>· 程序已经帮你降到最轻了。</b>它只收不发：不发言、不加好友、不拉群成员名单，
+       只盯着你勾选的那几个会话。行为上比"正常挂机"轻得多。</p>
+    <p><b>· 但用大号长期挂着，风险始终比小号高。</b>这是腾讯那边的规则，不是这个程序能改的。
+       作者自己用的就是大号，到现在没出过事 —— 这只是"到现在"，不是承诺。</p>
+    <p><b>· 用哪个号你自己定。</b>怕出事的就用小号，前提是那个小号能进你要监控的群。
+       用小号的话，"发给自己小号"那条收件箱功能也顺便能用上。</p>
+    <div class="acts">
+      <button class="primary block" id="btnRiskOk">我知道了，别每次都提醒</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -187,6 +302,15 @@ let counts = {};
    否则连点两个分组时，先发的请求如果后回来，会把内容盖成上一个分组的。 */
 let refreshToken = 0;
 
+/* 右侧面板同一时间只显示一样东西：
+   null 收起 / 'detail' 某条待办 / 'settings' 设置 / 'new' 新建 */
+let panel = null;
+let drawnPanel = null;      // 已经画出来的是哪个，避免 5 秒轮询把正在填的表单冲掉
+let schema = null;          // 后端给的配置清单
+let openSection = null;     // 设置面板里默认展开哪一段
+let riskDismissed = false;  // 这一轮先不弹风控（下次开程序还会弹）
+let guideStamp = '';
+
 const $ = (id) => document.getElementById(id);
 
 function api() { return window.pywebview.api; }
@@ -196,7 +320,7 @@ function toast(msg) {
   el.textContent = msg;
   el.classList.add('on');
   clearTimeout(el._t);
-  el._t = setTimeout(() => el.classList.remove('on'), 1600);
+  el._t = setTimeout(() => el.classList.remove('on'), 1800);
 }
 
 /* 把桥的错误显示出来。
@@ -219,6 +343,11 @@ async function call(name, ...args) {
   }
 }
 
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
 /* ---------- 左侧导航 ---------- */
 function renderNav() {
   $('nav').innerHTML = VIEWS.map(v => {
@@ -228,21 +357,21 @@ function renderNav() {
       <i class="dot"></i><span>${v.label}</span>${n ? `<i class="n">${n}</i>` : ''}</a>`;
   }).join('');
   $('nav').querySelectorAll('a').forEach(a => {
-    a.onclick = () => { current = a.dataset.view; selected = null; refresh(); };
+    a.onclick = () => {
+      current = a.dataset.view;
+      selected = null;
+      setPanel(null);
+      refresh();
+    };
   });
 }
 
 /* ---------- 中间列表 ---------- */
-function esc(s) {
-  return String(s ?? '').replace(/[&<>"]/g, c =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-}
-
 function renderList() {
   const box = $('list');
   if (!items.length) {
     box.innerHTML = `<div class="empty">这里没有待办<br>
-      <span style="font-size:12px">群消息里的通知会自动出现在这里</span></div>`;
+      <span style="font-size:12px">点左下角「＋ 新建待办」，或者直接发给 QQ 小号</span></div>`;
     return;
   }
   box.innerHTML = items.map(t => `
@@ -263,7 +392,9 @@ function renderList() {
     row.onclick = (e) => {
       if (e.target.dataset.done) return;
       selected = Number(row.dataset.id);
-      renderList(); renderDetail();
+      setPanel('detail');
+      renderList();
+      renderPanel(true);
     };
   });
   box.querySelectorAll('.tick').forEach(tick => {
@@ -275,24 +406,47 @@ function renderList() {
   });
 }
 
-/* ---------- 右侧详情 ---------- */
-function renderDetail() {
+/* ---------- 右侧面板的总开关 ---------- */
+function setPanel(next) {
+  panel = next;
+  drawnPanel = null;
+}
+
+function renderPanel(force) {
   const box = $('detail');
-  const t = items.find(x => x.id === selected);
-  if (!t) { box.classList.remove('open'); return; }
+  box.classList.toggle('wide', panel === 'settings');
+  if (!panel) {
+    box.classList.remove('open');
+    return;
+  }
+  // 正在填表单时别重画 —— 5 秒一次的后台刷新会把用户打字的内容冲掉
+  if (!force && drawnPanel === panel) return;
   box.classList.add('open');
+  drawnPanel = panel;
+
+  if (panel === 'settings') return drawSettings();
+  if (panel === 'new') return drawComposer();
+  return drawDetail();
+}
+
+/* ---------- 待办详情 ---------- */
+function drawDetail() {
+  const t = items.find(x => x.id === selected);
+  if (!t) { $('detail').classList.remove('open'); panel = null; drawnPanel = null; return; }
   $('detailInner').innerHTML = `
     <h2>${esc(t.title)}</h2>
-    <div class="kv"><b>时间</b><span class="due ${t.urgency}" style="color:inherit">${esc(t.due)}</span></div>
+    <div class="kv"><b>时间</b><span>${esc(t.due)}</span></div>
     ${t.location ? `<div class="kv"><b>地点</b><span>${esc(t.location)}</span></div>` : ''}
     ${t.source ? `<div class="kv"><b>来源</b><span>${esc(t.source)}${t.sender ? ' · ' + esc(t.sender) : ''}</span></div>` : ''}
     ${t.attachments ? `<div class="kv"><b>附件</b><span>${t.attachments} 个</span></div>` : ''}
     ${t.quoted ? `<div class="quote"><em>原始消息（判错了你能看出为什么）</em>${esc(t.quoted)}</div>` : ''}
     ${t.detail ? `<div class="quote">${esc(t.detail).slice(0, 800)}</div>` : ''}
     <div class="acts">
-      <button class="primary" onclick="act('complete')">标记完成</button>
-      <button onclick="act('archive')">归档</button>
-      <button onclick="act('drop')">这不是待办</button>
+      <button class="primary block" onclick="act('complete')">标记完成</button>
+      <div class="two">
+        <button onclick="act('archive')">归档</button>
+        <button onclick="act('drop')">这不是待办</button>
+      </div>
     </div>`;
 }
 
@@ -302,7 +456,162 @@ async function act(kind) {
   if (!res) return;                       // 失败了就别假装成功、也别清空选中
   toast({ complete: '已完成', archive: '已归档', drop: '已记为误判' }[kind]);
   selected = null;
+  setPanel(null);
   refresh();
+}
+
+/* ---------- 新建待办 ---------- */
+function drawComposer() {
+  $('detailInner').innerHTML = `
+    <div class="panelhead"><h2>新建待办</h2></div>
+    <p class="note">写一句话就行，比如「明天下午三点在图书馆门口集合」。
+       时间和地点会自动认出来，不用按格式填。</p>
+    <div class="field">
+      <textarea id="newText" placeholder="明天下午三点交作业"></textarea>
+      <p class="hint">Ctrl + Enter 快速添加</p>
+    </div>
+    <div class="acts">
+      <button class="primary block" id="btnAdd">添加</button>
+    </div>
+    <p class="hint" style="margin-top:14px">也可以把这段话直接发给 QQ 小号，一样会进来。</p>`;
+
+  const add = async () => {
+    const box = $('newText');
+    const text = box.value.trim();
+    if (!text) { toast('先写点什么'); box.focus(); return; }
+    const res = await call('add_text', text);
+    if (!res) return;
+    if (!res.ok) { toast(res.message || '没加上'); return; }
+    toast(res.added ? '已加入待办' : '这条看着不像待办，进废件箱了');
+    box.value = '';
+    refresh();
+    box.focus();
+  };
+  $('btnAdd').onclick = add;
+  $('newText').onkeydown = (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); add(); }
+  };
+  $('newText').focus();
+}
+
+/* ---------- 设置 ---------- */
+function fieldLabel(field) {
+  const lines = String(field.hint || '').split('\n')
+    .map(s => s.replace(/^#\s?/, '').trim()).filter(Boolean);
+  return { label: lines[0] || field.key, hint: lines.slice(1).join('\n') };
+}
+
+function drawSettings() {
+  if (!schema) {
+    $('detailInner').innerHTML = `<div class="panelhead"><h2>设置</h2></div>
+      <p class="note">正在读取配置…</p>`;
+    call('settings').then(res => {
+      if (!res) return;
+      schema = res;
+      drawnPanel = null;
+      renderPanel(true);
+    });
+    return;
+  }
+
+  const body = schema.sections.map(sec => {
+    const fields = sec.keys.map(f => {
+      const id = `f_${sec.name}_${f.key}`;
+      const path = `${sec.name}.${f.key}`;
+      const { label, hint } = fieldLabel(f);
+      let input;
+      if (f.kind === 'bool') {
+        input = `<input type="checkbox" id="${id}" data-path="${path}" ${f.value ? 'checked' : ''}>`;
+      } else if (f.kind === 'list') {
+        input = `<input type="text" id="${id}" data-path="${path}"
+                   value="${esc((f.value || []).join(', '))}" placeholder="用逗号分开，留空=不要">`;
+      } else if (f.kind === 'int' || f.kind === 'float') {
+        input = `<input type="number" id="${id}" data-path="${path}" value="${esc(f.value)}">`;
+      } else {
+        input = `<input type="text" id="${id}" data-path="${path}" value="${esc(f.value)}" placeholder="留空 = 不用">`;
+      }
+      const text = `${esc(label)}${hint ? `<p class="hint">${esc(hint)}</p>` : ''}`;
+      // 勾选项：方框在左、说明在右（像设置面板该有的样子）；
+      // 其它项：标题在上、输入框在下。不要把所有控件都堆成一列方块。
+      return f.kind === 'bool'
+        ? `<div class="field check">${input}<div><label for="${id}">${text}</label></div></div>`
+        : `<div class="field"><label for="${id}">${esc(label)}</label>${input}${
+             hint ? `<p class="hint">${esc(hint)}</p>` : ''}</div>`;
+    }).join('');
+    const open = openSection === sec.name ? ' open' : '';
+    return `<details class="sec"${open}>
+        <summary>${esc(sec.title)}<i>${esc(sec.desc)}</i></summary>${fields}</details>`;
+  }).join('');
+
+  $('detailInner').innerHTML = `
+    <div class="panelhead"><h2>设置</h2><button class="primary" id="btnSave">保存</button></div>
+    <p class="savepath">改动写回：${esc(schema.path)}<br>
+       保存后大多数设置立刻生效；带「要重启」的那几项按提示重启。</p>
+    ${body}`;
+  $('btnSave').onclick = saveSettings;
+}
+
+async function saveSettings() {
+  const updates = {};
+  $('detailInner').querySelectorAll('[data-path]').forEach(el => {
+    updates[el.dataset.path] = el.type === 'checkbox' ? el.checked : el.value;
+  });
+  const button = $('btnSave');
+  button.disabled = true;
+  const res = await call('save_settings', updates);
+  button.disabled = false;
+  if (!res) return;
+  toast('已保存');
+  schema = null;                 // 重新读一遍，让界面显示真正写进去的值
+  drawnPanel = null;
+  renderPanel(true);
+  refresh();
+}
+
+function openSettings(section) {
+  openSection = section || null;
+  // 每次都重新拉一遍。缓存着不动的话，用户在记事本里改完 config.toml
+  // 再点「保存」，会拿旧的界面值把他刚改的盖回去 —— 那是真丢东西。
+  schema = null;
+  setPanel('settings');
+  renderPanel(true);
+}
+
+/* ---------- 上手清单 ---------- */
+async function renderGuide() {
+  const state = await call('setup_state');
+  if (!state) return;
+
+  // 风控确认（契约红线：首次启动必须让他看过）
+  const risk = (state.checks || []).find(c => c.key === 'risk');
+  if (risk && !risk.ok && !riskDismissed) {
+    $('riskMask').classList.add('on');
+  }
+
+  if (state.done) {
+    if (guideStamp !== 'done') { guideStamp = 'done'; $('guide').innerHTML = ''; }
+    return;
+  }
+  const rows = state.checks.map(c => c.ok
+    ? `<li class="ok"><i class="mk">✓</i>${esc(c.label)}</li>`
+    : `<li class="todo" data-section="${esc(c.section)}"><i class="mk">○</i>${esc(c.label)}
+         <span class="go">去设置 ›</span></li>`).join('');
+  const html = `<div class="guide">
+      <h3>还没弄完这几步</h3>
+      <p>弄完前面两条就能收到第一条推送了。点哪一条直接跳过去。</p>
+      <ul>${rows}</ul>
+    </div>`;
+  if (html !== guideStamp) {
+    guideStamp = html;
+    $('guide').innerHTML = html;
+    $('guide').querySelectorAll('li.todo').forEach(li => {
+      li.onclick = () => {
+        const section = li.dataset.section;
+        if (section === 'risk') { $('riskMask').classList.add('on'); return; }
+        openSettings(section);
+      };
+    });
+  }
 }
 
 /* ---------- 统一刷新 ---------- */
@@ -334,28 +643,51 @@ async function refresh() {
   $('viewSub').textContent = items.length ? `${items.length} 条` : '';
   renderNav();
   renderList();
-  renderDetail();
+  renderPanel(false);
+  renderGuide();
 
   const env = await call('config_summary');
   const plug = await call('plugins');
-  if (mine === refreshToken && env && env.push_times && env.push_times.length) {
-    const list = (plug && plug.items) || [];
-    const bad = list.filter(p => !p.ok);
-    const parts = [`推送 ${env.push_times.join(' / ')}`, `${env.qq_groups} 个群`];
-    // 坏插件必须在界面上看得见（契约第二节）：不然用户只会觉得
-    // "我装的那个插件怎么好像没反应"，然后来问作者。
-    if (bad.length) {
-      parts.push(`⚠️ 插件坏了：${bad.map(p => p.title).join('、')}`);
-      $('foot').title = bad.map(p => `${p.title}：${p.error}`).join('\n');
-    } else if (list.length) {
-      parts.push(`插件 ${list.length} 个`);
-      $('foot').title = list.map(p => `${p.title}：正常`).join('\n');
-    }
-    $('foot').textContent = parts.join('\n');
+  if (mine !== refreshToken || !env) return;
+  const list = (plug && plug.items) || [];
+  const bad = list.filter(p => !p.ok);
+  const parts = [];
+  if (env.push_times && env.push_times.length) {
+    parts.push(`推送 ${env.push_times.join(' / ')}`);
   }
+  parts.push(`${env.qq_groups} 个群`);
+  if (bad.length) {
+    parts.push(`⚠️ 插件坏了：${bad.map(p => p.title).join('、')}`);
+    $('foot').title = bad.map(p => `${p.title}：${p.error}`).join('\n');
+  } else if (list.length) {
+    parts.push(`插件 ${list.length} 个`);
+    $('foot').title = list.map(p => `${p.title}：正常`).join('\n');
+  }
+  $('foot').textContent = parts.join('\n');
 }
 
+/* ---------- 接线 ---------- */
 window.addEventListener('pywebviewready', () => {
+  $('btnSettings').onclick = () => {
+    if (panel === 'settings') { setPanel(null); renderPanel(false); return; }
+    openSettings(null);
+  };
+  $('btnNew').onclick = () => { setPanel('new'); renderPanel(true); };
+  $('btnSync').onclick = async (e) => {
+    e.target.disabled = true;
+    const res = await call('sync_now');
+    e.target.disabled = false;
+    if (!res) return;
+    toast(res.added ? `同步完成，新增 ${res.added} 条` : '同步完成，没有新的');
+    refresh();
+  };
+  $('btnRiskOk').onclick = async () => {
+    $('riskMask').classList.remove('on');
+    riskDismissed = true;
+    await call('confirm_risk');
+    refresh();
+  };
+
   refresh();
   // 后台收了新消息时自动刷新：定时重取，比做推送通道简单得多
   setInterval(refresh, 5000);
