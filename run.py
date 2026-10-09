@@ -428,9 +428,22 @@ def run_ui(store) -> int:
         print(f"找不到界面文件：{page}")
         return 1
 
+    # 任务栏图标：不设这个的话，Windows 按 pythonw.exe 归组，
+    # 任务栏上显示的是 Python 的图标，而且跟别的 Python 程序挤在一起。
+    # 设一个自己的 AppUserModelID 才算"一个独立的应用"。
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "PersonalSecretary.Desktop")
+    except Exception:
+        pass
+
+    icon = Path(__file__).resolve().parent / "assets" / "app.ico"
     webview.create_window("私人秘书", str(page), width=1040, height=680,
                           min_size=(820, 520), js_api=Api(store))
-    webview.start()
+    # 标题栏图标。pywebview 的 create_window 不收这个参数，只有 start 收。
+    webview.start(icon=str(icon) if icon.is_file() else None)
     return 0
 
 
