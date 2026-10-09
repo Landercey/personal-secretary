@@ -181,6 +181,9 @@ let current = 'today';
 let items = [];
 let selected = null;
 let counts = {};
+/* 每次刷新自增。异步返回时对不上号就丢掉 ——
+   否则连点两个分组时，先发的请求如果后回来，会把内容盖成上一个分组的。 */
+let refreshToken = 0;
 
 const $ = (id) => document.getElementById(id);
 
@@ -192,6 +195,26 @@ function toast(msg) {
   el.classList.add('on');
   clearTimeout(el._t);
   el._t = setTimeout(() => el.classList.remove('on'), 1600);
+}
+
+/* 把桥的错误显示出来。
+   为什么必须做：pywebview 里 Python 抛异常，JS 这边只会拿到一个 rejected promise，
+   如果不管它，界面就是"点了没反应"—— 用户完全不知道发生了什么，
+   只能来问"为什么没反应"。这个问题真发生过。 */
+function showError(where, err) {
+  const msg = (err && (err.message || err.toString())) || String(err);
+  console.error('[私人秘书]', where, err);
+  toast(`${where}失败：${msg}`.slice(0, 60));
+}
+
+/* 包一层：任何一个桥调用出错都别让它把整条刷新链断掉 */
+async function call(name, ...args) {
+  try {
+    return await api()[name](...args);
+  } catch (err) {
+    showError(name, err);
+    return null;
+  }
 }
 
 /* ---------- 左侧导航 ---------- */
@@ -244,9 +267,8 @@ function renderList() {
   box.querySelectorAll('.tick').forEach(tick => {
     tick.onclick = async (e) => {
       e.stopPropagation();
-      await api().complete(Number(tick.dataset.done));
-      toast('已完成');
-      refresh();
+      const res = await call('complete', Number(tick.dataset.done));
+      if (res) { toast('已完成'); refresh(); }
     };
   });
 }
@@ -274,7 +296,8 @@ function renderDetail() {
 
 async function act(kind) {
   if (!selected) return;
-  await api()[kind](selected);
+  const res = await call(kind, selected);
+  if (!res) return;                       // 失败了就别假装成功、也别清空选中
   toast({ complete: '已完成', archive: '已归档', drop: '已记为误判' }[kind]);
   selected = null;
   refresh();
@@ -282,19 +305,27 @@ async function act(kind) {
 
 /* ---------- 统一刷新 ---------- */
 async function refresh() {
+  const mine = ++refreshToken;
   const view = current === 'junk' ? null : current;
+  let fresh = [];
   if (view) {
-    const res = await api().tasks(view);
-    items = res.items || [];
+    const res = await call('tasks', view);
+    if (mine !== refreshToken) return;      // 有人抢先刷新了，我这份作废
+    fresh = (res && res.items) || [];
   } else {
-    const res = await api().dropped();
-    items = (res.items || []).map(d => ({
+    const res = await call('dropped');
+    if (mine !== refreshToken) return;
+    fresh = ((res && res.items) || []).map(d => ({
       id: 'junk-' + d.drop_id, title: d.text, due: d.reason,
       urgency: 'later', location: '', source: d.source_name || '',
       sender: '', quoted: '', detail: '', attachments: 0, junk: true,
     }));
   }
-  counts = await api().counts();
+  items = fresh;
+
+  const c = await call('counts');
+  if (mine !== refreshToken) return;
+  counts = c || counts;
 
   const meta = VIEWS.find(v => v.id === current) || {};
   $('viewTitle').textContent = meta.label || '今天';
@@ -303,10 +334,10 @@ async function refresh() {
   renderList();
   renderDetail();
 
-  const env = await api().config_summary();
-  $('foot').textContent = env.push_times?.length
-    ? `推送 ${env.push_times.join(' / ')}\n${env.qq_groups} 个群`
-    : '还没配置推送';
+  const env = await call('config_summary');
+  if (mine === refreshToken && env && env.push_times && env.push_times.length) {
+    $('foot').textContent = `推送 ${env.push_times.join(' / ')}\n${env.qq_groups} 个群`;
+  }
 }
 
 window.addEventListener('pywebviewready', () => {
@@ -314,6 +345,25 @@ window.addEventListener('pywebviewready', () => {
   // 后台收了新消息时自动刷新：定时重取，比做推送通道简单得多
   setInterval(refresh, 5000);
 });
+
+/* F5 / Ctrl+R 重新载入页面。
+   WebView2 会把先前打开的页面缓存住，改了 index.html 之后老窗口不会自己变，
+   以前只能把程序关掉重开。加个刷新键省这一步。 */
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'F5' || (e.ctrlKey && e.key.toLowerCase() === 'r')) {
+    e.preventDefault();
+    location.reload();
+  }
+});
+
+/* 桥没连上（在浏览器里直接打开、或者 pywebview 没起来）也要让人看出来，
+   不能一直显示"正在连接…"然后什么都不发生。 */
+setTimeout(() => {
+  if (!window.pywebview) {
+    $('foot').textContent = '界面没连上后台（normal：在浏览器里直接打开时正常）';
+    console.error('[私人秘书] pywebview 桥没就绪');
+  }
+}, 2500);
 </script>
 </body>
 </html>
