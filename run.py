@@ -99,6 +99,11 @@ def ingest_message(store, pipeline, message) -> int:
     """
     store.save_message(message)
     prepared, drafts = pipeline.run(message)
+    # 再存一次。第一次存的是"还没读附件"的原样消息，跑完管线才有正文 ——
+    # 只存第一次的话，文件类消息在库里永远是空的，
+    # "这条为什么没收下"就查不出来了。save_message 是 INSERT OR REPLACE，
+    # 重复调用没副作用。
+    store.save_message(prepared)
     stored = store.save_drafts(prepared, drafts)
 
     # 合并窗口：这条自己没解析出待办，但带着附件 ——
