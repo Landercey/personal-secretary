@@ -49,22 +49,66 @@ def cut_watermark(im: Image.Image) -> Image.Image:
     return im
 
 
-def drop_white_background(im: Image.Image, tolerance: int = 20) -> Image.Image:
-    """把**和边框相连的**白底变成透明。
+def drop_white_background(im: Image.Image, light_threshold: int = 235) -> Image.Image:
+    """白底 → 透明，并且**不留白边**。
 
-    关键在"和边框相连"：人物身上本来就有白色的地方（围裙、袜子、高光），
-    一律把白色抠掉的话这些地方会变成窟窿。
-    做法是从四个角往里灌水，只灌得到背景那一块。
+    =====================================================================
+    为什么不能只做"白就透明"
+    =====================================================================
+    第一版是从四角灌水，灌到的像素 alpha=0、其余 alpha=255（硬边）。
+    问题是**边缘那几个像素既不是纯白也不是纯人物色**，它们是抗锯齿
+    过渡出来的半白像素。硬边会把它们留成不透明的浅色 ——
+    放到深色背景上就是一圈白边（模糊的头发轮廓外面那圈亮线）。
+
+    =====================================================================
+    正确的做法：白底是"合成的背景"，要反算掉
+    =====================================================================
+    观测到的颜色 C 其实是"人物色 F 盖在白底上"的结果：
+        C = a·F + (1-a)·255
+    反过来：
+        a = 1 - min(C)/255        ← 越白越透明
+        F = (C - (1-a)·255) / a   ← 把混进去的白减掉
+
+    用这套算，半白的边缘像素会变成"半透明 + 正确的颜色"，
+    放到任何底色上都不会有白圈。
+
+    =====================================================================
+    还有一条不能忘：只能动**和边框相连**的区域
+    =====================================================================
+    人物身上本来就有白的地方（围裙、袜子、高光）。一律按"白=透明"处理的话
+    这些地方会变成窟窿。所以先用灌水找出"从画布四角能走到"的那一块，
+    只对它做上面那套换算。
     """
+    import numpy as np
+
     image = im.convert("RGBA")
     width, height = image.size
-    # 灰度图：白=0，非白=255
-    mask = image.convert("L").point(lambda value: 0 if value > 255 - tolerance else 255)
+
+    # ① 灌水找背景：灰度高=可能是背景。深色轮廓会把水挡住，
+    #    所以人物内部的白色到不了。
+    mask = image.convert("L").point(
+        lambda value: 0 if value >= light_threshold else 255)
     for seed in ((0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1)):
         if mask.getpixel(seed) == 0:
-            ImageDraw.floodfill(mask, seed, 128)      # 灌到的背景变成 128
-    image.putalpha(mask.point(lambda value: 0 if value == 128 else 255))
-    return image
+            ImageDraw.floodfill(mask, seed, 128)
+    background = np.asarray(mask) == 128
+
+    # ② 对背景区域按"有多白"算 alpha，并反算掉白底
+    arr = np.asarray(image).astype(np.float32)
+    rgb, alpha = arr[:, :, :3], arr[:, :, 3]
+    whiteness = rgb.min(axis=2) / 255.0            # 1=纯白
+    new_alpha = np.where(background, (1.0 - whiteness) * 255.0, alpha)
+
+    safe = np.maximum(new_alpha, 1.0)[:, :, None] / 255.0
+    matte = (1.0 - safe) * 255.0                   # 混进去的那层白
+    fixed = np.where(background[:, :, None],
+                     (rgb - matte) / safe,     # 反算
+                     rgb)
+    fixed = np.clip(fixed, 0, 255)
+    fixed[new_alpha <= 0.5] = 0                    # 全透明的像素颜色无意义
+
+    out = np.dstack([fixed, np.clip(new_alpha, 0, 255)]).astype(np.uint8)
+    return Image.fromarray(out, "RGBA")
 
 
 def trim_and_pad(im: Image.Image, margin_ratio: float = 0.03) -> Image.Image:
@@ -162,9 +206,19 @@ def main() -> int:
         print("没找到源图，用代码画一只鲸鱼兜底")
         frames = [draw(size) for size in SIZES]
 
-    frames[0].save(target, format="ICO",
-                   sizes=[(s, s) for s in SIZES], append_images=frames[1:])
-    print(f"图标已生成：{target}（{', '.join(str(s) for s in SIZES)} px）")
+    # ⚠️ 必须拿**最大**的那张存，让 PIL 自己往下缩。
+    # 第一版写成 frames[0].save(...)（frames[0] 是 16px），
+    # 结果 .ico 里只有一个 16×16、文件才 997 字节 ——
+    # PIL 生不出比源图更大的尺寸，于是桌面图标是个小图被放大，糊的。
+    # 这个坑藏了很久，因为预览时一直是拿 PNG 看的。
+    biggest = frames[-1]
+    biggest.save(target, format="ICO", sizes=[(s, s) for s in SIZES])
+
+    saved = sorted(Image.open(target).ico.sizes())
+    print(f"图标已生成：{target}")
+    print(f"  实际包含尺寸：{', '.join(f'{w}×{h}' for w, h in saved)}")
+    if len(saved) < len(SIZES):
+        print(f"  ⚠️ 期望 {len(SIZES)} 个尺寸，只存进去 {len(saved)} 个")
     print("重跑 python run.py --shortcut 才会更新桌面快捷方式的图标")
     return 0
 
