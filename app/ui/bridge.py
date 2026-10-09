@@ -152,14 +152,14 @@ class Api:
 
     # ------------------------------------------------------------------ 设置
     def settings(self) -> dict:
-        """设置面板要的全部内容：有哪些段、每段有哪些项、当前值和说明。
+        """设置面板要的全部内容：分组 → 段 → 项，带当前值、说明、是否高级、是否锁住。
 
         清单直接从 config 的默认值生成，所以界面**不会漏项** ——
         以后加了新配置，界面上自动就出现。
         """
         from ..runtime.config import config
 
-        return {"sections": config.schema(), "path": str(config.path or "")}
+        return {"groups": config.schema(), "path": str(config.path or "")}
 
     def save_settings(self, updates: dict) -> dict:
         """把界面上改动过的项写回 config.toml。写回是按行改，不动用户的注释。"""

@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app.runtime.config import Config, DEFAULTS, coerce      # noqa: E402
+from app.runtime.config import ADVANCED_KEYS, LOCKED_KEYS     # noqa: E402
 from app.ui.bridge import Api                                # noqa: E402
 
 # 必须按模块路径取，不能写 `from app.runtime import config` ——
@@ -139,39 +140,72 @@ class TestSchema(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.config = Config.load(Path(self.tmp.name) / "config.toml")
+        self.groups = self.config.schema()
+        self.fields = {f"{sec['name']}.{item['key']}": item
+                       for group in self.groups
+                       for sec in group["sections"]
+                       for item in sec["keys"]}
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def test_every_config_key_shows_up_on_the_ui(self):
         """界面是照着 DEFAULTS 生成的 —— 漏一项就等于"这功能没入口"。"""
-        shown = {f"{section['name']}.{item['key']}"
-                 for section in self.config.schema() for item in section["keys"]}
         expected = {f"{section}.{key}"
                     for section, values in DEFAULTS.items() for key in values}
-        self.assertEqual(shown, expected)
+        self.assertEqual(set(self.fields), expected)
 
-    def test_sections_have_chinese_titles_and_are_ordered(self):
-        sections = self.config.schema()
-        titles = [s["title"] for s in sections[:3]]
-        self.assertEqual(titles, ["企业微信推送", "提醒时间", "QQ 接入"])
-        for section in sections:
-            self.assertTrue(section["title"])
+    def test_settings_are_grouped_into_tabs(self):
+        """用户的原话是"太杂，没有分类"。四个标签页，每页 2~3 段。"""
+        self.assertEqual([g["title"] for g in self.groups],
+                         ["推送到手机", "收消息", "看懂消息", "数据与资源"])
+        for group in self.groups:
+            self.assertTrue(group["desc"])
+            self.assertTrue(1 <= len(group["sections"]) <= 3, group["title"])
+            for section in group["sections"]:
+                self.assertTrue(section["title"])
 
     def test_kind_matches_the_default_value(self):
-        kinds = {f"{s['name']}.{i['key']}": i["kind"]
-                 for s in self.config.schema() for i in s["keys"]}
-        self.assertEqual(kinds["push.times"], "list")
-        self.assertEqual(kinds["qq.group_ids"], "list")
-        self.assertEqual(kinds["wecom_bot.enabled"], "bool")
-        self.assertEqual(kinds["resource.mem_critical_percent"], "int")
-        self.assertEqual(kinds["wecom_bot.webhook"], "text")
+        self.assertEqual(self.fields["push.times"]["kind"], "list")
+        self.assertEqual(self.fields["qq.group_ids"]["kind"], "list")
+        self.assertEqual(self.fields["wecom_bot.enabled"]["kind"], "bool")
+        self.assertEqual(self.fields["resource.mem_critical_percent"]["kind"], "int")
+        self.assertEqual(self.fields["wecom_bot.webhook"]["kind"], "text")
 
     def test_every_field_has_a_hint(self):
         """界面上每个框都得有一句人话说明，不然用户只能猜。"""
-        missing = [f"{s['name']}.{i['key']}"
-                   for s in self.config.schema() for i in s["keys"] if not i["hint"]]
+        missing = [path for path, item in self.fields.items() if not item["hint"]]
         self.assertEqual(missing, [], f"这些配置项没有说明：{missing}")
+
+    def test_advanced_fields_are_marked_and_sorted_last(self):
+        """高级项要在段内排到最后（界面上它们被折进一个收起的小块）。"""
+        marked = {path for path, item in self.fields.items()
+                  if item["level"] == "advanced"}
+        self.assertEqual(marked, set(ADVANCED_KEYS))
+
+        for group in self.groups:
+            for section in group["sections"]:
+                levels = [item["level"] for item in section["keys"]]
+                self.assertEqual(levels, sorted(levels, key=lambda x: x == "advanced"),
+                                 f"{section['name']} 的字段顺序不对")
+
+    def test_connection_settings_are_locked_with_a_reason(self):
+        """监听地址/端口/路径/令牌由程序写进 NapCat 配置。
+
+        用户在这儿单方面改，两边对不上，QQ 会**静默收不到消息** ——
+        所以这几项必须默认锁住，而且要说清楚为什么。
+        """
+        locked = {path for path, item in self.fields.items() if item["locked"]}
+        self.assertEqual(locked, set(LOCKED_KEYS))
+        for path in ("qq.bind_host", "qq.bind_port", "qq.path", "qq.token"):
+            self.assertIn(path, locked)
+            self.assertGreater(len(self.fields[path]["locked"]), 10)   # 说人话，不是"不可改"
+
+    def test_ordinary_fields_are_not_locked(self):
+        """别锁过头：群号、推送时间、Webhook 这些用户本来就要改。"""
+        for path in ("qq.group_ids", "push.times", "wecom_bot.webhook",
+                     "ai.cloud_base_url", "timetable.url"):
+            self.assertFalse(self.fields[path]["locked"], path)
 
 
 class TestBridge(unittest.TestCase):
@@ -192,8 +226,10 @@ class TestBridge(unittest.TestCase):
 
     def test_settings_lists_sections_and_path(self):
         result = self.api.settings()
-        self.assertTrue(result["sections"])
+        self.assertTrue(result["groups"])
         self.assertEqual(result["path"], str(self.path))
+        # 分组是给界面做标签页用的，每组都得有中文名
+        self.assertTrue(all(g["title"] for g in result["groups"]))
 
     def test_save_settings_writes_through(self):
         result = self.api.save_settings({"push.times": "06:30, 22:00",

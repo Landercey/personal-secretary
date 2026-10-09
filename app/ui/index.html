@@ -182,6 +182,18 @@ button:disabled { opacity: .5; cursor: default }
 .savepath { font-size: 11px; color: var(--text-3); line-height: 1.6; margin: 0 0 14px; word-break: break-all }
 .note { font-size: 12px; color: var(--text-2); line-height: 1.8; margin: 0 0 14px }
 
+/* 四个分组标签页。之前 11 段平铺成一长条，用户的原话是"太杂，没有分类" */
+.tabs { display: flex; gap: 2px; flex-wrap: wrap; border-bottom: 1px solid var(--line); margin-bottom: 10px }
+.tabs .tab {
+  border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+  padding: 6px 8px; font-size: 12.5px; color: var(--text-3); background: none
+}
+.tabs .tab:hover { background: none; color: var(--text-2) }
+.tabs .tab.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600 }
+.tabpane { display: none }
+.tabpane.on { display: block }
+.groupdesc { font-size: 11.5px; color: var(--text-3); margin: 0 0 8px }
+
 details.sec { border-top: 1px solid var(--line); padding: 2px 0 }
 details.sec > summary {
   list-style: none; cursor: pointer; padding: 11px 2px;
@@ -205,6 +217,25 @@ details.sec[open] > summary::before { content: "⌄" }
 .field.check input { margin-top: 2px; width: 15px; height: 15px; accent-color: var(--accent); flex: none }
 .field.check label { margin: 0 }
 .field.check .hint { margin-top: 3px }
+
+/* 高级：默认收起。一屏塞 60 个框，用户分不清哪个能碰 */
+details.adv { margin: 2px 0 10px; border-top: 1px dashed var(--line); padding-top: 4px }
+details.adv > summary {
+  list-style: none; cursor: pointer; font-size: 12px; color: var(--text-3); padding: 5px 2px
+}
+details.adv > summary::-webkit-details-marker { display: none }
+details.adv > summary::before { content: "▸ " }
+details.adv[open] > summary::before { content: "▾ " }
+
+/* 锁住的项：程序自己管的，改了会让两边配置对不上、QQ 静默收不到消息 */
+.field.locked input { background: #f3f3f5; color: var(--text-3); cursor: not-allowed }
+.field .tag {
+  margin-left: 6px; font-size: 10.5px; padding: 1px 5px;
+  border-radius: 4px; background: #f0f0f2; color: var(--text-3)
+}
+.field .unlock { display: inline-block; margin-top: 5px; font-size: 11.5px; color: var(--accent); cursor: pointer }
+.field .unlock:hover { text-decoration: underline }
+.field .warn { display: block; margin-top: 5px; font-size: 11px; color: var(--overdue); line-height: 1.6 }
 
 /* ---------- 风控确认（契约红线：首次启动必须确认过） ---------- */
 .mask {
@@ -306,8 +337,10 @@ let refreshToken = 0;
    null 收起 / 'detail' 某条待办 / 'settings' 设置 / 'new' 新建 */
 let panel = null;
 let drawnPanel = null;      // 已经画出来的是哪个，避免 5 秒轮询把正在填的表单冲掉
-let schema = null;          // 后端给的配置清单
-let openSection = null;     // 设置面板里默认展开哪一段
+let schema = null;          // 后端给的配置清单（分组 → 段 → 项）
+let openSection = null;     // 要跳过去并展开的那一段
+let activeGroup = null;     // 设置面板当前在哪个分组标签页
+let unlocked = new Set();   // 这一轮里被用户手动解锁的"程序管着"的项
 let riskDismissed = false;  // 这一轮先不弹风控（下次开程序还会弹）
 let guideStamp = '';
 
@@ -501,6 +534,82 @@ function fieldLabel(field) {
   return { label: lines[0] || field.key, hint: lines.slice(1).join('\n') };
 }
 
+function renderField(sectionName, f) {
+  const id = `f_${sectionName}_${f.key}`;
+  const path = `${sectionName}.${f.key}`;
+  const locked = !!f.locked && !unlocked.has(path);
+  const off = locked ? ' disabled' : '';
+
+  let input;
+  if (f.kind === 'bool') {
+    input = `<input type="checkbox" id="${id}" data-path="${path}"${f.value ? ' checked' : ''}${off}>`;
+  } else if (f.kind === 'list') {
+    input = `<input type="text" id="${id}" data-path="${path}"
+               value="${esc((f.value || []).join(', '))}" placeholder="用逗号分开，留空=不要"${off}>`;
+  } else if (f.kind === 'int' || f.kind === 'float') {
+    input = `<input type="number" id="${id}" data-path="${path}" value="${esc(f.value)}"${off}>`;
+  } else {
+    input = `<input type="text" id="${id}" data-path="${path}" value="${esc(f.value)}"
+               placeholder="留空 = 不用"${off}>`;
+  }
+
+  // 锁住的项：说明换成"为什么锁"，并给一个明确的解锁入口。
+  // 只禁用不解释的话，用户只会觉得"这软件有 bug，改不了"。
+  if (locked) {
+    const { label } = fieldLabel(f);
+    return `<div class="field locked">
+        <label for="${id}">${esc(label)}<span class="tag">程序管着</span></label>
+        ${input}
+        <p class="hint">${esc(f.locked)}</p>
+        <a class="unlock" data-unlock="${path}">确实要改 ›</a>
+      </div>`;
+  }
+
+  const { label, hint } = fieldLabel(f);
+  const text = `${esc(label)}${hint ? `<p class="hint">${esc(hint)}</p>` : ''}`;
+  // 勾选项：方框在左、说明在右（像设置面板该有的样子）；
+  // 其它项：标题在上、输入框在下。不要把所有控件都堆成一列方块。
+  return f.kind === 'bool'
+    ? `<div class="field check">${input}<div><label for="${id}">${text}</label></div></div>`
+    : `<div class="field"><label for="${id}">${esc(label)}</label>${input}${
+         hint ? `<p class="hint">${esc(hint)}</p>` : ''}</div>`;
+}
+
+function renderSection(sec, first) {
+  const common = sec.keys.filter(k => k.level !== 'advanced');
+  const advanced = sec.keys.filter(k => k.level === 'advanced');
+  const open = openSection ? sec.name === openSection : first;
+  // 高级项折进段底部的「高级」里，默认收起 ——
+  // 一屏塞 60 个框，用户根本分不清哪个能碰、哪个碰了会出事。
+  const tail = advanced.length
+    ? `<details class="adv"><summary>高级（一般不用动）</summary>${
+        advanced.map(f => renderField(sec.name, f)).join('')}</details>`
+    : '';
+  return `<details class="sec" data-section="${sec.name}"${open ? ' open' : ''}>
+      <summary>${esc(sec.title)}<i>${esc(sec.desc)}</i></summary>${
+      common.map(f => renderField(sec.name, f)).join('')}${tail}</details>`;
+}
+
+function activateTab(name) {
+  $('detailInner').querySelectorAll('.tab').forEach(b =>
+    b.classList.toggle('on', b.dataset.g === name));
+  $('detailInner').querySelectorAll('.tabpane').forEach(p =>
+    p.classList.toggle('on', p.dataset.g === name));
+}
+
+function wireUnlock() {
+  $('detailInner').querySelectorAll('[data-unlock]').forEach(link => {
+    link.onclick = () => {
+      const path = link.dataset.unlock;
+      unlocked.add(path);
+      const el = $('detailInner').querySelector(`[data-path="${path}"]`);
+      if (el) el.disabled = false;
+      link.className = 'warn';
+      link.textContent = '已解锁。改完必须让 NapCat 那边也对得上，否则 QQ 收不到消息。';
+    };
+  });
+}
+
 function drawSettings() {
   if (!schema) {
     $('detailInner').innerHTML = `<div class="panelhead"><h2>设置</h2></div>
@@ -514,41 +623,39 @@ function drawSettings() {
     return;
   }
 
-  const body = schema.sections.map(sec => {
-    const fields = sec.keys.map(f => {
-      const id = `f_${sec.name}_${f.key}`;
-      const path = `${sec.name}.${f.key}`;
-      const { label, hint } = fieldLabel(f);
-      let input;
-      if (f.kind === 'bool') {
-        input = `<input type="checkbox" id="${id}" data-path="${path}" ${f.value ? 'checked' : ''}>`;
-      } else if (f.kind === 'list') {
-        input = `<input type="text" id="${id}" data-path="${path}"
-                   value="${esc((f.value || []).join(', '))}" placeholder="用逗号分开，留空=不要">`;
-      } else if (f.kind === 'int' || f.kind === 'float') {
-        input = `<input type="number" id="${id}" data-path="${path}" value="${esc(f.value)}">`;
-      } else {
-        input = `<input type="text" id="${id}" data-path="${path}" value="${esc(f.value)}" placeholder="留空 = 不用">`;
-      }
-      const text = `${esc(label)}${hint ? `<p class="hint">${esc(hint)}</p>` : ''}`;
-      // 勾选项：方框在左、说明在右（像设置面板该有的样子）；
-      // 其它项：标题在上、输入框在下。不要把所有控件都堆成一列方块。
-      return f.kind === 'bool'
-        ? `<div class="field check">${input}<div><label for="${id}">${text}</label></div></div>`
-        : `<div class="field"><label for="${id}">${esc(label)}</label>${input}${
-             hint ? `<p class="hint">${esc(hint)}</p>` : ''}</div>`;
-    }).join('');
-    const open = openSection === sec.name ? ' open' : '';
-    return `<details class="sec"${open}>
-        <summary>${esc(sec.title)}<i>${esc(sec.desc)}</i></summary>${fields}</details>`;
-  }).join('');
+  const groups = schema.groups || [];
+  const active = groups.some(g => g.name === activeGroup) ? activeGroup : (groups[0] || {}).name;
+  const tabs = groups.map(g =>
+    `<button class="tab ${g.name === active ? 'on' : ''}" data-g="${g.name}" title="${esc(g.desc)}">${
+      esc(g.title)}</button>`).join('');
+  const panes = groups.map(g => `<div class="tabpane ${g.name === active ? 'on' : ''}" data-g="${g.name}">
+      <p class="groupdesc">${esc(g.desc)}</p>
+      ${g.sections.map((sec, i) => renderSection(sec, i === 0)).join('')}
+    </div>`).join('');
 
   $('detailInner').innerHTML = `
     <div class="panelhead"><h2>设置</h2><button class="primary" id="btnSave">保存</button></div>
     <p class="savepath">改动写回：${esc(schema.path)}<br>
        保存后大多数设置立刻生效；带「要重启」的那几项按提示重启。</p>
-    ${body}`;
+    <div class="tabs">${tabs}</div>
+    ${panes}`;
+
+  $('detailInner').querySelectorAll('.tab').forEach(b =>
+    b.onclick = () => activateTab(b.dataset.g));
   $('btnSave').onclick = saveSettings;
+  wireUnlock();
+
+  // 从"还没弄完这几步"点进来时，跳到对应的那一段并展开它
+  if (openSection) {
+    const target = $('detailInner').querySelector(`details[data-section="${openSection}"]`);
+    if (target) {
+      target.open = true;
+      const pane = target.closest('.tabpane');
+      if (pane) activateTab(pane.dataset.g);
+      target.scrollIntoView({ block: 'nearest' });
+      openSection = null;
+    }
+  }
 }
 
 async function saveSettings() {

@@ -52,8 +52,14 @@ class TestWiring(unittest.TestCase):
         self.assertEqual(missing, [], f"界面里引用了不存在的元素 id：{missing}")
 
     def test_settings_panel_covers_every_config_section(self):
-        """设置面板是照着后端清单画的，这里确认它没有写死某几段。"""
-        self.assertIn("schema.sections", self.html)
+        """设置面板是照着后端清单画的，这里确认它没有写死某几段。
+
+        清单结构是 分组 → 段 → 项：分组渲染成标签页，段渲染成可折叠的小节，
+        高级项折进段底部的「高级」里，锁住的项要给出解锁入口。
+        """
+        for anchor in ("schema.groups", "renderSection", "details.adv",
+                       "data-unlock", "tabpane", "activateTab"):
+            self.assertTrue(anchor in self.html, f"界面里找不到：{anchor}")
         self.assertIn("'settings'", self.html)
 
     def test_page_has_the_four_entry_points(self):

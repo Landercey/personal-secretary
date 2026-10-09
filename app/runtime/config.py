@@ -268,24 +268,61 @@ KEY_COMMENTS: dict[str, str] = {
 
 
 # --------------------------------------------------------------------------
-# 界面上「设置」面板的分段顺序和标题。
+# 界面上「设置」面板长什么样：先分四组（标签页），组里再分段。
+#
+# 为什么非得分组：之前 11 段平铺成一长条，用户的原话是"太杂，没有分类" ——
+# 想改推送时间得从"企业微信"往下翻过 QQ、课表、AI、文件解析……
+# 分组之后每个标签页只放 2~3 段。
+#
 # 这里只排顺序和起名，**每一项的说明直接用 KEY_COMMENTS** ——
 # 配置文件和界面共用同一句话，不会出现"文件里写了、界面上没写"的漂移。
-# 加了新配置段记得在这里补一行，补漏了也不会报错，只是那段排到最后。
+# 加了新配置段记得在这里补一行，补漏了不会报错，只是那段排到最后。
 # --------------------------------------------------------------------------
-SECTION_TITLES: tuple[tuple[str, str, str], ...] = (
-    ("wecom_bot", "企业微信推送", "推到哪去。新用户第一件要填的就是这里"),
-    ("push", "提醒时间", "一天推几次、什么时候推"),
-    ("qq", "QQ 接入", "收哪些群、哪些私聊；二维码登录也在这里看"),
-    ("timetable", "课表", "把课表变成待办（不用就留空）"),
-    ("ai", "AI 增强", "可选。不填就只用规则解析，功能照常"),
-    ("parse", "识别与过滤", "什么样的消息算待办、碎片怎么处理"),
-    ("extract", "文件解析", "图片 / PDF / Office 怎么读"),
-    ("store", "数据保留", "附件和废件箱留多久"),
-    ("resource", "资源占用", "打游戏时别跟你抢资源"),
-    ("risk", "风险提示", "小号还是大号，想清楚再挂机"),
-    ("title", "标题规则", "很少需要动"),
+SECTION_GROUPS: tuple[tuple[str, str, str, tuple[tuple[str, str, str], ...]], ...] = (
+    ("group_push", "推送到手机", "待办怎么发到你手机上", (
+        ("wecom_bot", "企业微信机器人", "新用户第一件要填的就是这里"),
+        ("push", "什么时候推", "一天推几次、错过了补不补"),
+    )),
+    ("group_receive", "收消息", "消息从哪儿来、用哪个号挂着收", (
+        ("qq", "QQ 接入", "收哪些群、哪些私聊"),
+        ("risk", "用大号还是小号", "挂机之前先想清楚"),
+        ("timetable", "课表", "把课表变成待办（不用就留空）"),
+    )),
+    ("group_understand", "看懂消息", "什么样的消息算待办", (
+        ("ai", "AI 增强", "可选。不填就只用规则解析，功能照常"),
+        ("parse", "识别与过滤", "偏严还是偏松、你自己的名字"),
+        ("extract", "文件解析", "图片 / PDF / Office 怎么读"),
+    )),
+    ("group_data", "数据与资源", "存在哪、留多久、别跟你抢资源", (
+        ("store", "数据保留", "附件和废件箱留多久"),
+        ("resource", "资源占用", "打游戏时别抢资源"),
+        ("title", "标题规则", "很少需要动"),
+    )),
 )
+
+# 一般不用动的东西。界面上折进每段底部的「高级」里，默认收起 ——
+# 一屏塞 60 个框，用户不知道哪个能碰、哪个碰了会出事。
+ADVANCED_KEYS: frozenset[str] = frozenset({
+    "qq.max_text_chars", "qq.keep_every_message",
+    "parse.confidence_min", "parse.merge_window_seconds", "parse.due_default_hour",
+    "extract.ocr_engine", "extract.max_pages", "extract.render_scale",
+    "ai.token_budget_per_day",
+    "title.max_len", "title.min_meaningful_chars",
+})
+
+# 由**程序自己管**的项：程序会把同样的值写进 NapCat 的配置文件里。
+# 用户在这边单方面改，两边就对不上，QQ 会**静默收不到消息** ——
+# 这是最讨厌的那种坏法（界面看着一切正常，就是没反应）。
+# 所以默认锁住，界面上要明确点一下「我要改」才能动。
+LOCKED_KEYS: dict[str, str] = {
+    "qq.bind_host": "程序只监听本机（127.0.0.1）。改成别的地址等于把这个端口"
+                    "开给局域网，别人也能连进来。",
+    "qq.bind_port": "程序会把同一个端口写进 NapCat 的配置。你在这儿单方面改，"
+                    "NapCat 就再也连不上来了。",
+    "qq.path": "同上 —— 必须和 NapCat 那边配的路径一模一样。",
+    "qq.token": "程序自动生成，并写进 NapCat 的配置。在这儿改，"
+                "要重新装一次 NapCat 才能对上。",
+}
 
 
 def _kind(value: Any) -> str:
@@ -442,31 +479,55 @@ class Config:
 
     # ------------------------------------------------------------------ 界面
     def schema(self) -> list[dict[str, Any]]:
-        """给设置界面用的清单：有哪些段、每段有哪些项、当前值是什么、怎么填。
+        """给设置界面用的清单：分组 → 段 → 项。
 
         直接从 DEFAULTS + KEY_COMMENTS 生成，所以不存在"界面漏了一项"
         —— 加了新配置项，界面上自动就出现。
-        """
-        sections: list[dict[str, Any]] = []
-        ordered = [name for name, _title, _desc in SECTION_TITLES]
-        rest = [name for name in sorted(DEFAULTS) if name not in ordered]
-        titles = {name: (title, desc) for name, title, desc in SECTION_TITLES}
 
-        for section in ordered + rest:
-            if section not in DEFAULTS:
-                continue
-            title, desc = titles.get(section, (section, ""))
-            keys = []
-            for key in sorted(DEFAULTS[section]):
-                value = self.get(section, key)
-                keys.append({
-                    "key": key,
-                    "value": value,
-                    "kind": _kind(DEFAULTS[section][key]),
-                    "hint": KEY_COMMENTS.get(f"{section}.{key}", ""),
-                })
-            sections.append({"name": section, "title": title, "desc": desc, "keys": keys})
-        return sections
+        每一项都带 `level`（common / advanced）和 `locked`（不为空就是被锁住，
+        值是"为什么锁"）。界面靠这两个字段决定折叠和禁用。
+        """
+        groups: list[dict[str, Any]] = []
+        placed: set[str] = set()
+
+        for group_id, group_title, group_desc, sections in SECTION_GROUPS:
+            items = []
+            for section, title, desc in sections:
+                if section not in DEFAULTS or section in placed:
+                    continue
+                placed.add(section)
+                items.append(self._section_entry(section, title, desc))
+            if items:
+                groups.append({"name": group_id, "title": group_title,
+                               "desc": group_desc, "sections": items})
+
+        # 兜底：没在 SECTION_GROUPS 里登记过的段，塞进最后一个组。
+        # 为什么要兜底：以后加了新配置段忘了登记，用户也得能在界面上改到它。
+        rest = [name for name in sorted(DEFAULTS) if name not in placed]
+        if rest:
+            items = [self._section_entry(name, name, "") for name in rest]
+            if groups:
+                groups[-1]["sections"].extend(items)
+            else:
+                groups.append({"name": "group_rest", "title": "其它",
+                               "desc": "", "sections": items})
+        return groups
+
+    def _section_entry(self, section: str, title: str, desc: str) -> dict[str, Any]:
+        keys = []
+        for key in sorted(DEFAULTS[section]):
+            full = f"{section}.{key}"
+            keys.append({
+                "key": key,
+                "value": self.get(section, key),
+                "kind": _kind(DEFAULTS[section][key]),
+                "hint": KEY_COMMENTS.get(full, ""),
+                "level": "advanced" if full in ADVANCED_KEYS else "common",
+                "locked": LOCKED_KEYS.get(full, ""),
+            })
+        # 常用的排前面，高级的排后面 —— 界面上高级那几项要单独折叠起来
+        keys.sort(key=lambda item: item["level"] == "advanced")
+        return {"name": section, "title": title, "desc": desc, "keys": keys}
 
     def set(self, section: str, key: str, value: Any) -> None:
         """改一项配置，并写回 config.toml。
