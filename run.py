@@ -402,6 +402,33 @@ def run_deploy(store, pipeline, account: int) -> int:
     return 0
 
 
+def run_ui(store) -> int:
+    """打开界面窗口。
+
+    ⚠️ 界面和"收消息"是**两个独立进程**，共用同一个 SQLite 库。
+    好处：界面关掉不影响后台收消息；后台也不用为了显示而常驻一个窗口。
+    这也解释了为什么值得用网页界面 —— 那 400 多 MB 只在窗口开着时占。
+    """
+    try:
+        import webview
+    except ImportError:
+        print("界面需要 pywebview，装一下：")
+        print("    pip install pywebview pythonnet")
+        return 1
+
+    from app.ui.bridge import Api
+
+    page = Path(__file__).resolve().parent / "app" / "ui" / "index.html"
+    if not page.is_file():
+        print(f"找不到界面文件：{page}")
+        return 1
+
+    webview.create_window("私人秘书", str(page), width=1040, height=680,
+                          min_size=(820, 520), js_api=Api(store))
+    webview.start()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="私人秘书（开发期命令行）")
     parser.add_argument("text", nargs="*", help="要录入的文字")
@@ -427,6 +454,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--account", type=int,
                         help="要登录的 QQ 号（NapCat 按号找配置文件，必须给）")
     parser.add_argument("--dir", help="NapCat 装到哪个目录（默认 data/napcat）")
+    parser.add_argument("--ui", action="store_true", help="打开界面窗口")
     parser.add_argument("--file", help="把一个文件（图片/Word/PPT/PDF）变成待办")
     parser.add_argument("--read", help="只看这个文件能提出什么字，不入库")
     parser.add_argument("--stats", action="store_true", help="看统计")
@@ -519,6 +547,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.qq:
         return run_qq(store, pipeline)
+
+    if args.ui:
+        return run_ui(store)
 
     if args.deploy or args.setup:
         account = args.account

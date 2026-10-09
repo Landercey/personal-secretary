@@ -331,8 +331,14 @@ class SqliteStore(Store):
             return ("status='open' AND is_archived=0 AND due_at IS NOT NULL"
                     " AND substr(due_at,1,10) BETWEEN ? AND ?"), (today, week_end)
         if view == "overdue":
-            return ("status='open' AND is_archived=0 AND due_at IS NOT NULL AND due_at < ?"),
-            (now,)
+            # ⚠️ 别把这一行拆成两行。写成
+            #     return ("...< ?"),
+            #     (now,)
+            # 行尾那个逗号会让它变成"只有一个元素的元组"，下一行成了独立语句，
+            # 解包时报 "not enough values to unpack"。这个坑真的踩过 ——
+            # 而且只有真正调 overdue 这条路时才会炸，平时藏着。
+            return ("status='open' AND is_archived=0 AND due_at IS NOT NULL"
+                    " AND due_at < ?"), (now,)
         if view == "archive":
             return "is_archived=1", ()
         if view == "junk":
