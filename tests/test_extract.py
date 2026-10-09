@@ -144,12 +144,15 @@ class TestPlainText(unittest.TestCase):
 
 class TestSupportMatrix(unittest.TestCase):
     def test_supported_extensions(self):
-        for ext in (".docx", ".pptx", ".xlsx", ".pdf", ".png", ".jpg", ".txt", ".csv"):
+        for ext in (".docx", ".pptx", ".xlsx", ".pdf", ".png", ".jpg", ".txt", ".csv",
+                    ".zip", ".xmind"):
             with self.subTest(ext=ext):
                 self.assertTrue(is_supported(f"x{ext}"))
 
     def test_unsupported_extensions(self):
-        for ext in (".mp4", ".zip", ".exe", ".apk", ""):
+        # .zip/.xmind 2026-10-09 起支持了（本质是 zip，标准库直接读）；
+        # .rar/.7z 仍然不做 —— 解压算法有版权，要引二进制库。
+        for ext in (".mp4", ".rar", ".7z", ".exe", ".apk", ""):
             with self.subTest(ext=ext):
                 self.assertFalse(is_supported(f"x{ext}"))
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import ocr, ooxml, pdf
+from . import archive, ocr, ooxml, pdf
 from .types import ExtractResult
 
 # 各类扩展名。加新格式时这三个集合和 _READERS 一起改。
@@ -18,12 +18,25 @@ TEXT_EXTS = {".txt", ".md", ".markdown", ".csv", ".log", ".json"}
 PDF_EXTS = {".pdf"}
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif", ".tif", ".tiff"}
 VIDEO_EXTS = {".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm", ".m4v"}
+ARCHIVE_EXTS = {".zip"}                 # 只认 zip：rar/7z 的解压算法有版权
+MINDMAP_EXTS = {".xmind"}               # 本质也是 zip
 
 # 格式 → 读取函数。加新格式在这一行登记即可。
 _READERS = {
     ".docx": ooxml.read_docx,
     ".pptx": ooxml.read_pptx,
     ".xlsx": ooxml.read_xlsx,
+    ".zip": archive.read_zip,
+    ".xmind": archive.read_xmind,
+}
+
+# 明确不做的格式，给一句"那该怎么办"。只说"不支持"，用户只能来问作者。
+UNSUPPORTED_HINTS = {
+    ".rar": "压缩包只认 .zip —— .rar / .7z 的解压算法有版权，标准库做不了。"
+            "先解压出来，或者用 zip 重新压一份",
+    ".7z": "同上：只认 .zip，请先解压或用 zip 重新压一份",
+    ".tar": "请压成 .zip 再发（.tar/.tar.gz 没做）",
+    ".gz": "请压成 .zip 再发（.tar/.tar.gz 没做）",
 }
 
 
@@ -33,7 +46,8 @@ def job_type_for(path: str | Path) -> str | None:
     if ext in IMAGE_EXTS:
         return "ocr"
     if ext in OFFICE_EXTS or ext in LEGACY_OFFICE_EXTS \
-            or ext in TEXT_EXTS or ext in PDF_EXTS:
+            or ext in TEXT_EXTS or ext in PDF_EXTS \
+            or ext in ARCHIVE_EXTS or ext in MINDMAP_EXTS:
         return "doc_parse"
     return None          # 视频、压缩包、可执行文件：按设计不处理
 
@@ -79,9 +93,13 @@ def extract_text(path: str | Path) -> ExtractResult:
             return ocr.recognize(str(target))
 
         if ext in VIDEO_EXTS:
-            return ExtractResult(method="skip", note="视频暂不处理")
+            return ExtractResult(
+                method="skip",
+                note="视频要先把声音转成文字（配语音识别模型），那个还没做 —— "
+                     "想留个念的话，可以把视频里关键的一帧截图发过来")
 
+        hint = UNSUPPORTED_HINTS.get(ext)
         return ExtractResult(method="unsupported",
-                             note=f"暂不支持的文件类型：{ext or '无扩展名'}")
+                             note=hint or f"暂不支持的文件类型：{ext or '无扩展名'}")
     except Exception as exc:
         return ExtractResult(method="error", note=f"提取异常：{type(exc).__name__}: {exc}")
