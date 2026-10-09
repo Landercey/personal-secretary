@@ -268,6 +268,15 @@ details.adv[open] > summary::before { content: "▾ " }
 /* 「还没做」的段：说明为什么一个框都没有 */
 .pending { margin: 0 0 12px; padding: 2px; font-size: 12px; color: var(--text-3); line-height: 1.75 }
 
+/* QQ 那一页：二维码、启动/停止、开机自启 */
+.qqbox .qr {
+  width: 196px; height: 196px; display: block; margin: 10px auto;
+  border: 1px solid var(--line); border-radius: 8px; background: #fff
+}
+.qqbox .ok { color: #16a34a }
+.qqbox .bad { color: var(--today) }
+.qqbox .acts { margin-top: 10px }
+
 /* 锁住的项：程序自己管的，改了会让两边配置对不上、QQ 静默收不到消息 */
 .field.locked input { background: #f3f3f5; color: var(--text-3); cursor: not-allowed }
 .field .tag {
@@ -410,6 +419,7 @@ let keyword = '';           // 搜索词。非空时中间那列显示搜索结�
 let editing = false;        // 详情面板是不是在编辑模式
 let jumped = false;         // 第一次进来做过"今天没安排"的自动跳转没有
 let viewHint = '';          // 标题旁边那句小提示
+let qqTimer = null;         // 「QQ 接收」那一块的轮询（等二维码出来）
 
 const $ = (id) => document.getElementById(id);
 
@@ -979,6 +989,14 @@ function drawSettings() {
     });
   }
 
+  // 「收消息」那一页：二维码 + 启动/停止 + 开机自启。
+  // 放在这里是因为"QQ 接不接得上"就是这一页的事，不用另开一个入口。
+  const qqPane = $('detailInner').querySelector('.tabpane[data-g="group_receive"]');
+  if (qqPane) {
+    qqPane.insertAdjacentHTML('beforeend', '<div class="qqbox" id="qqBox"></div>');
+    drawQqBox();
+  }
+
   // 从"还没弄完这几步"点进来时，跳到对应的那一段并展开它
   if (openSection) {
     const target = $('detailInner').querySelector(`details[data-section="${openSection}"]`);
@@ -1016,6 +1034,95 @@ function openSettings(section) {
   schema = null;
   setPanel('settings');
   renderPanel(true);
+}
+
+/* ---------- QQ 接收：二维码 / 启动 / 停止 / 开机自启 ---------- */
+async function drawQqBox() {
+  const box = $('qqBox');
+  if (!box) return;                       // 面板已经关了
+  const data = await call('qq_panel');
+  if (!data || !$('qqBox')) return;
+
+  const receiver = data.receiver || {};
+  const qr = data.qr || {};
+  // 心跳里的 detail 是"登录号 xxx｜收到 N"就说明真连上了；
+  // 是"等扫码登录"就说明进程在跑、但还没登上。
+  const connected = String(receiver.detail || '').startsWith('登录号');
+  const status = receiver.alive
+    ? (connected
+        ? `<span class="ok">✅ 正在收消息（${esc(receiver.detail)}）</span>`
+        : '<span class="ok">✅ 后台在跑</span>，但还没登录 —— 扫下面的二维码')
+    : '<span class="bad">⚠️ 后台没在跑 —— 现在收不到任何消息</span>';
+
+  const qrBlock = qr.image
+    ? `<img class="qr" src="${qr.image}" alt="登录二维码">
+       <p class="hint">用手机 QQ 扫它。约 2 分钟过期，过期了点下面的「重新出码」。</p>`
+    : (qr.ready
+        ? `<p class="hint">二维码已经 ${Math.max(1, Math.round((qr.age_seconds || 0) / 60))} 分钟了，
+             多半过期了。点「重新出码」拿一张新的。</p>`
+        : '<p class="hint">还没出二维码。点下面「启动 QQ」—— 第一次会先自动下载安装 NapCat（约几十秒）。</p>');
+
+  box.innerHTML = `<div class="guide" style="margin:0 0 14px">
+      <h3>QQ 接收</h3>
+      <p>${status}</p>
+      ${qrBlock}
+      <div class="acts">
+        <button class="primary block" id="btnQQStart"${receiver.alive ? ' disabled' : ''}>
+          启动 QQ（后台常驻，收消息 + 定时推送）</button>
+        ${receiver.alive && !connected
+          ? '<button class="block" id="btnQQRestart">重新出码（重启一次后台）</button>' : ''}
+        <button class="block" id="btnQQStop"${receiver.alive ? '' : ' disabled'}>
+          停止后台</button>
+      </div>
+      <p class="hint" style="margin-top:10px">
+        开机自启：<a id="btnAuto" data-on="${data.autostart ? 1 : 0}">${
+          data.autostart ? '已开启，点一下关掉' : '点一下开启'}</a><br>
+        开启后每次开机它自己在后台跑（一个进程干两件事）。
+        不开机自启的话，每天得自己点一次「启动 QQ」。</p>
+    </div>`;
+
+  $('btnQQStart').onclick = async () => {
+    const res = await call('start_qq');
+    if (!res) return;
+    toast(res.message || '起来了');
+    drawQqBox();
+  };
+  $('btnQQStop').onclick = async () => {
+    const res = await call('stop_background');
+    if (!res) return;
+    toast(res.message || '让它收工了');
+    setTimeout(drawQqBox, 3000);
+  };
+  // 二维码约 2 分钟过期，而 NapCat 不会自己刷新 —— 只能重启一次。
+  // 这就是为什么必须给一个「重新出码」：不然用户对着一个扫不上的码干瞪眼。
+  const restart = $('btnQQRestart');
+  if (restart) restart.onclick = async () => {
+    toast('正在重启后台，几秒钟…');
+    await call('stop_background');
+    for (let i = 0; i < 12; i += 1) {          // 等它真的退下去
+      await new Promise(r => setTimeout(r, 1500));
+      const now = await call('qq_panel');
+      if (now && !(now.receiver || {}).alive) break;
+    }
+    await call('start_qq');
+    toast('重启了。NapCat 会写一张新码，等十几秒');
+    drawQqBox();
+  };
+  $('btnAuto').onclick = async () => {
+    const on = $('btnAuto').dataset.on === '1';
+    const res = await call('set_autostart', !on);
+    if (!res) return;
+    toast(res.message || (on ? '已关掉' : '已开启'));
+    drawQqBox();
+  };
+
+  // 二维码是 NapCat 启动几十秒后才写出来的，所以得自己盯着点。
+  // 面板一关就停 —— 别让一个看不见的定时器一直在那儿敲桥。
+  clearTimeout(qqTimer);
+  qqTimer = setTimeout(async () => {
+    if (!$('qqBox')) return;
+    await drawQqBox();
+  }, 5000);
 }
 
 /* ---------- 上手清单 ---------- */

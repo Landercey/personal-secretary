@@ -218,6 +218,7 @@ def run_qq(store, pipeline) -> int:
     全项目只有 run.py 负责装配。
     """
     settings = QQSettings.from_config()
+    heartbeat.clear_stop()      # 清掉上次留下的停止请求，不然一起来就退出
     if not settings.enabled:
         print("QQ 接入没有启用。")
         print("打开 config.toml，把 [qq] 下面的 enabled 改成 true，再运行一次。")
@@ -280,6 +281,9 @@ def run_qq(store, pipeline) -> int:
             heartbeat.beat(store, (
                 f"登录号 {state.get('self_id') or '?'}｜收到 {state.get('received', 0)}"
                 if state.get("connected") else "等 NapCat 连上来"))
+            if heartbeat.stop_requested():
+                print("  收到停止请求（界面里点的「停止后台」），收工。")
+                break
             if not state.get("running"):
                 continue
             if state.get("connected"):
@@ -347,7 +351,9 @@ def parse_times_or_empty() -> list[str]:
 
 def deploy_dir() -> Path:
     """NapCat 装哪儿。跟着数据目录走。"""
-    return default_data_dir().parent / "napcat"
+    from app.runtime import deploy
+
+    return deploy.default_dir()
 
 
 def run_setup(onekey_dir: Path, account: int, token: str, port: int) -> int:
@@ -441,6 +447,12 @@ def run_deploy(store, pipeline, account: int) -> int:
         while True:
             time.sleep(2)
             state = source.status()
+            heartbeat.beat(store, (
+                f"登录号 {state.get('self_id') or '?'}｜收到 {state.get('received', 0)}"
+                if state.get("connected") else "等扫码登录"))
+            if heartbeat.stop_requested():
+                print("  收到停止请求，收工。")
+                break
             if state.get("connected"):
                 line = (f"  [已连接] 登录号 {state.get('self_id') or '?'}｜"
                         f"收到 {state.get('received', 0)}｜收下 {state.get('accepted', 0)}｜"
@@ -457,6 +469,37 @@ def run_deploy(store, pipeline, account: int) -> int:
         if napcat.poll() is None:
             napcat.terminate()
     return 0
+
+
+def run_serve(store, pipeline, sink, account: int | None = None) -> int:
+    """后台全开：定时推送 + QQ 接收（需要的话先装好 NapCat）。**一个进程。**
+
+    为什么合成一个：
+      · 开机自启只要挂一条，不用挂两条；
+      · 少一个进程 = 少一份内存、少一个崩溃点（旧项目就是两个进程）；
+      · 界面上那个「启动 QQ」按钮起的也是它。
+    定时推送本来就跑在自己的线程里（`Scheduler.start()`），塞进来很自然。
+    """
+    scheduler = None
+    if config.get("push", "enabled", True) and parse_times_or_empty():
+        scheduler = Scheduler(store, sink, on_event=lambda text: print(f"  [推送] {text}"))
+        try:
+            for batch in scheduler.run_once():
+                print(f"  [补推] {batch}")
+            scheduler.start()
+            print(f"  定时推送：{scheduler.describe()}")
+        except Exception as exc:                      # 推送起不来不该拖累收消息
+            print(f"  ⚠️ 定时推送没起来（{type(exc).__name__}: {exc}），收消息照常")
+            scheduler = None
+    else:
+        print("  定时推送没开（config.toml 的 [push] enabled / times）")
+    try:
+        if account:
+            return run_deploy(store, pipeline, account)
+        return run_qq(store, pipeline)
+    finally:
+        if scheduler is not None:
+            scheduler.stop()
 
 
 def run_ui(store, plugins=(), actions=None) -> int:
@@ -569,6 +612,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check-qq", action="store_true",
                         help="看 QQ 接入的配置和状态")
     parser.add_argument("--qq", action="store_true", help="启动 QQ 接收")
+    parser.add_argument("--serve", action="store_true",
+                        help="后台全开：收消息 + 定时推送，一个进程（开机自启用这个）")
     parser.add_argument("--deploy", action="store_true",
                         help="一键装 NapCat 并启动（要先给 --account）")
     parser.add_argument("--setup", action="store_true",
@@ -691,6 +736,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.qq:
         return run_qq(store, pipeline)
 
+    if args.serve:
+        # 没给 --account 就用 config.toml 里 [qq] account 那个号。
+        # 界面上的「启动 QQ」按钮走的也是这条路（它不该逼用户记命令行参数）。
+        account = args.account or int(config.get("qq", "account", 0) or 0)
+        return run_serve(store, pipeline, sink, account or None)
+
     if args.ui:
         return run_ui(store, registry.status, {
             "add_text": lambda text: ingest(store, source, pipeline, text),
@@ -710,10 +761,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if ok else 1
 
     if args.deploy or args.setup:
-        account = args.account
+        account = args.account or int(config.get("qq", "account", 0) or 0)
         if not account:
             print("要装哪个号？加一个参数，例如：")
             print("    python run.py --deploy --account 123456789")
+            print("    （或者在 config.toml 的 [qq] account 里填一次，以后不用再带参数）")
             return 1
         token = ensure_token(str(config.get("qq", "token", "") or ""))
         port = int(config.get("qq", "bind_port", 18080) or 18080)

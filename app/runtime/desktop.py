@@ -24,10 +24,12 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 from pathlib import Path
 
 SHORTCUT_NAME = "私人秘书.lnk"
+AUTOSTART_NAME = "私人秘书(开机自启).lnk"
 
 # 在 PowerShell 里跑的一段脚本。用 {} 占位，由 Python 填好再编码。
 _SCRIPT = """
@@ -150,3 +152,67 @@ def resolve_shortcut(path: Path) -> Path | None:
             value = line[len(_TARGET_MARK):].strip()
             return Path(value) if value else None
     return None
+
+
+# --------------------------------------------------------------------- 开机自启
+def startup_folder() -> Path:
+    """Windows 的「启动」文件夹。放进去的快捷方式开机就会自己跑。"""
+    base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+    return (Path(base) / "Microsoft" / "Windows" / "Start Menu"
+            / "Programs" / "Startup")
+
+
+def autostart_entry() -> Path:
+    return startup_folder() / AUTOSTART_NAME
+
+
+def autostart_enabled() -> bool:
+    return autostart_entry().is_file()
+
+
+def set_autostart(enabled: bool, root: Path | None = None) -> tuple[bool, str]:
+    """开/关开机自启。返回 (成功?, 说明)。
+
+    **挂的是哪一个进程**：`run.py --serve` —— 一个进程同时干收消息和定时推送。
+    以前这俩是分开的，开机自启就得挂两条、多一个崩溃点，所以合成一条了。
+
+    关掉就是删掉那个快捷方式。挪了文件夹之后要重新开一次
+    （快捷方式里存的是绝对路径）。
+    """
+    entry = autostart_entry()
+    if not enabled:
+        try:
+            entry.unlink()
+        except FileNotFoundError:
+            return True, "本来就是关着的"
+        except OSError as exc:
+            return False, f"删不掉：{exc}"
+        return True, "已关掉开机自启"
+
+    project = Path(root) if root else Path(__file__).resolve().parents[2]
+    interpreter = pythonw()
+    if interpreter is None:
+        return False, "找不到 pythonw.exe（装 Python 时没勾上？）"
+    runner = project / "run.py"
+    if not runner.is_file():
+        return False, f"找不到 {runner}"
+    try:
+        entry.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return False, f"建不了启动文件夹：{exc}"
+
+    script = (
+        "$ErrorActionPreference = 'Stop'\n"
+        "$ProgressPreference = 'SilentlyContinue'\n"
+        "$shell = New-Object -ComObject WScript.Shell\n"
+        f"$link = $shell.CreateShortcut('{str(entry).replace(chr(39), chr(39) * 2)}')\n"
+        f"$link.TargetPath = '{str(interpreter).replace(chr(39), chr(39) * 2)}'\n"
+        f"$link.Arguments = '\"{runner}\" --serve'\n"
+        f"$link.WorkingDirectory = '{str(project).replace(chr(39), chr(39) * 2)}'\n"
+        "$link.Description = '私人秘书 · 后台收消息 + 定时推送'\n"
+        "$link.Save()\n"
+    )
+    ok, output = _run_powershell(script)
+    if not ok:
+        return False, output or "PowerShell 建快捷方式失败"
+    return True, "已开启：下次开机它会自己跑起来"

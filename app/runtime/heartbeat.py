@@ -1,4 +1,4 @@
-"""心跳：让界面知道"收消息的那个进程到底还活着没有"。
+"""后台进程的心跳与停止信号：让界面知道它活着，也能让它停下来。
 
 =====================================================================
 为什么必须有这个
@@ -13,6 +13,16 @@
 
 做法：收消息的循环每隔一会儿往库里记一笔"我还活着"，
 界面读这一笔，看它有多新。跨进程、不依赖网络、不需要额外端口。
+
+=====================================================================
+停止信号为什么是"写个文件"而不是"杀进程"
+=====================================================================
+界面上的「停止后台」如果拿 PID 去杀，得先确认那个 PID 确实是我们的
+后台进程 —— 查错了就是误杀别人的程序。风险大、还要 WMI。
+
+写一个 `data/stop.request` 文件，让后台循环自己看到、自己退：
+简单、安全、不依赖平台。代价是善后要记得**清掉这个文件**
+（见 `clear_stop`：不清的话下次开机自启一启动就立刻退出，这个坑很典型）。
 
 =====================================================================
 想改这里的话
@@ -30,6 +40,7 @@ from datetime import datetime
 from ..contracts.models import TIME_FORMAT
 
 KEY = "receiver_beat"
+STOP_FILE = "stop.request"
 
 # 超过这么多秒没有心跳，就认为它没在跑。
 # 60 秒是"收消息的循环每 10 秒写一次"的 6 倍余量 —— 机器卡一下也不至于误报。
@@ -73,3 +84,32 @@ def state(store) -> dict:
         return {"alive": False, "age_seconds": None, "detail": "", "at": at}
     return {"alive": age < STALE_SECONDS, "age_seconds": round(age),
             "detail": str(payload.get("detail") or ""), "at": at}
+
+
+def request_stop() -> None:
+    """请后台进程停下来。界面上那个「停止后台」按钮调它。"""
+    from .config import default_data_dir
+
+    folder = default_data_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / STOP_FILE).write_text("stop", encoding="utf-8")
+
+
+def stop_requested() -> bool:
+    from .config import default_data_dir
+
+    return (default_data_dir() / STOP_FILE).exists()
+
+
+def clear_stop() -> None:
+    """后台进程**启动时**先清掉上一次留下的停止请求。
+
+    不清的话：用户点了「停止后台」→ 下次开机自启起来的进程一睁眼看到
+    那个旧文件，立刻又退出了。用户会说"开机自启根本没用"。
+    """
+    from .config import default_data_dir
+
+    try:
+        (default_data_dir() / STOP_FILE).unlink()
+    except OSError:
+        pass

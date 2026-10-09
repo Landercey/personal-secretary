@@ -185,6 +185,17 @@ def qr_path(shell_dir: Path) -> Path:
     return config_dir(shell_dir).parent / "cache" / "qrcode.png"
 
 
+def default_dir() -> Path:
+    """NapCat 默认装哪儿：跟着数据目录走（绿色版就是程序旁边的 napcat/）。
+
+    放在这里而不是 run.py，是因为**界面也要知道**（它要读二维码、要判断装没装）。
+    界面不许 import run.py（那是唯一的装配点），所以这个路径必须由 runtime 提供。
+    """
+    from .config import default_data_dir
+
+    return default_data_dir().parent / "napcat"
+
+
 def launch_command(shell_dir: Path, qq: int | None = None) -> list[str]:
     """启动 NapCat 的命令行。
 

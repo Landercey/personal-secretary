@@ -134,6 +134,9 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         # NapCat 会主动连到下面这个地址（叫"反向 WebSocket"：由我们监听，
         # 它来连我们）。改了这里，NapCat 那边的配置也要跟着改。
         "enabled": False,                 # 改成 true 才开始收 QQ 消息
+        # 要登录哪个 QQ 号。NapCat 是**按号找配置文件**的（onebot11_<QQ>.json），
+        # 所以这里必须和实际扫码登录的号一致。界面上的「启动」按钮也靠它。
+        "account": 0,
         "bind_host": "127.0.0.1",         # 只监听本机，不接受外面的连接
         "bind_port": 18080,
         "path": "/onebot/v11/ws",
@@ -252,6 +255,9 @@ KEY_COMMENTS: dict[str, str] = {
     "wecom_bot.send_attachments": "推送时要不要连图片/文件原件一起发到手机。嫌手机响得勤就改 false。",
     # [qq]
     "qq.enabled": "改成 true 才开始收 QQ 消息。改完要重启程序。",
+    "qq.account": "要登录哪个 QQ 号（填数字，不要引号）。\n"
+                  "#   NapCat 是按号找配置文件的，所以这里必须和你扫码登录的号一致。\n"
+                  "#   填了它，设置里那个「启动 QQ」按钮才知道该起哪个号。",
     "qq.bind_host": "监听地址。默认 127.0.0.1 只接受本机连接，一般不用改。",
     "qq.bind_port": "监听端口。和 NapCat 那边配的端口要一致。",
     "qq.path": "监听路径。和 NapCat 那边配的路径要一致。",

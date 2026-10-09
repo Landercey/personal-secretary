@@ -273,6 +273,94 @@ class Api:
             return target
         raise ValueError("这个附件不在库里")
 
+    # ------------------------------------------------------------------ QQ 那一页
+    def qq_panel(self) -> dict:
+        """QQ 那一页要的全部状态：装没装、后台活没活、二维码还在不在。
+
+        **二维码是个 PNG 文件**（NapCat 自己写到 cache/qrcode.png 的），
+        直接读成 data URL 给界面显示 —— 用户不用去文件夹里找图。
+        """
+        import base64
+
+        from ..runtime import deploy, desktop, heartbeat
+        from ..runtime.config import config
+
+        receiver = heartbeat.state(self.store)
+        shell = deploy.find_shell_dir(deploy.default_dir())
+        qr = deploy.qr_path(shell) if shell else None
+        qr_info = {"ready": False, "age_seconds": None, "image": "", "path": str(qr or "")}
+        if qr is not None and qr.is_file():
+            age = time.time() - qr.stat().st_mtime
+            qr_info["ready"] = True
+            qr_info["age_seconds"] = round(age)
+            # 超过 5 分钟就不给图了：NapCat 的码大约 2 分钟过期，
+            # 拿一个过期的码让人扫，比不给更气人。
+            if age < 300 and qr.stat().st_size < 2 * 1024 * 1024:
+                blob = base64.b64encode(qr.read_bytes()).decode("ascii")
+                qr_info["image"] = f"data:image/png;base64,{blob}"
+
+        return {
+            "installed": shell is not None,
+            "account": int(config.get("qq", "account", 0) or 0),
+            "qq_enabled": bool(config.get("qq", "enabled")),
+            "receiver": receiver,
+            "qr": qr_info,
+            "autostart": desktop.autostart_enabled(),
+        }
+
+    def start_qq(self) -> dict:
+        """后台起一个 `run.py --serve`（收消息 + 定时推送）。
+
+        为什么开**子进程**而不是在当前进程里起线程：界面关掉不该把收消息
+        一起关掉；而且把 WebSocket 服务端和 NapCat 子进程塞进界面进程，
+        界面一崩就全崩了。这也是原来的设计（两个进程），只是现在由界面代劳。
+        """
+        import subprocess
+        import sys
+
+        from ..runtime import heartbeat
+
+        if heartbeat.state(self.store)["alive"]:
+            return {"ok": False, "message": "后台已经在跑了"}
+        project = Path(__file__).resolve().parents[2]
+        runner = project / "run.py"
+        if not runner.is_file():
+            return {"ok": False, "message": f"找不到 {runner}"}
+        interpreter = Path(sys.executable).with_name("pythonw.exe")
+        exe = interpreter if interpreter.is_file() else Path(sys.executable)
+        flags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                 | getattr(subprocess, "DETACHED_PROCESS", 0))
+        try:
+            subprocess.Popen(
+                [str(exe), str(runner), "--serve"], cwd=str(project),
+                creationflags=flags, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                close_fds=True,
+            )
+        except OSError as exc:
+            return {"ok": False, "message": f"起不来：{exc}"}
+        return {"ok": True, "lazy": True,
+                "message": "后台起来了。第一次要等几十秒下载安装 NapCat，"
+                           "完了二维码会出现在这里。"}
+
+    def stop_background(self) -> dict:
+        """让后台进程自己收工（写个文件，它自己看到就退）。
+
+        为什么不直接杀进程：得先确认那个 PID 确实是我们的后台进程，
+        查错了就是误杀别人的程序。写文件让它自己看，简单也安全。
+        """
+        from ..runtime import heartbeat
+
+        heartbeat.request_stop()
+        return {"ok": True, "message": "已经让它收工，几秒钟后停"}
+
+    def set_autostart(self, enabled: bool) -> dict:
+        """开/关开机自启（往「启动」文件夹里放/删一个快捷方式）。"""
+        from ..runtime import desktop
+
+        ok, message = desktop.set_autostart(bool(enabled))
+        return {"ok": ok, "message": message}
+
     # ------------------------------------------------------------------ 环境
     def config_summary(self) -> dict:
         """界面上显示"现在什么状态"用。"""
