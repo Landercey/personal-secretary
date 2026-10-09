@@ -34,6 +34,7 @@
     python run.py --deploy --account <QQ号>  一键装 NapCat 并启动（先接收端后 QQ）
     python run.py --stats                  看统计
     python run.py --plugins                看装了哪些插件、有没有坏掉的
+    python run.py --sync                   拉一遍插件来源（课表订阅），变成待办
     python run.py --selftest               检查契约与环境
 """
 
@@ -53,7 +54,9 @@ from app.pipeline.chat_filter import ChatNoiseEnricher           # noqa: E402
 from app.pipeline.file_enricher import FileEnricher              # noqa: E402
 from app.pipeline.parse_enricher import RuleParseEnricher        # noqa: E402
 from app.runtime.config import config, default_data_dir          # noqa: E402
-from app.runtime.plugins import Registry, load as load_plugins   # noqa: E402
+from app.runtime.plugins import (                                # noqa: E402
+    Registry, load as load_plugins, plugin_dir,
+)
 from app.runtime.scheduler import Scheduler, due_slots           # noqa: E402
 from app.runtime.sysmon import describe as mem_describe          # noqa: E402
 from app.sinks.console import build_digest                       # noqa: E402
@@ -73,7 +76,7 @@ def build(database: str | Path | None = None):
 
     插件的加载放在装配的最后一步：**坏插件只会被记一笔**，
     不影响这里把主程序装配起来（CONTRACT.md 第二节硬性约束）。
-    返回值里多带的 plugin_status 就是给 --plugins / 界面 / 自检看的。
+    返回值里多带的 registry 就是给 --plugins / --sync / 界面 / 自检看的。
     """
     root = Path(__file__).resolve().parent
     db_path = Path(database) if database else default_data_dir() / "secretary.db"
@@ -81,7 +84,7 @@ def build(database: str | Path | None = None):
     source = ManualSource()
 
     registry = Registry()
-    plugin_status = load_plugins(root, registry)
+    load_plugins(root, registry)     # 加载结果记在 registry.status 上
 
     # 理解层的零件分两组，管线保证「消息级」整组先跑：
     #   ① 文件解析（把附件读成文字拼进正文）
@@ -97,7 +100,7 @@ def build(database: str | Path | None = None):
         ],
     )
     sink = build_sink()          # 配了企微就走企微，没配就退回控制台
-    return store, source, pipeline, sink, plugin_status
+    return store, source, pipeline, sink, registry
 
 
 def ingest_message(store, pipeline, message) -> int:
@@ -462,8 +465,6 @@ def run_ui(store, plugins=()) -> int:
 
 def list_plugins(statuses) -> int:
     """`--plugins`：装了哪些、哪个坏了。坏插件不影响主程序，但要说出来。"""
-    from app.runtime.plugins import plugin_dir
-
     folder = plugin_dir(Path(__file__).resolve().parent)
     print("插件现状：")
     print(f"  插件目录：{folder}")
@@ -479,6 +480,29 @@ def list_plugins(statuses) -> int:
               "它对主程序没影响，但那个插件自己不会干活。")
         return 1
     return 0
+
+
+def sync_sources(store, pipeline, sources) -> int:
+    """拉一遍插件来源（课表订阅这类），结果当普通消息走同一条管线。
+
+    一个来源挂了不影响别的：它自己报一句错，其余的照拉 ——
+    跟"坏插件不影响启动"是同一条规矩，只是发生在运行期。
+    """
+    added = 0
+    for source in sources:
+        label = getattr(source, "title", None) or getattr(source, "kind", "?")
+        try:
+            messages = source.fetch() or []
+        except Exception as exc:
+            print(f"  ✗ {label} 拉取失败：{type(exc).__name__}: {exc}")
+            continue
+        if not messages:
+            print(f"  · {label}：这次没有新的")
+            continue
+        print(f"  · {label}：拿到 {len(messages)} 条")
+        for message in messages:
+            added += ingest_message(store, pipeline, message)
+    return added
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -515,6 +539,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stats", action="store_true", help="看统计")
     parser.add_argument("--plugins", action="store_true",
                         help="看装了哪些插件（plugins/ 文件夹里的 .py）")
+    parser.add_argument("--sync", action="store_true",
+                        help="拉一遍插件来源（课表订阅这类），存成待办")
     parser.add_argument("--selftest", action="store_true", help="检查契约与环境")
     parser.add_argument("--db", help="数据库路径（默认 data/secretary.db）")
     args = parser.parse_args(argv)
@@ -522,10 +548,20 @@ def main(argv: list[str] | None = None) -> int:
     if args.selftest:
         return _selftest()
 
-    store, source, pipeline, sink, plugin_status = build(args.db)
+    store, source, pipeline, sink, registry = build(args.db)
 
     if args.plugins:
-        return list_plugins(plugin_status)
+        return list_plugins(registry.status)
+
+    if args.sync:
+        if not registry.sources:
+            print("没有可主动拉取的插件来源。")
+            print(f"（插件放在 {plugin_dir(Path(__file__).resolve().parent)}，"
+                  "课表插件要在 config.toml 的 [timetable] 里填 url）")
+            return 0
+        added = sync_sources(store, pipeline, registry.sources)
+        print(f"\n同步完成：新待办 {added} 条")
+        return 0
 
     if args.done:
         store.set_status(args.done, STATUS_DONE, "用户在命令行标记完成")
@@ -609,7 +645,7 @@ def main(argv: list[str] | None = None) -> int:
         return run_qq(store, pipeline)
 
     if args.ui:
-        return run_ui(store, plugin_status)
+        return run_ui(store, registry.status)
 
     if args.shortcut:
         from app.runtime.desktop import create_shortcut

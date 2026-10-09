@@ -26,6 +26,28 @@ def register(registry):
     registry.add_draft(MyEnricher())     # 或 registry.add_text(...)
 ```
 
+需要**主动去外面拉**的插件（课表订阅、邮箱）注册一个来源，
+然后由 `python run.py --sync` 去拉：
+
+```python
+from app.contracts.interfaces import Source
+
+class MySource(Source):
+    kind  = "my-source"
+    title = "我的来源"
+
+    def submit(self, message):   # 别人塞消息给你（外面推的用这个）
+        return message
+
+    def fetch(self):             # 主动去拉，返回 list[Message]
+        return []
+
+def register(registry):
+    registry.add_source(MySource())
+```
+
+现成的例子看 `timetable.py`（课表：ICS / CSV / JSON 三种格式）。
+
 **插件写坏了不会影响程序启动**：加载失败只会在这个文件夹对应的状态里
 记一笔，界面底部和 `python run.py --selftest` 都会显示出来。
 

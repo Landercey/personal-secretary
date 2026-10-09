@@ -150,6 +150,21 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "max_text_chars": 3000,           # 单条消息最多留多少字，防超长轰炸
         "keep_every_message": False,      # true = 连闲聊也存进库（排查用，平时关着）
     },
+    # 课表插件的设置。插件在 plugins/timetable.py；不用它的话这一段留空就行。
+    "timetable": {
+        # iCal 订阅地址（.ics）。留空 = 不用课表插件。
+        # 学校教务系统里找「导出日历 / 订阅」拿到的那个地址，webcal:// 开头也认。
+        "url": "",
+        # 或者指一个本地文件：.ics / .csv / .json / .txt 都能读。
+        # 格式靠内容自动认，不用告诉程序是哪种。
+        "file": "",
+        # 往后看几天。默认一周 —— 只把最近的课变成待办，
+        # 整学期的课一次性灌进来会把待办列表淹掉。
+        "days_ahead": 7,
+        # 开学第一周的周一，例如 "2026-09-01"。只有表格里写了
+        # "单周/双周/1-16周" 时才需要它；留空就当成每周都上。
+        "term_start": "",
+    },
 }
 
 # 新建项目必须零真实信息（CONTRACT.md 第十节）。这里只放占位值。
@@ -236,6 +251,18 @@ KEY_COMMENTS: dict[str, str] = {
     "qq.only_mention": "true = 群里只有 @我 的消息才收。群太吵可以打开。",
     "qq.max_text_chars": "单条消息最多保留多少字，防超长内容刷屏。",
     "qq.keep_every_message": "true = 连判为闲聊的消息也存进库（排查「为什么没收下」时用）。",
+    # [timetable] 课表插件
+    "timetable.url": "课表订阅地址（iCal / .ics）。留空 = 不用这个。\n"
+                     "#   手机课表 App（WakeUp / 小爱 / 超级课程表）里找「导出 / 分享」，\n"
+                     "#   学校教务系统里找「导出日历 / 订阅」，把地址整条贴进来。\n"
+                     "#   填好后跑一次 python run.py --sync，课就会变成待办。",
+    "timetable.file": "或者指一个本地课表文件，.ics / .csv / .json / .txt 都能读。\n"
+                      "#   格式靠内容自动认，不用告诉程序是哪种。\n"
+                      "#   ⚠️ Excel（.xlsx）要先「另存为 → CSV UTF-8」，程序不直接读 Excel。",
+    "timetable.days_ahead": "往后看几天。默认 7 天，只把最近的课变成待办。",
+    "timetable.term_start": "开学第一周的周一，例如 \"2026-09-01\"。\n"
+                            "#   只有表格里写了「单周 / 双周 / 1-16周」才需要填；\n"
+                            "#   留空就当成每周都上（一周内的待办不受影响）。",
 }
 
 

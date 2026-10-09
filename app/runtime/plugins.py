@@ -20,6 +20,7 @@
 
     def register(registry):
         registry.add_draft(MyEnricher())    # 或 registry.add_text(...)
+        # 需要主动去外面拉的（课表订阅、邮箱）用 registry.add_source(...)
 
 文件名以 `_` 开头的会被跳过（留着自己放草稿用）。
 
@@ -48,10 +49,11 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..contracts.interfaces import DraftEnricher, TextEnricher
+from ..contracts.interfaces import DraftEnricher, Source, TextEnricher
 
 PLUGIN_DIRNAME = "plugins"
 
@@ -75,16 +77,18 @@ class PluginStatus:
 class Registry:
     """插件往这里塞零件，run.py 的 build() 再把它们倒进管线。
 
-    目前只有两个槽：理解层的消息级和草稿级零件。
-    来源和输出通道的插件槽等真有插件要用时再加 ——
-    现在加上去也只是两个没人读的空列表。
+    三个槽：理解层的消息级/草稿级零件，加上来源（课表订阅、邮箱这类
+    需要主动去拉的）。
 
-    shortcut: 只支持理解层零件（AI 增强、语音转写这类都在这一层），
-              等课表/邮箱插件真开工时再扩来源与输出槽。
+    shortcut: 还没有输出通道的槽（推送插件）。等真有那个插件时再加 ——
+              现在加上去只是一个没人读的空列表。
     """
 
     text_enrichers: list = field(default_factory=list)
     draft_enrichers: list = field(default_factory=list)
+    sources: list = field(default_factory=list)
+    # load() 会把每个插件的加载结果放这里，界面和自检都读它
+    status: list["PluginStatus"] = field(default_factory=list)
 
     def add_text(self, enricher) -> None:
         """注册一个消息级零件（AI 读图、语音转写…）。"""
@@ -93,6 +97,10 @@ class Registry:
     def add_draft(self, enricher) -> None:
         """注册一个草稿级零件（AI 归纳、插件版切分…）。"""
         self.draft_enrichers.append(enricher)
+
+    def add_source(self, source) -> None:
+        """注册一个来源（课表订阅、邮箱…）。由 run.py --sync 主动去拉。"""
+        self.sources.append(source)
 
 
 def plugin_dir(root: Path) -> Path:
@@ -113,8 +121,11 @@ def load(root: Path, registry: Registry) -> list[PluginStatus]:
 
     返回每个插件的结果，成功的和失败的都在里面 ——
     "没有插件"和"插件全挂了"在界面上要能分开，所以不能只返回成功的。
+
+    结果同时记在 `registry.status` 上，免得调用方再传一个列表到处走。
     """
-    return [_load_one(path, registry) for path in discover(root)]
+    registry.status = [_load_one(path, registry) for path in discover(root)]
+    return registry.status
 
 
 def _module_name(stem: str) -> str:
@@ -128,13 +139,22 @@ def _load_one(path: Path, registry: Registry) -> PluginStatus:
     # 注册前的长度。出任何事都截回这里，不留半个插件在管线里。
     text_before = len(registry.text_enrichers)
     draft_before = len(registry.draft_enrichers)
+    source_before = len(registry.sources)
 
     try:
         spec = importlib.util.spec_from_file_location(_module_name(name), path)
         if spec is None or spec.loader is None:
             raise ImportError("这个文件没法当成 Python 模块加载")
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        # 必须先登记到 sys.modules 再执行：`@dataclass(slots=True)` 会回头
+        # 去 sys.modules 里找自己的模块，没登记就直接 AttributeError。
+        # （真踩过：课表插件用了个 dataclass，加载报"NoneType has no __dict__"。）
+        sys.modules[spec.name] = module
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            sys.modules.pop(spec.name, None)
+            raise
 
         title = str(getattr(module, "TITLE", "") or name)
         register = getattr(module, "register", None)
@@ -143,16 +163,18 @@ def _load_one(path: Path, registry: Registry) -> PluginStatus:
         register(registry)
 
         # 注册进来的是不是真的零件？不是就整条回滚。
-        _verify(registry, text_before, draft_before)
+        _verify(registry, text_before, draft_before, source_before)
     except Exception as exc:
         del registry.text_enrichers[text_before:]
         del registry.draft_enrichers[draft_before:]
+        del registry.sources[source_before:]
         return PluginStatus(name, title, False, f"{type(exc).__name__}: {exc}")
 
     return PluginStatus(name, title, True)
 
 
-def _verify(registry: Registry, text_before: int, draft_before: int) -> None:
+def _verify(registry: Registry, text_before: int, draft_before: int,
+            source_before: int) -> None:
     """检查这个插件刚注册进来的零件合不合规矩（不合规就抛异常触发回滚）。
 
     为什么要在加载时就卡：管线是按 `order` 排序的，
@@ -165,3 +187,6 @@ def _verify(registry: Registry, text_before: int, draft_before: int) -> None:
     for part in registry.draft_enrichers[draft_before:]:
         if not isinstance(part, DraftEnricher):
             raise TypeError(f"{type(part).__name__} 不是 DraftEnricher（要用 registry.add_draft）")
+    for part in registry.sources[source_before:]:
+        if not isinstance(part, Source):
+            raise TypeError(f"{type(part).__name__} 不是 Source（要用 registry.add_source）")

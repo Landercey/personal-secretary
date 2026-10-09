@@ -68,6 +68,7 @@ python run.py --qq                启动 QQ 接收（Ctrl+C 停止）
 python run.py --done 3            标记某条完成
 python run.py --stats             看统计
 python run.py --plugins           看装了哪些插件、哪个坏了
+python run.py --sync              拉一遍课表订阅，变成待办
 ```
 
 跑测试（标准库 unittest，不用装 pytest）：

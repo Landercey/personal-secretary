@@ -66,6 +66,31 @@ def register(registry):
     registry.add_draft("我不是零件，是字符串")
 '''
 
+# 用 dataclass 的插件。这曾经是个真 bug：`@dataclass(slots=True)` 会回头去
+# sys.modules 里找自己的模块，加载器没登记就直接崩 —— 插件作者完全看不懂
+# "NoneType has no __dict__" 是什么。
+WITH_DATACLASS = '''
+from dataclasses import dataclass
+
+from app.contracts.interfaces import DraftEnricher
+
+TITLE = "用 dataclass 的插件"
+
+@dataclass(slots=True)
+class Config:
+    tag: str = "x"
+
+class Tagged(DraftEnricher):
+    order = 90
+    def __init__(self):
+        self.settings = Config()
+    def process(self, message, drafts):
+        return drafts
+
+def register(registry):
+    registry.add_draft(Tagged())
+'''
+
 
 def make_message(text: str = "明天下午三点交作业") -> Message:
     return Message(msg_id="t:1", source_kind="manual", source_name="手动录入",
@@ -170,6 +195,13 @@ class TestLoad(unittest.TestCase):
         statuses = plugins.load(self.root, self.registry)
 
         self.assertTrue(statuses[0].ok, statuses[0].error)
+
+    def test_plugin_using_dataclass_is_loadable(self):
+        self.write("dc.py", WITH_DATACLASS)
+        statuses = plugins.load(self.root, self.registry)
+
+        self.assertTrue(statuses[0].ok, statuses[0].error)
+        self.assertEqual(len(self.registry.draft_enrichers), 1)
 
 
 if __name__ == "__main__":
