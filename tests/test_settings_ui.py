@@ -21,7 +21,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app.runtime.config import Config, DEFAULTS, coerce      # noqa: E402
-from app.runtime.config import ADVANCED_KEYS, LOCKED_KEYS     # noqa: E402
+from app.runtime.config import (                              # noqa: E402
+    ADVANCED_KEYS, LOCKED_KEYS, PENDING_SECTIONS,
+)
 from app.ui.bridge import Api                                # noqa: E402
 
 # 必须按模块路径取，不能写 `from app.runtime import config` ——
@@ -150,10 +152,31 @@ class TestSchema(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_every_config_key_shows_up_on_the_ui(self):
-        """界面是照着 DEFAULTS 生成的 —— 漏一项就等于"这功能没入口"。"""
+        """界面是照着 DEFAULTS 生成的 —— 漏一项就等于"这功能没入口"。
+
+        唯一的例外是**还没做的段**：那些键在界面上故意不给输入框
+        （填了不生效比没有更伤信任），只留一句"还没做"。
+        """
         expected = {f"{section}.{key}"
                     for section, values in DEFAULTS.items() for key in values}
-        self.assertEqual(set(self.fields), expected)
+        waiting = {f"{name}.{key}" for name in PENDING_SECTIONS
+                   for key in DEFAULTS.get(name, {})}
+        self.assertEqual(set(self.fields) | waiting, expected)
+
+    def test_pending_sections_show_a_note_and_no_inputs(self):
+        """AI 还没做 —— 界面上一个框都不该有，但得说一句人话。"""
+        shown = {s["name"]: s for g in self.groups for s in g["sections"]
+                 if s.get("pending")}
+        self.assertEqual(set(shown), set(PENDING_SECTIONS))
+        for name, section in shown.items():
+            self.assertEqual(section["keys"], [], f"{name} 不该有输入框")
+            self.assertGreater(len(section["pending"]), 10)   # 说人话，不是"未实现"
+
+    def test_finished_sections_are_not_marked_pending(self):
+        for group in self.groups:
+            for section in group["sections"]:
+                if section["name"] not in PENDING_SECTIONS:
+                    self.assertEqual(section["pending"], "")
 
     def test_settings_are_grouped_into_tabs(self):
         """用户的原话是"太杂，没有分类"。四个标签页，每页 2~3 段。"""
@@ -182,7 +205,10 @@ class TestSchema(unittest.TestCase):
         """高级项要在段内排到最后（界面上它们被折进一个收起的小块）。"""
         marked = {path for path, item in self.fields.items()
                   if item["level"] == "advanced"}
-        self.assertEqual(marked, set(ADVANCED_KEYS))
+        # 还没做的段没有输入框，也就没有"高级"可言
+        waiting = {f"{name}.{key}" for name in PENDING_SECTIONS
+                   for key in DEFAULTS.get(name, {})}
+        self.assertEqual(marked, set(ADVANCED_KEYS) - waiting)
 
         for group in self.groups:
             for section in group["sections"]:
@@ -205,7 +231,7 @@ class TestSchema(unittest.TestCase):
     def test_ordinary_fields_are_not_locked(self):
         """别锁过头：群号、推送时间、Webhook 这些用户本来就要改。"""
         for path in ("qq.group_ids", "push.times", "wecom_bot.webhook",
-                     "ai.cloud_base_url", "timetable.url"):
+                     "timetable.url"):
             self.assertFalse(self.fields[path]["locked"], path)
 
 
@@ -244,11 +270,11 @@ class TestBridge(unittest.TestCase):
     def test_setup_state_reports_what_is_missing(self):
         state = self.api.setup_state()
         by_key = {item["key"]: item for item in state["checks"]}
-        self.assertEqual(set(by_key), {"risk", "wecom", "qq", "ai"})
+        # AI 不在清单里 —— 它还没做，摆一条"配了 AI"等于催用户去填一个不生效的框
+        self.assertEqual(set(by_key), {"risk", "wecom", "qq"})
         self.assertFalse(by_key["risk"]["ok"])
         self.assertFalse(by_key["wecom"]["ok"])
         self.assertFalse(state["done"])
-        self.assertTrue(by_key["ai"]["optional"])       # AI 是选配
 
     def test_confirm_risk_remembers(self):
         self.api.confirm_risk()

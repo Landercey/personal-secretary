@@ -58,7 +58,7 @@ class TestWiring(unittest.TestCase):
         高级项折进段底部的「高级」里，锁住的项要给出解锁入口。
         """
         for anchor in ("schema.groups", "renderSection", "details.adv",
-                       "data-unlock", "tabpane", "activateTab"):
+                       "data-unlock", "tabpane", "activateTab", "sec.pending"):
             self.assertTrue(anchor in self.html, f"界面里找不到：{anchor}")
         self.assertIn("'settings'", self.html)
 

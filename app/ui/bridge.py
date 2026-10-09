@@ -200,10 +200,9 @@ class Api:
              "ok": bool(config.get("qq", "group_ids") or config.get("qq", "private_ids")
                         or config.get("qq", "inbox_ids")
                         or config.get("qq", "receive_all"))},
-            # AI 是选配：不装也能用，所以不算"没做完"
-            {"key": "ai", "section": "ai", "optional": True,
-             "label": "配了 AI（可选，不填也能用）",
-             "ok": has("ai", "cloud_base_url") or has("ai", "local_model")},
+            # AI 不在这里列 —— 它**还没做**。
+            # 摆一条"配了 AI"等于催用户去填一个不生效的框，纯坑人。
+            # 等 AI 插件做出来了，再加一条真正有意义的检查。
         ]
         return {"checks": checks,
                 "done": all(item["ok"] for item in checks if not item.get("optional")),

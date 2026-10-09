@@ -826,7 +826,9 @@ def _selftest() -> int:
     print(f"  配置文件：  {config.path}")
     print(f"  数据目录：  {data_dir}")
     print(f"  过滤强度：  {config.get('parse', 'filter_strength')}")
-    print(f"  AI 模式：   {config.get('ai', 'mode')}（云端优先={config.get('ai', 'cloud_priority')}）")
+    # AI 还没做，但配置段留着（以后做插件时直接用）。这里如实说，
+    # 不打印"AI 模式：conservative"那种看着像已经在跑的话。
+    print("  AI 增强：   还没做（现在是纯规则解析：不联网、不花钱、不传内容出去）")
     print(f"  插件：      {len(plugins)} 个（{plugin_dir(root)}）")
     for item in plugins:
         print(("    ✓ " if item.ok else "    ✕ ") + item.describe())

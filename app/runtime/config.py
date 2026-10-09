@@ -222,14 +222,17 @@ KEY_COMMENTS: dict[str, str] = {
     "push.quote_max_chars": "推送里附带的原文片段长度（方便你看它为什么被判成待办）。",
     "push.fallback_text_chars": "AI 用不了时，推送原文的前多少字作为保底。",
     # [ai]
-    "ai.mode": "AI 处理长文档的尺度：conservative 保守（默认，只挑明确要做的事）\n"
-               "#   / aggressive 激进（允许重写归纳，读着舒服但可能漏或编）。",
-    "ai.cloud_priority": "true = 优先用云端（质量好、要花钱或额度）；false = 优先用本地模型。",
-    "ai.cloud_base_url": "云端接口地址。留空 = 不用云端。",
-    "ai.cloud_api_key": "云端密钥。⚠️ 这是你的钱包，别把填好的文件发人、别传网盘。",
-    "ai.cloud_model": "云端模型名。⚠️ 免费模型名会变，换服务商时记得改这里。",
-    "ai.token_budget_per_day": "每天最多用多少 token，0 = 不限制。防止意外烧钱用。",
-    "ai.local_model": "本地模型名（要装 Ollama）。留空 = 不用本地模型。",
+    # [ai] 整段都标着"还没做" —— 界面上一个输入框都不显示，
+    # 只有认字的人打开 config.toml 才会看到这些。所以每一条都先说清楚这一点。
+    "ai.mode": "⚠️ AI 增强还没做，下面这些填了不生效（功能做完会随插件发布）。\n"
+               "#   做完之后：conservative 保守（只挑明确要做的事）/\n"
+               "#   aggressive 激进（允许重写归纳，读着舒服但可能漏或编）。",
+    "ai.cloud_priority": "⚠️ 还没做。以后：true = 优先用云端；false = 优先用本地模型。",
+    "ai.cloud_base_url": "⚠️ 还没做。以后：云端接口地址，留空 = 不用云端。",
+    "ai.cloud_api_key": "⚠️ 还没做。以后：云端密钥。别把填好的文件发人、别传网盘。",
+    "ai.cloud_model": "⚠️ 还没做。以后：云端模型名。免费模型名会变，换服务商时要改。",
+    "ai.token_budget_per_day": "⚠️ 还没做。以后：每天最多用多少 token，0 = 不限制。",
+    "ai.local_model": "⚠️ 还没做。以后：本地模型名（要装 Ollama），留空 = 不用本地。",
     # [resource]
     "resource.mem_critical_percent": "内存占用超过这个百分比时，只记待办不分析不推送（别在打游戏时抢资源）。",
     "resource.mem_resume_percent": "内存降到这个百分比以下，恢复正常工作。",
@@ -338,6 +341,19 @@ LOCKED_KEYS: dict[str, str] = {
     "qq.path": "同上 —— 必须和 NapCat 那边配的路径一模一样。",
     "qq.token": "程序自动生成，并写进 NapCat 的配置。在这儿改，"
                 "要重新装一次 NapCat 才能对上。",
+}
+
+# 功能**还没做**的配置段。界面上不显示任何输入框，只留一句实话。
+#
+# 为什么不干脆把这些字段删掉：用户会以为"这功能本来就没有"，
+# 而不是"还没做"。留一句说明，他知道以后会有。
+# 为什么不显示输入框：**填了不生效，比没有更伤信任** ——
+# 他会以为是自己的配置写错了，然后来问作者。
+#
+# 做完了就把对应的那行删掉，界面上的输入框会自己出现（清单是照 DEFAULTS 生成的）。
+PENDING_SECTIONS: dict[str, str] = {
+    "ai": "AI 增强还没做。现在走的是纯规则解析：不联网、不花钱、"
+          "任何内容都不会传出去。等做成插件，这一页才会出现。",
 }
 
 
@@ -530,6 +546,13 @@ class Config:
         return groups
 
     def _section_entry(self, section: str, title: str, desc: str) -> dict[str, Any]:
+        # 还没做的段：一个输入框都不给，只带一句实话。
+        # 给框子的话用户会去填，填完什么都不会发生 —— 那比没有这个功能更糟。
+        pending = PENDING_SECTIONS.get(section, "")
+        if pending:
+            return {"name": section, "title": title, "desc": desc,
+                    "pending": pending, "keys": []}
+
         keys = []
         for key in sorted(DEFAULTS[section]):
             full = f"{section}.{key}"
@@ -543,7 +566,8 @@ class Config:
             })
         # 常用的排前面，高级的排后面 —— 界面上高级那几项要单独折叠起来
         keys.sort(key=lambda item: item["level"] == "advanced")
-        return {"name": section, "title": title, "desc": desc, "keys": keys}
+        return {"name": section, "title": title, "desc": desc,
+                "pending": "", "keys": keys}
 
     def set(self, section: str, key: str, value: Any) -> None:
         """改一项配置，并写回 config.toml。

@@ -240,6 +240,9 @@ details.adv > summary::-webkit-details-marker { display: none }
 details.adv > summary::before { content: "▸ " }
 details.adv[open] > summary::before { content: "▾ " }
 
+/* 「还没做」的段：说明为什么一个框都没有 */
+.pending { margin: 0 0 12px; padding: 2px; font-size: 12px; color: var(--text-3); line-height: 1.75 }
+
 /* 锁住的项：程序自己管的，改了会让两边配置对不上、QQ 静默收不到消息 */
 .field.locked input { background: #f3f3f5; color: var(--text-3); cursor: not-allowed }
 .field .tag {
@@ -745,6 +748,13 @@ function renderField(sectionName, f) {
 }
 
 function renderSection(sec, first) {
+  // 还没做的功能：只给一句实话，一个输入框都不给。
+  // 给框子的话用户会去填，填完什么都不会发生 —— 比没有这个功能更伤信任。
+  if (sec.pending) {
+    return `<details class="sec" data-section="${sec.name}">
+        <summary>${esc(sec.title)}<i>还没做</i></summary>
+        <p class="pending">${esc(sec.pending)}</p></details>`;
+  }
   const common = sec.keys.filter(k => k.level !== 'advanced');
   const advanced = sec.keys.filter(k => k.level === 'advanced');
   const open = openSection ? sec.name === openSection : first;
