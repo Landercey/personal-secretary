@@ -69,7 +69,7 @@ class TestCoerce(unittest.TestCase):
 
     def test_numbers(self):
         self.assertEqual(coerce("resource", "mem_critical_percent", "90"), 90)
-        self.assertEqual(coerce("parse", "confidence_min", "0.5"), 0.5)
+        self.assertEqual(coerce("extract", "render_scale", "2.5"), 2.5)
 
 
 class TestWriteBack(unittest.TestCase):

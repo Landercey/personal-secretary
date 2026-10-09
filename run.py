@@ -791,7 +791,7 @@ def _selftest() -> int:
             problems.append(f"接口没有抽象方法：{iface.__name__}")
 
     required = {
-        "parse": ["filter_strength", "confidence_min", "merge_window_seconds", "due_default_hour"],
+        "parse": ["filter_strength", "merge_window_seconds", "due_default_hour"],
         "title": ["max_len", "min_meaningful_chars"],
         "store": ["attachment_retention_days", "keep_dropped_days"],
         "push": ["default_times", "quote_max_chars", "fallback_text_chars"],

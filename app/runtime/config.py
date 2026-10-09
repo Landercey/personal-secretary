@@ -37,8 +37,11 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     "parse": {
         # 过滤强度总开关：strict / loose / off。只给这一个开关，不给十几个细开关。
         "filter_strength": "strict",
-        # 低于这个可信度的草稿进废件箱，不推送、不进主列表。
-        "confidence_min": 0.45,
+        # 这里**故意没有**"可信度低于 X 就丢掉"这一项。
+        # 判"值不值得变待办"和"是不是碎片"已经有两道闸门了
+        # （pipeline/actionable.py + quick_parse.is_fragment），
+        # 再加一个打分阈值不会更准，只会让"这条为什么没收"要多跨一道门槛才解释得清。
+        # TaskDraft.confidence 字段保留 —— 以后 AI 插件用它表达"我有多确定"。
         # 同群同人这个秒数内连续发的消息合并成一条待办。
         "merge_window_seconds": 60,
         # 只说了哪天没说几点时的兜底时刻（不写 09:00：一到九点就标红逾期，
@@ -189,7 +192,6 @@ KEY_COMMENTS: dict[str, str] = {
     "parse.filter_strength": "过滤强度，三档：strict 严格（默认）/ loose 宽松 / off 关闭。\n"
                              "#   觉得丢太多就改 loose；觉得碎片太多就保持 strict。\n"
                              "#   有人说碎片其实是暗号（学号、房间号），那就改 off。",
-    "parse.confidence_min": "可信度低于这个数的待办会进废件箱，不推送。",
     "parse.merge_window_seconds": "同一个人在同一个群里，这个秒数内连续发的东西算一件事。",
     "parse.due_default_hour": "只说了哪天、没说几点时，算当天的几点。默认当天最后一分钟。",
     "parse.my_names": "你自己的名字/昵称，写成 [\"张三\", \"小张\"]。\n"
@@ -323,7 +325,7 @@ SECTION_GROUPS: tuple[tuple[str, str, str, tuple[tuple[str, str, str], ...]], ..
 # 一屏塞 60 个框，用户不知道哪个能碰、哪个碰了会出事。
 ADVANCED_KEYS: frozenset[str] = frozenset({
     "qq.max_text_chars", "qq.keep_every_message",
-    "parse.confidence_min", "parse.merge_window_seconds", "parse.due_default_hour",
+    "parse.merge_window_seconds", "parse.due_default_hour",
     "extract.ocr_engine", "extract.max_pages", "extract.render_scale",
     "ai.token_budget_per_day",
     "title.max_len", "title.min_meaningful_chars",

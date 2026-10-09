@@ -123,7 +123,10 @@ class TaskDraft:
     sender: str = ""
     origin_msg_id: str = ""                     # 来自哪条消息
     attachments: list[Attachment] = field(default_factory=list)
-    confidence: float = 1.0                     # 信誉度；低于阈值进废件箱
+    # 可信度 0~1。**现在没有"低于阈值就丢掉"这道闸门**（判值不值得、判碎片
+    # 已经各有一道了，见 CONTRACT 第五节）。这个字段留着是给 AI 插件用的：
+    # 到时候由它来说"这条我有多确定"。
+    confidence: float = 1.0
     quoted: str = ""                            # 原始消息片段，推送时带上
 
 

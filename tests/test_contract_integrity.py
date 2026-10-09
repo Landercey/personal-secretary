@@ -67,7 +67,7 @@ class TestInterfaces(unittest.TestCase):
 
 class TestConfig(unittest.TestCase):
     REQUIRED = {
-        "parse": ["filter_strength", "confidence_min", "merge_window_seconds", "due_default_hour"],
+        "parse": ["filter_strength", "merge_window_seconds", "due_default_hour"],
         "title": ["max_len", "min_meaningful_chars"],
         "store": ["attachment_retention_days", "keep_dropped_days"],
         "push": ["enabled", "times", "catch_up_minutes",
