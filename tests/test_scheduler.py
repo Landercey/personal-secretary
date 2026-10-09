@@ -135,13 +135,19 @@ class TestScheduler(unittest.TestCase):
         self._saved = {
             "times": list(config.get("push", "times", []) or []),
             "enabled": config.get("push", "enabled", True),
+            "mem": config.get("resource", "mem_critical_percent", 88),
         }
         config["push"]["times"] = ["07:30", "21:30"]
         config["push"]["enabled"] = True
+        # 测试要自己控制内存闸门，不能依赖跑测试时这台机器恰好空闲 ——
+        # 开着 QQ+NapCat 时内存常年 90%+，闸门一开这些用例全挂。
+        # 闸门本身由 test_memory_gate_blocks_pushing 专门覆盖。
+        config["resource"]["mem_critical_percent"] = 100
 
     def tearDown(self):
         config["push"]["times"] = self._saved["times"]
         config["push"]["enabled"] = self._saved["enabled"]
+        config["resource"]["mem_critical_percent"] = self._saved["mem"]
         self.store.close()
         self.tmp.cleanup()
 
