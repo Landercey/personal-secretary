@@ -23,6 +23,7 @@ NapCat 启动器也是这么干的，一样的原因。
 from __future__ import annotations
 
 import base64
+import json
 import subprocess
 from pathlib import Path
 
@@ -34,7 +35,7 @@ $ErrorActionPreference = 'Stop'
 # 不关掉进度流的话，输出里会混进一坨 CLIXML（powershell 首次加载模块时的进度记录）
 $ProgressPreference = 'SilentlyContinue'
 $root  = '{root}'
-$icon  = Join-Path $root 'assets\\app.ico'
+$icon  = '{icon}'
 $run   = Join-Path $root 'run.py'
 $pyw   = '{pythonw}'
 $link  = Join-Path ([Environment]::GetFolderPath('Desktop')) '{name}'
@@ -77,6 +78,27 @@ def _run_powershell(script: str) -> tuple[bool, str]:
     return proc.returncode == 0, output
 
 
+def icon_path(project: Path) -> Path:
+    """快捷方式该用哪个图标文件。
+
+    Windows 按**文件路径**缓存图标，改了 app.ico 的内容但路径没变，
+    桌面会继续显示老图标（ie4uinit 刷不动，得重启资源管理器）。
+    tools/make_icon.py 因此额外存一份 app-<内容指纹>.ico 并写进
+    assets/icon.json —— 内容一变文件名就变，缓存必然失效。
+    这里优先读它，读不到就退回 app.ico。
+    """
+    assets = project / "assets"
+    meta = assets / "icon.json"
+    if meta.is_file():
+        try:
+            name = json.loads(meta.read_text(encoding="utf-8")).get("shortcut_icon")
+            if name and (assets / name).is_file():
+                return assets / name
+        except (OSError, ValueError):
+            pass
+    return assets / "app.ico"
+
+
 def create_shortcut(root: Path | None = None) -> tuple[bool, str]:
     """在桌面建「私人秘书」快捷方式。返回 (成功?, 说明)。
 
@@ -88,6 +110,7 @@ def create_shortcut(root: Path | None = None) -> tuple[bool, str]:
     if interpreter is None:
         return False, "找不到 pythonw.exe（装 Python 时没勾上？）"
     script = _SCRIPT.format(root=str(project).replace("'", "''"),
+                            icon=str(icon_path(project)).replace("'", "''"),
                             pythonw=str(interpreter).replace("'", "''"),
                             name=SHORTCUT_NAME)
     ok, output = _run_powershell(script)

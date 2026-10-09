@@ -214,8 +214,33 @@ def main() -> int:
     biggest = frames[-1]
     biggest.save(target, format="ICO", sizes=[(s, s) for s in SIZES])
 
+    # =====================================================================
+    # 再存一份**带内容指纹的文件名**
+    # =====================================================================
+    # 为什么需要：Windows 把快捷方式图标按**文件路径**缓存。
+    # 改了 app.ico 的内容但路径没变，桌面会继续显示老图标 ——
+    # 实测 ie4uinit.exe -show 刷不动，得重启资源管理器才行，太打扰。
+    # 换个文件名就绕过去了：路径变了 = 缓存必然失效 = 一定读新图。
+    import hashlib
+    import json
+
+    blob = target.read_bytes()
+    digest = hashlib.sha256(blob).hexdigest()[:8]
+    stamped = target.with_name(f"app-{digest}.ico")
+    stamped.write_bytes(blob)
+    for old in target.parent.glob("app-*.ico"):      # 清掉上一版，别堆一堆
+        if old != stamped:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+    (target.parent / "icon.json").write_text(
+        json.dumps({"shortcut_icon": stamped.name}, ensure_ascii=False),
+        encoding="utf-8")
+
     saved = sorted(Image.open(target).ico.sizes())
     print(f"图标已生成：{target}")
+    print(f"  快捷方式用：{stamped.name}（文件名跟着内容变，绕开 Windows 图标缓存）")
     print(f"  实际包含尺寸：{', '.join(f'{w}×{h}' for w, h in saved)}")
     if len(saved) < len(SIZES):
         print(f"  ⚠️ 期望 {len(SIZES)} 个尺寸，只存进去 {len(saved)} 个")
