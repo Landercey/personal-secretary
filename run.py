@@ -33,6 +33,7 @@
     python run.py --qq                     启动 QQ 接收（Ctrl+C 停止）
     python run.py --deploy --account <QQ号>  一键装 NapCat 并启动（先接收端后 QQ）
     python run.py --stats                  看统计
+    python run.py --plugins                看装了哪些插件、有没有坏掉的
     python run.py --selftest               检查契约与环境
 """
 
@@ -52,6 +53,7 @@ from app.pipeline.chat_filter import ChatNoiseEnricher           # noqa: E402
 from app.pipeline.file_enricher import FileEnricher              # noqa: E402
 from app.pipeline.parse_enricher import RuleParseEnricher        # noqa: E402
 from app.runtime.config import config, default_data_dir          # noqa: E402
+from app.runtime.plugins import Registry, load as load_plugins   # noqa: E402
 from app.runtime.scheduler import Scheduler, due_slots           # noqa: E402
 from app.runtime.sysmon import describe as mem_describe          # noqa: E402
 from app.sinks.console import build_digest                       # noqa: E402
@@ -67,24 +69,35 @@ def build(database: str | Path | None = None):
     加一个新零件/插件的标准动作就是改这里（下面四行）：
         store / source / pipeline / sink
     比如以后接 QQ 来源，就是在 source 那边多一个 QQSource；
-    加 AI 理解，就是 pipeline 的 draft_enrichers 里多一个 AISummarizer。
+    加 AI 理解，就是往 plugins/ 丢一个插件（不用改这个文件）。
+
+    插件的加载放在装配的最后一步：**坏插件只会被记一笔**，
+    不影响这里把主程序装配起来（CONTRACT.md 第二节硬性约束）。
+    返回值里多带的 plugin_status 就是给 --plugins / 界面 / 自检看的。
     """
+    root = Path(__file__).resolve().parent
     db_path = Path(database) if database else default_data_dir() / "secretary.db"
     store = SqliteStore(open_database(db_path))
     source = ManualSource()
+
+    registry = Registry()
+    plugin_status = load_plugins(root, registry)
+
     # 理解层的零件分两组，管线保证「消息级」整组先跑：
     #   ① 文件解析（把附件读成文字拼进正文）
     #   ② 闲聊过滤 → 切分/时间识别 →（以后）去重 → AI
     # 为什么文件解析必须在最前：正文可能只有"看这个"，真正的活在图里。
+    # 插件注册进来的零件按各自的 `order` 自动插到位置上（AI 是 90，排最后）。
     pipeline = Pipeline(
-        text_enrichers=[FileEnricher()],
+        text_enrichers=[FileEnricher(), *registry.text_enrichers],
         draft_enrichers=[
             ChatNoiseEnricher(),
             RuleParseEnricher(),
+            *registry.draft_enrichers,
         ],
     )
     sink = build_sink()          # 配了企微就走企微，没配就退回控制台
-    return store, source, pipeline, sink
+    return store, source, pipeline, sink, plugin_status
 
 
 def ingest_message(store, pipeline, message) -> int:
@@ -407,7 +420,7 @@ def run_deploy(store, pipeline, account: int) -> int:
     return 0
 
 
-def run_ui(store) -> int:
+def run_ui(store, plugins=()) -> int:
     """打开界面窗口。
 
     ⚠️ 界面和"收消息"是**两个独立进程**，共用同一个 SQLite 库。
@@ -441,9 +454,30 @@ def run_ui(store) -> int:
 
     icon = Path(__file__).resolve().parent / "assets" / "app.ico"
     webview.create_window("私人秘书", str(page), width=1040, height=680,
-                          min_size=(820, 520), js_api=Api(store))
+                          min_size=(820, 520), js_api=Api(store, plugins))
     # 标题栏图标。pywebview 的 create_window 不收这个参数，只有 start 收。
     webview.start(icon=str(icon) if icon.is_file() else None)
+    return 0
+
+
+def list_plugins(statuses) -> int:
+    """`--plugins`：装了哪些、哪个坏了。坏插件不影响主程序，但要说出来。"""
+    from app.runtime.plugins import plugin_dir
+
+    folder = plugin_dir(Path(__file__).resolve().parent)
+    print("插件现状：")
+    print(f"  插件目录：{folder}")
+    if not statuses:
+        print("  一个插件都没装。")
+        print(f"  装法：把一个 .py 文件丢进上面这个文件夹；卸载就是删掉它。")
+        return 0
+    for item in statuses:
+        print(("  ✓ " if item.ok else "  ✕ ") + item.describe())
+    broken = [item for item in statuses if not item.ok]
+    if broken:
+        print(f"\n  有 {len(broken)} 个插件没加载起来。"
+              "它对主程序没影响，但那个插件自己不会干活。")
+        return 1
     return 0
 
 
@@ -479,6 +513,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--file", help="把一个文件（图片/Word/PPT/PDF）变成待办")
     parser.add_argument("--read", help="只看这个文件能提出什么字，不入库")
     parser.add_argument("--stats", action="store_true", help="看统计")
+    parser.add_argument("--plugins", action="store_true",
+                        help="看装了哪些插件（plugins/ 文件夹里的 .py）")
     parser.add_argument("--selftest", action="store_true", help="检查契约与环境")
     parser.add_argument("--db", help="数据库路径（默认 data/secretary.db）")
     args = parser.parse_args(argv)
@@ -486,7 +522,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.selftest:
         return _selftest()
 
-    store, source, pipeline, sink = build(args.db)
+    store, source, pipeline, sink, plugin_status = build(args.db)
+
+    if args.plugins:
+        return list_plugins(plugin_status)
 
     if args.done:
         store.set_status(args.done, STATUS_DONE, "用户在命令行标记完成")
@@ -570,7 +609,7 @@ def main(argv: list[str] | None = None) -> int:
         return run_qq(store, pipeline)
 
     if args.ui:
-        return run_ui(store)
+        return run_ui(store, plugin_status)
 
     if args.shortcut:
         from app.runtime.desktop import create_shortcut
@@ -658,6 +697,8 @@ def _selftest() -> int:
     from app.contracts.interfaces import (
         DraftEnricher, Sink, Source, Store, TextEnricher,
     )
+    from app.runtime.plugins import Registry, plugin_dir
+    from app.runtime.plugins import load as load_plugins
 
     problems: list[str] = []
     for name in ("Message", "TaskDraft", "Task", "PushPayload", "Attachment"):
@@ -690,12 +731,23 @@ def _selftest() -> int:
     except OSError as exc:
         problems.append(f"数据目录建不了：{exc}")
 
+    # 插件：坏插件不该拦住启动，但自检必须把它摆出来 —— 否则用户
+    # 只会觉得"我装的那个插件怎么好像没反应"。
+    root = Path(__file__).resolve().parent
+    plugins = load_plugins(root, Registry())
+    broken = [item for item in plugins if not item.ok]
+    if broken:
+        problems.append(f"有 {len(broken)} 个插件加载失败（见下面 ✕ 那几行）")
+
     print("私人秘书 · 自检")
     print(f"  项目根目录：{config.path.parent if config.path else '?'}")
     print(f"  配置文件：  {config.path}")
     print(f"  数据目录：  {data_dir}")
     print(f"  过滤强度：  {config.get('parse', 'filter_strength')}")
     print(f"  AI 模式：   {config.get('ai', 'mode')}（云端优先={config.get('ai', 'cloud_priority')}）")
+    print(f"  插件：      {len(plugins)} 个（{plugin_dir(root)}）")
+    for item in plugins:
+        print(("    ✓ " if item.ok else "    ✕ ") + item.describe())
     if problems:
         print("\n发现问题：")
         for item in problems:

@@ -63,7 +63,8 @@ nav a .dot { width: 5px; height: 5px; border-radius: 50%; background: currentCol
 nav a .n { margin-left: auto; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums }
 nav a.on .n { color: var(--accent); opacity: .75 }
 nav .gap { height: 14px }
-.foot { margin-top: auto; padding: 10px; font-size: 11px; line-height: 1.7; color: var(--text-3) }
+  /* pre-line: 下面几行状态是拿 \n 拼的，默认会把换行吞成一个空格 */
+  .foot { margin-top: auto; padding: 10px; font-size: 11px; line-height: 1.7; color: var(--text-3); white-space: pre-line }
 
 /* ---------- 中间：列表 ---------- */
 main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22px 20px 0 8px }
@@ -336,8 +337,21 @@ async function refresh() {
   renderDetail();
 
   const env = await call('config_summary');
+  const plug = await call('plugins');
   if (mine === refreshToken && env && env.push_times && env.push_times.length) {
-    $('foot').textContent = `推送 ${env.push_times.join(' / ')}\n${env.qq_groups} 个群`;
+    const list = (plug && plug.items) || [];
+    const bad = list.filter(p => !p.ok);
+    const parts = [`推送 ${env.push_times.join(' / ')}`, `${env.qq_groups} 个群`];
+    // 坏插件必须在界面上看得见（契约第二节）：不然用户只会觉得
+    // "我装的那个插件怎么好像没反应"，然后来问作者。
+    if (bad.length) {
+      parts.push(`⚠️ 插件坏了：${bad.map(p => p.title).join('、')}`);
+      $('foot').title = bad.map(p => `${p.title}：${p.error}`).join('\n');
+    } else if (list.length) {
+      parts.push(`插件 ${list.length} 个`);
+      $('foot').title = list.map(p => `${p.title}：正常`).join('\n');
+    }
+    $('foot').textContent = parts.join('\n');
   }
 }
 

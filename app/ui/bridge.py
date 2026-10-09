@@ -52,8 +52,11 @@ def _human_due(due_at: str | None) -> tuple[str, str]:
 class Api:
     """网页能调到的全部方法。加方法不用改别的，网页那边直接调。"""
 
-    def __init__(self, store) -> None:
+    def __init__(self, store, plugins=()) -> None:
         self.store = store
+        # 插件加载结果由 run.py 装配时递进来。界面不自己扫文件夹 ——
+        # 扫一遍等于把插件又 import 一次，副作用会来两遍。
+        self._plugins = list(plugins)
         # 网页轮询用：每次返回一个自增号，界面上"数据变了没"靠它判断
         self._revision = 0
 
@@ -130,3 +133,10 @@ class Api:
             "push_times": config.get("push", "times", []),
             "db": str(getattr(self.store, "conn", "")),
         }
+
+    def plugins(self) -> dict:
+        """装了哪些插件、哪个坏了。坏的要在界面上看得见（契约第二节）。"""
+        return {"items": [
+            {"name": p.name, "title": p.title, "ok": p.ok, "error": p.error}
+            for p in self._plugins
+        ]}
