@@ -31,6 +31,7 @@
     python run.py --next-push              看下一次什么时候推
     python run.py --check-qq               看 QQ 接入的配置和状态
     python run.py --qq                     启动 QQ 接收（Ctrl+C 停止）
+    python run.py --deploy --account <QQ号>  一键装 NapCat 并启动（先接收端后 QQ）
     python run.py --stats                  看统计
     python run.py --selftest               检查契约与环境
 """
@@ -38,6 +39,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -286,6 +288,120 @@ def parse_times_or_empty() -> list[str]:
     return parse_times(config.get("push", "times", []))
 
 
+def deploy_dir() -> Path:
+    """NapCat 装哪儿。跟着数据目录走。"""
+    return default_data_dir().parent / "napcat"
+
+
+def run_setup(onekey_dir: Path, account: int, token: str, port: int) -> int:
+    """只装不启动：下包 → 跑官方安装器 → 写我们的配置。"""
+    from app.runtime import deploy
+
+    onekey_dir.mkdir(parents=True, exist_ok=True)
+    if deploy.is_installed(onekey_dir):
+        print("已经装过了，跳过下载安装。")
+    else:
+        try:
+            zip_path = deploy.download_onekey(onekey_dir, print)
+            deploy.extract(zip_path, onekey_dir, print)
+            deploy.run_installer(onekey_dir, print)
+        except Exception as exc:
+            print(f"\n安装失败：{exc}")
+            print("可以手动去 https://github.com/NapNeko/NapCatQQ/releases "
+                  "下载 OneKey 包，解压后双击 NapCatInstaller.exe。")
+            return 1
+
+    shell = deploy.find_shell_dir(onekey_dir)
+    if shell is None:
+        print(f"没找到装出来的 Shell 目录（在 {onekey_dir} 下面找 NapCat.*.Shell）")
+        return 1
+
+    config_path = deploy.write_onebot_config(shell, account, token, port)
+    print()
+    print("=" * 62)
+    print("  装好了")
+    print("=" * 62)
+    print(f"  安装目录：{shell}")
+    print(f"  配置文件：{config_path}")
+    print(f"  登录账号：{account}（配置按这个号写的，换了号要重新写）")
+    print(f"  连接地址：ws://127.0.0.1:{port}/onebot/v11/ws")
+    print()
+    print("  要跑起来：python run.py --deploy")
+    print("=" * 62)
+    return 0
+
+
+def run_deploy(store, pipeline, account: int) -> int:
+    """一键：装（如需要）→ 起接收端 → 起 NapCat。
+
+    ⚠️ 顺序是死的：**我们的接收端必须先监听**。
+    NapCat 是主动连过来的，连不上就每 15 秒无限重试，
+    用户看到的是"一直超时"（昨天卡在这里一整晚）。
+    """
+    from app.runtime import deploy
+
+    onekey_dir = deploy_dir()
+    token = ensure_token(str(config.get("qq", "token", "") or ""))
+    port = int(config.get("qq", "bind_port", 18080) or 18080)
+
+    if not deploy.is_installed(onekey_dir):
+        code = run_setup(onekey_dir, account, token, port)
+        if code != 0:
+            return code
+
+    shell = deploy.find_shell_dir(onekey_dir)
+    assert shell is not None
+    deploy.write_onebot_config(shell, account, token, port)
+
+    # ① 先起我们的接收端
+    settings = QQSettings.from_config()
+    if not settings.enabled:
+        print("QQ 接入没启用（config.toml 的 [qq] enabled）。")
+        return 1
+    source = QQSource(settings=settings,
+                      on_message=lambda m: ingest_message(store, pipeline, m),
+                      on_status=lambda s: s.get("error") and print(f"  ⚠️ {s['error']}"))
+    if not source.start():
+        print("接收端没起来，先别启动 NapCat。")
+        return 1
+    print(f"  接收端已监听 127.0.0.1:{port}")
+
+    # ② 再起 NapCat
+    napcat = subprocess.Popen(deploy.launch_command(shell),
+                              cwd=str(shell),
+                              creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    print(f"  NapCat 已启动（PID {napcat.pid}）")
+
+    print()
+    print("=" * 62)
+    print("  即将弹出登录二维码，用手机 QQ 扫它")
+    print(f"  二维码图片：{deploy.qr_path(shell)}")
+    print("  ⚠️ 二维码约 2 分钟过期，过期了 Ctrl+C 重跑一次就好")
+    print("=" * 62)
+
+    last_line = ""
+    try:
+        while True:
+            time.sleep(2)
+            state = source.status()
+            if state.get("connected"):
+                line = (f"  [已连接] 登录号 {state.get('self_id') or '?'}｜"
+                        f"收到 {state.get('received', 0)}｜收下 {state.get('accepted', 0)}｜"
+                        f"拦下 {state.get('skipped', 0)}")
+            else:
+                line = "  [等 NapCat 连上来] 扫上面的二维码…"
+            if line != last_line:
+                print(line)
+                last_line = line
+    except KeyboardInterrupt:
+        print("\n  停止中…")
+    finally:
+        source.stop()
+        if napcat.poll() is None:
+            napcat.terminate()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="私人秘书（开发期命令行）")
     parser.add_argument("text", nargs="*", help="要录入的文字")
@@ -304,6 +420,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check-qq", action="store_true",
                         help="看 QQ 接入的配置和状态")
     parser.add_argument("--qq", action="store_true", help="启动 QQ 接收")
+    parser.add_argument("--deploy", action="store_true",
+                        help="一键装 NapCat 并启动（要先给 --account）")
+    parser.add_argument("--setup", action="store_true",
+                        help="只装不启动")
+    parser.add_argument("--account", type=int,
+                        help="要登录的 QQ 号（NapCat 按号找配置文件，必须给）")
+    parser.add_argument("--dir", help="NapCat 装到哪个目录（默认 data/napcat）")
     parser.add_argument("--file", help="把一个文件（图片/Word/PPT/PDF）变成待办")
     parser.add_argument("--read", help="只看这个文件能提出什么字，不入库")
     parser.add_argument("--stats", action="store_true", help="看统计")
@@ -396,6 +519,21 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.qq:
         return run_qq(store, pipeline)
+
+    if args.deploy or args.setup:
+        account = args.account
+        if not account:
+            print("要装哪个号？加一个参数，例如：")
+            print("    python run.py --deploy --account 123456789")
+            return 1
+        token = ensure_token(str(config.get("qq", "token", "") or ""))
+        port = int(config.get("qq", "bind_port", 18080) or 18080)
+        target = Path(args.dir) if args.dir else deploy_dir()
+        if args.setup:
+            return run_setup(target, account, token, port)
+        if args.dir:
+            print("--dir 只在 --setup 时有效；--deploy 用的是默认位置。")
+        return run_deploy(store, pipeline, account)
 
     if args.digest or args.push:
         tasks = store.list_tasks("open")
