@@ -84,9 +84,15 @@ class RuleParseEnricher(DraftEnricher):
         这里的"严"最终由 quick_parse.is_fragment() 执行，三档过滤强度
         （strict / loose / off）在 config.toml 的 [parse] filter_strength 改。
         """
+        # 用户点着按钮要求的（拖进界面 → 点"变成待办"）：他已经表过态了
+        if message.raw.get("explicit"):
+            return False
+        # 小号收件箱全盘接收，文件里的字也算 —— 得排在 text_from_file 前面
+        if message.source_kind == SOURCE_QQ_INBOX:
+            return False
         if message.raw.get("text_from_file"):
             return True
-        if message.is_self or message.source_kind == SOURCE_QQ_INBOX:
+        if message.is_self:
             return False
         strength = str(config.get("parse", "filter_strength", "strict"))
         return strength != "off"

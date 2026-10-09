@@ -261,6 +261,18 @@ details.adv[open] > summary::before { content: "▾ " }
   transition: opacity .18s, transform .18s; z-index: 50;
 }
 .toast.on { opacity: 1; transform: translate(-50%, 0) }
+
+/* 拖着东西进窗口时的提示。WebView2 不给网页真实路径，拖放是网页自己接的，
+   得自己给反馈 —— 不然用户拖完看没反应，只会以为程序坏了 */
+.dropmask {
+  position: fixed; inset: 10px; border: 2px dashed var(--accent);
+  border-radius: 14px; background: rgba(238,240,254,.78);
+  display: none; align-items: center; justify-content: center;
+  font-size: 14px; color: var(--accent); z-index: 30; pointer-events: none;
+}
+.dropmask.on { display: flex }
+.dropmask span { background: var(--panel); padding: 10px 18px; border-radius: 10px;
+                 box-shadow: var(--shadow) }
 </style>
 </head>
 <body>
@@ -307,6 +319,7 @@ details.adv[open] > summary::before { content: "▾ " }
 </div>
 
 <div class="toast" id="toast"></div>
+<div class="dropmask" id="dropHint"><span>松手就放进来了</span></div>
 
 <script>
 /* =====================================================================
@@ -343,6 +356,8 @@ let activeGroup = null;     // 设置面板当前在哪个分组标签页
 let unlocked = new Set();   // 这一轮里被用户手动解锁的"程序管着"的项
 let riskDismissed = false;  // 这一轮先不弹风控（下次开程序还会弹）
 let guideStamp = '';
+let dropped = null;         // 拖进来的东西：{id,name,size} 或 {text}
+let dropMaxMb = 12;         // 拖进来的文件上限，后端也会拦一道
 
 const $ = (id) => document.getElementById(id);
 
@@ -404,7 +419,8 @@ function renderList() {
   const box = $('list');
   if (!items.length) {
     box.innerHTML = `<div class="empty">这里没有待办<br>
-      <span style="font-size:12px">点左下角「＋ 新建待办」，或者直接发给 QQ 小号</span></div>`;
+      <span style="font-size:12px">点左下角「＋ 新建待办」、把文件拖进窗口，<br>
+      或者直接发给 QQ 小号</span></div>`;
     return;
   }
   box.innerHTML = items.map(t => `
@@ -459,6 +475,7 @@ function renderPanel(force) {
 
   if (panel === 'settings') return drawSettings();
   if (panel === 'new') return drawComposer();
+  if (panel === 'drop') return drawDrop();
   return drawDetail();
 }
 
@@ -528,6 +545,136 @@ function drawComposer() {
 }
 
 /* ---------- 设置 ---------- */
+function fmtSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/* ---------- 拖进来的东西 ---------- */
+function readBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function acceptDrop(file) {
+  if (file.size > dropMaxMb * 1024 * 1024) {
+    toast(`文件超过 ${dropMaxMb} MB，请用 python run.py --file 路径`);
+    return;
+  }
+  dropped = {name: file.name, size: file.size};
+  setPanel('drop');
+  $('detail').classList.add('open');
+  $('detailInner').innerHTML = `<div class="panelhead"><h2>正在接收…</h2></div>
+    <p class="note">${esc(file.name)}（${fmtSize(file.size)}）</p>`;
+  drawnPanel = 'drop';
+
+  let data;
+  try {
+    data = await readBase64(file);
+  } catch (err) {
+    showError('读文件', err);
+    setPanel(null); renderPanel(false); return;
+  }
+  const res = await call('stage_drop', file.name, data);
+  if (!res) { setPanel(null); renderPanel(false); return; }
+  dropped = res;
+  renderPanel(true);
+}
+
+function drawDrop() {
+  const d = dropped || {};
+  const isFile = !!d.name;
+  $('detailInner').innerHTML = `
+    <div class="panelhead"><h2>这个怎么处理？</h2></div>
+    <p class="note">${isFile
+      ? `文件：<b>${esc(d.name)}</b>（${fmtSize(d.size)}）`
+      : `一段文字：${esc(String(d.text || '').slice(0, 120))}`}</p>
+    <div class="acts">
+      <button class="primary block" id="dropTodo">${
+        isFile ? '读里面的字，变成待办' : '变成待办'}</button>
+      ${isFile ? '<button class="block" id="dropPeek">只看它写了什么</button>' : ''}
+      <button class="block" id="dropCancel">算了，不要了</button>
+    </div>
+    ${isFile ? `<p class="hint" style="margin-top:14px">
+       也可以直接把文件发给 QQ 小号，一样会进来。<br>
+       超过 ${dropMaxMb} MB 的文件用 python run.py --file 路径。</p>` : ''}
+    <div id="dropOut"></div>`;
+
+  $('dropTodo').onclick = async () => {
+    if (isFile) {
+      const res = await call('ingest_drop', d.id);
+      if (!res) return;
+      toast(res.added ? `已建 ${res.added} 条待办` : '这份文件里没读出待办，进了废件箱');
+    } else {
+      const res = await call('add_text', d.text);
+      if (!res) return;
+      if (!res.ok) { toast(res.message || '没加上'); return; }
+      toast(res.added ? '已加入待办' : '这条看着不像待办，进废件箱了');
+    }
+    dropped = null;
+    setPanel(null);
+    refresh();
+  };
+
+  const peek = $('dropPeek');
+  if (peek) peek.onclick = async () => {
+    $('dropOut').innerHTML = '<p class="hint">正在读…（图片和 PDF 要几秒）</p>';
+    const res = await call('peek_drop', d.id);
+    if (!res) return;
+    $('dropOut').innerHTML = res.text
+      ? `<div class="quote"><em>从文件里读出来的字（共 ${res.chars} 字，这里显示前 1500）</em>${
+          esc(res.text)}</div>`
+      : '<p class="hint">这个文件里没读出文字。</p>';
+  };
+
+  $('dropCancel').onclick = async () => {
+    if (isFile && d.id) await call('discard_drop', d.id);
+    dropped = null;
+    setPanel(null);
+    renderPanel(false);
+  };
+}
+
+/* 拖文件/文字到窗口任何地方。dragenter/leave 要计数 ——
+   鼠标划过子元素时会连着触发 leave，只看布尔值的话提示会一闪一闪。 */
+function wireDrop() {
+  let depth = 0;
+  const hasFiles = (e) => !!(e.dataTransfer && e.dataTransfer.types
+                             && [...e.dataTransfer.types].includes('Files'));
+  window.addEventListener('dragenter', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    depth++;
+    $('dropHint').classList.add('on');
+  });
+  window.addEventListener('dragover', (e) => {
+    if (hasFiles(e)) e.preventDefault();     // 不拦的话浏览器会自己去打开文件
+  });
+  window.addEventListener('dragleave', () => {
+    depth = Math.max(0, depth - 1);
+    if (!depth) $('dropHint').classList.remove('on');
+  });
+  window.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    depth = 0;
+    $('dropHint').classList.remove('on');
+    const transfer = e.dataTransfer;
+    const files = transfer ? [...transfer.files] : [];
+    if (files.length) { await acceptDrop(files[0]); return; }
+    const text = transfer ? transfer.getData('text/plain') : '';
+    if (text && text.trim()) {
+      dropped = {text: text.trim()};
+      setPanel('drop');
+      renderPanel(true);
+    }
+  });
+}
+
 function fieldLabel(field) {
   const lines = String(field.hint || '').split('\n')
     .map(s => s.replace(/^#\s?/, '').trim()).filter(Boolean);
@@ -758,6 +905,7 @@ async function refresh() {
   if (mine !== refreshToken || !env) return;
   const list = (plug && plug.items) || [];
   const bad = list.filter(p => !p.ok);
+  if (env.drop_max_mb) dropMaxMb = Number(env.drop_max_mb) || dropMaxMb;
   const parts = [];
   if (env.push_times && env.push_times.length) {
     parts.push(`推送 ${env.push_times.join(' / ')}`);
@@ -795,6 +943,7 @@ window.addEventListener('pywebviewready', () => {
     refresh();
   };
 
+  wireDrop();
   refresh();
   // 后台收了新消息时自动刷新：定时重取，比做推送通道简单得多
   setInterval(refresh, 5000);

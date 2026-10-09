@@ -161,7 +161,8 @@ class TestSchema(unittest.TestCase):
                          ["推送到手机", "收消息", "看懂消息", "数据与资源"])
         for group in self.groups:
             self.assertTrue(group["desc"])
-            self.assertTrue(1 <= len(group["sections"]) <= 3, group["title"])
+            # 一页最多四段。再多就该拆新组了 —— 用户的原话是"太杂，没有分类"。
+            self.assertTrue(1 <= len(group["sections"]) <= 4, group["title"])
             for section in group["sections"]:
                 self.assertTrue(section["title"])
 

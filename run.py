@@ -156,6 +156,28 @@ def ingest(store, source, pipeline, text: str) -> int:
     return ingest_message(store, pipeline, source.from_text(text))
 
 
+def explicit_file_message(source, path: str):
+    """界面上拖进来、用户点着「变成待办」的文件。
+
+    和 `--file` 的区别只有一处：这条打上 `explicit` 标记。
+    用户已经点着按钮表过态了，理解层就不该再拿"文件里大多是资料"
+    去替他判断 —— 那等于点了按钮还是没反应。
+    """
+    message = source.from_files([str(path)])
+    message.raw["explicit"] = True
+    return message
+
+
+def extract_preview(path: str) -> str:
+    """只把文件里的字读出来，不入库（界面上「只看写了什么」用）。"""
+    from app.pipeline.extract import extract_text
+
+    target = Path(path)
+    if not target.is_file():
+        return ""
+    return extract_text(target).text or ""
+
+
 def read_file(path: str) -> int:
     """只看一个文件能提出什么文字，不入库。
 
@@ -651,6 +673,9 @@ def main(argv: list[str] | None = None) -> int:
         return run_ui(store, registry.status, {
             "add_text": lambda text: ingest(store, source, pipeline, text),
             "sync": lambda: sync_sources(store, pipeline, registry.sources),
+            "ingest_file": lambda path: ingest_message(
+                store, pipeline, explicit_file_message(source, path)),
+            "read_file_text": extract_preview,
         })
 
     if args.shortcut:

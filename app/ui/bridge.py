@@ -13,7 +13,12 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import re
+import time
 from datetime import datetime
+from pathlib import Path
 
 from ..contracts.models import STATUS_DONE, STATUS_DROPPED
 
@@ -140,6 +145,8 @@ class Api:
             "memory": mem_describe(),
             "qq_groups": len(config.get("qq", "group_ids", []) or []),
             "push_times": config.get("push", "times", []),
+            # 界面拖文件时先在前端拦一道，免得白传一遍几十 MB
+            "drop_max_mb": int(config.get("ui", "drop_max_mb", 12) or 12),
             "db": str(getattr(self.store, "conn", "")),
         }
 
@@ -228,3 +235,90 @@ class Api:
         added = self._act("sync") or 0
         self._revision += 1
         return {"ok": True, "added": added}
+
+    # ------------------------------------------------------------------ 拖进来的东西
+    def stage_drop(self, name: str, data_base64: str) -> dict:
+        """把拖进窗口的文件先落到暂存区，等用户选"怎么处理"。
+
+        **为什么不在拖进来那一刻就解析**：解析要跑 OCR / PDF，大文件好几秒，
+        而用户可能只是想看看。先落盘、给选项，点了"变成待办"再干活。
+
+        **为什么内容是 base64**：网页拿不到拖进来文件的真实路径
+        （浏览器安全限制，WebView2 也一样）。所以只能把文件内容摊成文本传过来。
+        代价是有大小上限，见 `ui.drop_max_mb`。
+        """
+        from ..runtime.config import config, default_data_dir
+
+        limit_mb = int(config.get("ui", "drop_max_mb", 12) or 12)
+        # 前端已经拦过一道，这里是第二道 —— 不能让一个手写的 200 MB 把内存吃光
+        if len(str(data_base64 or "")) > (limit_mb + 1) * 1024 * 1024 * 4 // 3:
+            raise ValueError(f"文件超过 {limit_mb} MB，用 python run.py --file 路径")
+        try:
+            blob = base64.b64decode(str(data_base64 or ""), validate=True)
+        except Exception:
+            raise ValueError("文件内容传坏了，再拖一次试试")
+        if not blob:
+            raise ValueError("这个文件是空的")
+        if len(blob) > limit_mb * 1024 * 1024:
+            raise ValueError(f"文件超过 {limit_mb} MB，用 python run.py --file 路径")
+
+        # 文件名要洗干净再拼进路径：用户的文件名里可能带路径分隔符或怪字符
+        safe = re.sub(r"[^\w.\-]+", "_", Path(str(name or "")).name)[:64].strip("._- ")
+        token = f"{int(time.time())}-{hashlib.sha1(blob).hexdigest()[:10]}-{safe or 'drop'}"
+        folder = default_data_dir() / self.DROP_DIR
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / token).write_bytes(blob)
+        return {"id": token, "name": token.split("-", 2)[2],
+                "size": len(blob), "limit_mb": limit_mb}
+
+    def ingest_drop(self, token: str) -> dict:
+        """把暂存的文件**挪进附件目录**再入库。
+
+        为什么先挪：暂存区是临时的，待办要是指着暂存区，哪天清理就把附件清了。
+        挪的是同一个盘、同一次改名，不花时间也不占双份空间。
+        """
+        from ..runtime.config import default_data_dir
+
+        path = self._drop_path(token)
+        archive = default_data_dir() / "attachments"
+        archive.mkdir(parents=True, exist_ok=True)
+        target = archive / path.name
+        try:
+            path.replace(target)
+        except OSError:
+            target = path          # 挪不动就用原地，总比入库失败强
+        added = self._act("ingest_file", str(target)) or 0
+        self._revision += 1
+        return {"ok": True, "added": added}
+
+    def peek_drop(self, token: str) -> dict:
+        """只把文件里的字读出来，不入库（界面上"只看写了什么"）。"""
+        path = self._drop_path(token)
+        text = str(self._act("read_file_text", str(path)) or "")
+        return {"ok": True, "chars": len(text), "text": text[:1500]}
+
+    def discard_drop(self, token: str) -> dict:
+        """算了，不处理了 —— 把暂存的那份删掉。"""
+        try:
+            self._drop_path(token).unlink()
+        except (ValueError, OSError):
+            pass
+        return {"ok": True}
+
+    # 暂存文件名长什么样："时间戳-内容指纹-原文件名"。
+    # 存成一个固定形状是为了能**严格校验**：界面传回来的 token 直接拼路径，
+    # 不校验的话一个 "../.." 就能读到别处的文件。
+    DROP_DIR = "drops"
+    _DROP_RE = re.compile(r"[0-9]{6,}-[0-9a-f]{10}-[\w.\-]{1,64}")
+
+    def _drop_path(self, token: str) -> Path:
+        from ..runtime.config import default_data_dir
+
+        token = str(token or "")
+        if not self._DROP_RE.fullmatch(token):
+            raise ValueError("这个文件已经处理过了，重新拖一次")
+        folder = (default_data_dir() / self.DROP_DIR).resolve()
+        path = (folder / token).resolve()
+        if folder not in path.parents or not path.is_file():
+            raise ValueError("文件不在了，重新拖一次")
+        return path

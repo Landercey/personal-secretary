@@ -65,8 +65,17 @@ class TestWiring(unittest.TestCase):
     def test_page_has_the_four_entry_points(self):
         """用户点得到的入口：新建 / 同步 / 设置 / 列表四个分组。"""
         for anchor in ('id="btnNew"', 'id="btnSync"', 'id="btnSettings"',
-                       'id="riskMask"', 'id="guide"'):
+                       'id="riskMask"', 'id="guide"', 'id="dropHint"'):
             self.assertIn(anchor, self.html)
+
+    def test_drag_and_drop_is_wired(self):
+        """拖文件进窗口 → 弹"怎么处理"的面板。
+
+        WebView2 不给网页真实路径，所以内容是 base64 传过去的，
+        拖进来时的提示也只能自己画（不然用户以为没反应）。"""
+        for anchor in ("wireDrop", "acceptDrop", "readBase64", "stage_drop",
+                       "ingest_drop", "peek_drop", "discard_drop", "dropmask"):
+            self.assertTrue(anchor in self.html, f"界面里找不到：{anchor}")
 
     def test_risk_confirmation_is_not_skippable_by_default(self):
         """契约红线：首次启动必须确认过。遮罩一开始不能是 on 之外的可关闭状态。"""

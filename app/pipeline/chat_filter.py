@@ -96,11 +96,22 @@ class ChatNoiseEnricher(DraftEnricher):
         一张讲座海报 OCR 出来的"成都理工大学"，都被当成待办收进去了。
         判据：FileEnricher 会打上 text_from_file 标记。
         """
+        # 用户在界面上**点着按钮**要求的（拖进来 → 点"变成待办"），不替他判断。
+        # 他已经明确表达过意图了，再拿规则去猜是跟用户对着干。
+        if message.raw.get("explicit"):
+            return False
+        # 小号收件箱：你专门发给自己的东西，**全盘接收** —— 连文件里的字也不过滤。
+        # 这条必须排在 text_from_file 前面：把小号当收件箱的人，
+        # 发一份文件过去就是明说"这个我要记下来"，
+        # 再拿"文件里大多是资料"挡掉他，等于这个功能白做。
+        if message.source_kind == SOURCE_QQ_INBOX:
+            return False
+        # 别人发来的附件里读出来的文字要过滤：文件里大部分是资料不是待办。
+        # （实测那份《实验报告要求.docx》的"字数不少于 2000 字"、
+        #   讲座海报 OCR 出来的"成都理工大学"都是这么漏进来的。）
         if message.raw.get("text_from_file"):
             return True
         if message.is_self:
-            return False
-        if message.source_kind == SOURCE_QQ_INBOX:
             return False
         return True
 
