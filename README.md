@@ -35,7 +35,7 @@
 | 5 | 文件解析 + 附件 | ✅ 完成 |
 | 6 | 去重 + 时间解析增强（碎片率 <3%） | ✅ 完成（实测 0%） |
 | 7 | 定时调度（早报/晚间） | ✅ 完成 |
-| 8 | 一键部署脚本（自动装 QQ + NapCat） | ⬜ 待做 |
+| 8 | 一键部署（官方 OneKey 安装器） | ✅ 完成 |
 | 9 | 界面 | ⬜ 待做 |
 | 10 | 插件系统 | ⬜ 待做 |
 | 11 | 课表插件 | ⬜ 待做 |
@@ -59,6 +59,8 @@ python run.py --push              把汇总真正推送到企业微信
 python run.py --check-push        检查推送通道配置（不发消息）
 python run.py --next-push         看下一次什么时候推、有没有错过的
 python run.py --schedule          启动定时推送（Ctrl+C 停止）
+python run.py --setup --account 你的QQ号   只装 NapCat（约 2.5 分钟）
+python run.py --deploy --account 你的QQ号  装 + 启动（先起接收端再起 QQ）
 python run.py --check-qq          看 QQ 接入的配置和状态
 python run.py --qq                启动 QQ 接收（Ctrl+C 停止）
 python run.py --done 3            标记某条完成
