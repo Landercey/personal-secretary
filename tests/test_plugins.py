@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -26,6 +27,7 @@ sys.path.insert(0, str(ROOT))
 from app.contracts.models import Message, TaskDraft               # noqa: E402
 from app.pipeline.chain import Pipeline                          # noqa: E402
 from app.runtime import plugins                                  # noqa: E402
+from app.store.repository import SqliteStore, open_database       # noqa: E402
 
 # 好插件：真去 import 项目的契约层，证明插件拿得到接口定义
 GOOD = '''
@@ -275,6 +277,84 @@ class TestBridgePluginList(unittest.TestCase):
         item = {p["name"]: p for p in data["items"]}["timetable"]
         self.assertEqual(item["section"], "timetable")
         self.assertTrue(item["description"])
+
+
+class TestInstallByDrop(unittest.TestCase):
+    """拖一个 .py 进来就装好。**装之前当场试一次**，坏的当场退回。"""
+
+    def setUp(self):
+        import base64
+        import importlib
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self._old_home = os.environ.get("SECRETARY_HOME")
+        os.environ["SECRETARY_HOME"] = str(self.root / "home")
+        self.bridge = importlib.import_module("app.ui.bridge")
+        # ⚠️ 必须换掉插件根目录，不然这几条测试会往**真的** plugins/ 里写
+        self._old_root = self.bridge._plugin_root
+        self.bridge._plugin_root = lambda: self.root
+        self.store = SqliteStore(open_database(self.root / "t.db"))
+        self.api = self.bridge.Api(self.store)
+        self.b64 = base64
+
+    def tearDown(self):
+        self.store.close()
+        self.bridge._plugin_root = self._old_root
+        if self._old_home is None:
+            os.environ.pop("SECRETARY_HOME", None)
+        else:
+            os.environ["SECRETARY_HOME"] = self._old_home
+        self.tmp.cleanup()
+
+    def stage(self, name: str, code: str) -> str:
+        staged = self.api.stage_drop(name, self.b64.b64encode(code.encode()).decode())
+        return staged["id"]
+
+    def installed(self) -> list[str]:
+        return sorted(p.name for p in (self.root / "plugins").glob("*.py"))
+
+    def test_good_plugin_lands_in_the_folder(self):
+        token = self.stage("mine.py", "TITLE='我的插件'\ndef register(r):\n    pass\n")
+        result = self.api.install_drop(token)
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(self.installed(), ["mine.py"])
+        self.assertIn("重开", result["message"])      # 得说清楚要重启才生效
+
+    def test_broken_plugin_is_refused_and_not_left_behind(self):
+        """坏插件当场退回，**不留在文件夹里** —— 留半个比不装更糟。"""
+        token = self.stage("bad.py", "def register(r)\n    pass\n")
+        result = self.api.install_drop(token)
+
+        self.assertFalse(result["ok"])
+        self.assertIn("SyntaxError", result["message"])
+        self.assertEqual(self.installed(), [])
+
+    def test_plugin_without_register_is_refused(self):
+        token = self.stage("nofunc.py", "TITLE = 'x'\n")
+        result = self.api.install_drop(token)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(self.installed(), [])
+
+    def test_same_name_is_not_overwritten(self):
+        """不覆盖同名文件 —— 那可能就是他改过的。"""
+        (self.root / "plugins").mkdir(parents=True, exist_ok=True)
+        (self.root / "plugins" / "mine.py").write_text("# 我自己改过的\n", encoding="utf-8")
+
+        token = self.stage("mine.py", "def register(r):\n    pass\n")
+        result = self.api.install_drop(token)
+
+        self.assertFalse(result["ok"])
+        self.assertIn("同名", result["message"])
+        self.assertEqual((self.root / "plugins" / "mine.py").read_text(encoding="utf-8"),
+                         "# 我自己改过的\n")
+
+    def test_non_python_file_is_refused(self):
+        token = self.stage("笔记.txt", "这不是插件")
+        with self.assertRaises(ValueError):
+            self.api.install_drop(token)
 
 
 if __name__ == "__main__":

@@ -84,12 +84,49 @@ def _background_log() -> Path:
     return default_data_dir() / "background.log"
 
 
+def _plugin_root() -> Path:
+    """插件文件夹挂在哪个根目录下。
+
+    单独抽成一个函数是为了**测试能替换它** —— 不抽的话，
+    装插件的测试会往真的 `plugins/` 里写文件，把作者自己的插件弄脏。
+    """
+    return Path(__file__).resolve().parents[2]
+
+
 def _tail(path: Path, lines: int = 12) -> list[str]:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
     return [line for line in text.splitlines() if line.strip()][-lines:]
+
+
+def _drop_name(token: str) -> str:
+    """暂存文件名 → **用户原本的文件名**。
+
+    暂存时为了防重名，我们在前面加了"时间戳-指纹-"。
+    装插件的时候必须把这截去掉 —— 不然装进去的插件会叫
+    `1700000000-caf5bab41b-mine.py`，模块名也跟着变丑。
+    """
+    return token.split("-", 2)[2] if token.count("-") >= 2 else token
+
+
+# 一眼能看出"这是谁"的东西：长号码（QQ 号、群号）、Webhook 里的 key。
+_DIGITS = re.compile(r"\d{6,}")
+_SECRET = re.compile(r"(key=|access_token=|token[\"'=:\s]+)\S+", re.IGNORECASE)
+
+
+def _redact(text: str) -> str:
+    """把反馈文本里的号码和密钥打掉。
+
+    **脱敏必须是默认行为，不能是选项**：用户点「复制」的时候不会想到
+    "这段话里有没有我的号"。而反馈多半是要贴到群里或者 GitHub Issue 的，
+    贴出去就收不回来了。
+
+    长号码保留后 4 位：用户自己还认得出来是哪个号，别人认不出。
+    """
+    out = _SECRET.sub(lambda m: m.group(1) + "***", str(text or ""))
+    return _DIGITS.sub(lambda m: "*" * (len(m.group()) - 4) + m.group()[-4:], out)
 
 
 class Api:
@@ -491,7 +528,7 @@ class Api:
              "section": getattr(p, "section", ""),
              "description": getattr(p, "description", "")}
             for p in self._plugins
-        ], "folder": str(plugin_dir(Path(__file__).resolve().parents[2]))}
+        ], "folder": str(plugin_dir(_plugin_root()))}
 
     # ------------------------------------------------------------------ 设置
     def settings(self) -> dict:
@@ -738,6 +775,138 @@ class Api:
         except (ValueError, OSError):
             pass
         return {"ok": True}
+
+    # ------------------------------------------------------------------ 装插件
+    def install_drop(self, token: str) -> dict:
+        """把拖进来的 `.py` 装成插件：拷进 plugins/，**当场试着加载一次**。
+
+        为什么当场试：装完不生效、用户重启一看"没反应"，比装之前就拦下来差得多。
+        加载失败就把文件删掉 —— 不留半个坏插件在他文件夹里。
+
+        ⚠️ 插件就是一段 Python 代码，跑起来跟你自己写的程序权限一样。
+        界面上必须把这句话说给用户听（见 index.html 的拖放面板）。
+        """
+        import shutil
+
+        from ..runtime.plugins import Registry, plugin_dir
+        from ..runtime.plugins import load as load_plugins
+
+        staged = self._drop_path(token)
+        if staged.suffix.lower() != ".py":
+            raise ValueError("插件必须是 .py 文件")
+
+        root = _plugin_root()
+        folder = plugin_dir(root)
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / _drop_name(token)
+        if target.exists():
+            # 不覆盖同名文件：那可能就是他改过的
+            return {"ok": False,
+                    "message": f"已经有个同名的插件了（{target.name}）—— 先删掉或者改个名"}
+
+        shutil.copy2(staged, target)
+        statuses = [s for s in load_plugins(root, Registry()) if s.name == target.stem]
+        failed = [s for s in statuses if not s.ok]
+        if failed or not statuses:
+            target.unlink(missing_ok=True)
+            why = failed[0].error if failed else "这个文件里没有 register(registry)"
+            return {"ok": False, "message": f"这个插件有问题，没装上：{why}"}
+
+        self._revision += 1
+        return {"ok": True, "name": target.stem, "title": statuses[0].title,
+                "message": f"装好了：{statuses[0].title}。"
+                           f"重开一次程序它才会开始干活。"}
+
+    def open_plugin_folder(self) -> dict:
+        """用资源管理器打开插件文件夹 —— 想自己放文件的人需要它。"""
+        from ..runtime.plugins import plugin_dir
+
+        folder = plugin_dir(_plugin_root())
+        folder.mkdir(parents=True, exist_ok=True)
+        os.startfile(str(folder))
+        return {"ok": True, "path": str(folder)}
+
+    # ------------------------------------------------------------------ 意见反馈
+    def feedback_report(self, note: str = "", include_junk: bool = False) -> dict:
+        """生成一份可以复制走的反馈，**默认脱敏**。
+
+        为什么不"帮我直接发出去"：
+          · 没有服务器；要发就得先有一个，那是另一个项目的工作量。
+          · 更要紧的是**隐私**：自动上报意味着用户一按按钮，
+            他的报错内容（可能带群名、消息原文、webhook）就上传了。
+            开源小工具里"自动上报"是减分项，不是加分项。
+        所以做成：自动把该带的信息整理好、把号码打掉，用户自己看一眼、复制、贴过去。
+        """
+        import platform
+
+        from ..runtime.config import config
+        from ..runtime.heartbeat import state as beat_state
+        from ..runtime.sysmon import memory_state, self_rss_mb
+
+        root = _plugin_root()
+        receiver = beat_state(self.store)
+        system = memory_state() or {}
+        plugins = self.plugins()["items"]
+        qq = "qq"
+
+        def count(key: str) -> int:
+            value = config.get(qq, key, []) or []
+            return len(value) if isinstance(value, list) else 0
+
+        own_mb = (self_rss_mb() or 0) + (receiver.get("rss_mb") or 0)
+        built = ""
+        try:
+            built = f"{(root / 'run.py').stat().st_mtime:.0f}"
+            built = datetime.fromtimestamp(float(built)).strftime("%Y-%m-%d")
+        except (OSError, ValueError):
+            built = "?"
+
+        lines = [
+            "【私人秘书 · 反馈】",
+            f"构建日期：{built}",
+            f"系统：{platform.platform()}｜Python {platform.python_version()}",
+            f"内存：系统 {system.get('percent', '?')}%｜本程序约 {round(own_mb)} MB",
+            "",
+            "—— 收消息 ——",
+            "后台：" + ("在跑" if receiver.get("alive") else "没在跑")
+            + (f"（{_redact(receiver.get('detail'))}）" if receiver.get("detail") else ""),
+            f"配置：{count('group_ids')} 个群 / {count('private_ids')} 个私聊 / "
+            f"{count('inbox_ids')} 个收件箱"
+            f"｜登录号 {'填了' if int(config.get(qq, 'account', 0) or 0) else '没填'}",
+            "",
+            "—— 推送 ——",
+            "企业微信：" + ("配好了" if (
+                str(config.get("wecom_bot", "webhook", "") or "").strip()
+                and config.get("wecom_bot", "enabled")) else "还没配好"),
+            f"时间点：{' / '.join(config.get('push', 'times') or []) or '（没设）'}",
+        ]
+        for row in self.store.recent_pushes(limit=3):
+            mark = "✓" if row.get("ok") else "✗"
+            lines.append(f"  {mark} {str(row.get('pushed_at') or '')[:16]}｜"
+                         f"{_redact(row.get('message') or '')[:60]}")
+
+        lines += ["", "—— 插件 ——"]
+        lines += [f"  {item['title']}：{'正常' if item['ok'] else item['error']}"
+                  for item in plugins] or ["  （一个都没装）"]
+
+        tail = _tail(_background_log(), 8)
+        if tail:
+            lines += ["", "—— 后台最近输出 ——"]
+            lines += [f"  {_redact(line)}" for line in tail]
+
+        if include_junk:
+            rows = self.store.list_dropped(limit=5)
+            if rows:
+                # 这一段**故意不打码**：用户勾了它就是要给原文，
+                # 打码了反而看不出"为什么这条没收"。所以界面上要写清楚它含什么。
+                lines += ["", "—— 最近被拦下的原文（可能含群名和消息内容）——"]
+                lines += [f"  [{row.get('reason', '')}] {str(row.get('text') or '')[:80]}"
+                          for row in rows]
+
+        text = "\n".join(lines)
+        if str(note or "").strip():
+            text += "\n\n—— 我想说的 ——\n" + str(note).strip()
+        return {"ok": True, "text": text}
 
     # 暂存文件名长什么样："时间戳-内容指纹-原文件名"。
     # 存成一个固定形状是为了能**严格校验**：界面传回来的 token 直接拼路径，

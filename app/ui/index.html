@@ -72,13 +72,24 @@ nav .gap { height: 14px }
 .tools button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px }
 
 /* pre-line: 下面几行状态是拿 \n 拼的，默认会把换行吞成一个空格 */
-.foot { padding: 10px 6px 0; font-size: 11px; line-height: 1.7; color: var(--text-3); white-space: pre-line }
-/* 收消息的进程没在跑 —— 这是**状态**，得让它显眼，不然用户只会觉得"发了没反应" */
+/* 左下角：**标签靠左、数值靠右**的两列，比一坨左对齐的小字好扫。
+   最上面一行是"收消息的进程活着没"，带个状态点。 */
+.foot { padding: 8px 4px 0; font-size: 11px; color: var(--text-3) }
+.foot > * {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 5px; border-radius: 6px; line-height: 1.5;
+}
+.foot a { cursor: pointer; color: inherit }
+.foot a:hover { background: rgba(0,0,0,.045); color: var(--text-2) }
+.foot .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* 数值不许换行：不写这行，`内存 34% · 184 MB` 会被挤成两行，整块高度忽高忽低 */
+.foot .value { flex: none; white-space: nowrap; font-weight: 500; color: var(--text-2); font-variant-numeric: tabular-nums }
+.foot .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--text-3) }
+.foot .dot.ok { background: #16a34a }
+.foot .dot.bad { background: var(--today) }
+/* 后台没在跑 —— 这是**状态**，得让它显眼，不然用户只会觉得"发了没反应" */
 .foot.warn { color: var(--today) }
-/* 左下角每一行都能点：点哪儿跳哪儿。鼠标上去要看得出来能点。 */
-.foot a { display: block; cursor: pointer; color: inherit }
-.foot a:hover { color: var(--accent); text-decoration: underline }
-.foot span { display: block }
+.foot.warn .value { color: var(--today) }
 
 /* ---------- 中间：列表 ---------- */
 main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22px 20px 0 8px }
@@ -190,10 +201,12 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
 .detail .inner::-webkit-scrollbar-thumb { background: rgba(0,0,0,.13); border-radius: 99px; border: 3px solid transparent; background-clip: content-box }
 
 .detail h2 { font-size: 16px; font-weight: 600; margin: 0 0 16px; line-height: 1.5; word-break: break-word }
-.kv { display: flex; gap: 10px; font-size: 12.5px; line-height: 1.8; padding: 6px 0; border-bottom: 1px solid var(--line) }
-.kv:last-of-type { border-bottom: 0 }
-.kv b { flex: none; width: 52px; color: var(--text-3); font-weight: 400 }
-.kv span { color: var(--text-2); word-break: break-word }
+/* 必须带 .detail 前缀：左下角那几行也叫 kv，不限定的话
+   这里的 width:52px 会把「34% · 184 MB」挤成两行。 */
+.detail .kv { display: flex; gap: 10px; font-size: 12.5px; line-height: 1.8; padding: 6px 0; border-bottom: 1px solid var(--line) }
+.detail .kv:last-of-type { border-bottom: 0 }
+.detail .kv b { flex: none; width: 52px; color: var(--text-3); font-weight: 400 }
+.detail .kv span { color: var(--text-2); word-break: break-word }
 .quote {
   margin-top: 14px; padding: 11px 12px; border-radius: 8px; background: #fafafa;
   font-size: 12.5px; line-height: 1.75; color: var(--text-2); white-space: pre-wrap; word-break: break-word
@@ -567,6 +580,7 @@ function renderPanel(force) {
   if (panel === 'drop') return drawDrop();
   if (panel === 'qq') return drawQqPanel();
   if (panel === 'plugins') return drawPluginsPanel();
+  if (panel === 'feedback') return drawFeedbackPanel();
   return drawDetail();
 }
 
@@ -798,9 +812,49 @@ async function acceptDrop(file) {
   renderPanel(true);
 }
 
+/* 拖进来的是一段 Python 代码 —— 那就当插件装，不是待办。
+   ⚠️ 界面上必须把"插件能干什么"说清楚：它跟你自己写的程序权限一样。 */
+function drawPluginDrop(d) {
+  $('detailInner').innerHTML = `
+    <div class="panelhead"><h2>这是个插件</h2></div>
+    <p class="note">文件：<b>${esc(d.name)}</b>（${fmtSize(d.size)}）</p>
+    <div class="guide warn" style="margin-bottom:14px">
+      <p><b>装之前想清楚：</b>插件就是一段 Python 代码，跑起来跟你自己写的程序
+         <b>权限一样</b> —— 它能读你的待办、能联网、能删你的文件。
+         只装你信得过来源的东西，别装群里随手发的。</p>
+    </div>
+    <div class="acts">
+      <button class="primary block" id="btnInstall">装成插件</button>
+      <button class="block" id="dropCancel">算了，不要了</button>
+    </div>
+    <div id="dropOut"></div>`;
+
+  $('btnInstall').onclick = async () => {
+    const res = await call('install_drop', d.id);
+    if (!res) return;
+    if (!res.ok) {
+      $('dropOut').innerHTML = `<div class="quote"><em>没装上</em>${esc(res.message)}</div>`;
+      return;
+    }
+    toast(res.message || '装好了');
+    dropped = null;
+    setPanel('plugins');
+    renderPanel(true);
+  };
+  $('dropCancel').onclick = async () => {
+    await call('discard_drop', d.id);
+    dropped = null;
+    setPanel(null);
+    renderPanel(false);
+  };
+}
+
 function drawDrop() {
   const d = dropped || {};
   const isFile = !!d.name;
+  // 拖进来的是一段 Python 代码 —— 那就是插件，不是待办
+  const isPlugin = isFile && /\.py$/i.test(d.name);
+  if (isPlugin) return drawPluginDrop(d);
   $('detailInner').innerHTML = `
     <div class="panelhead"><h2>这个怎么处理？</h2></div>
     <p class="note">${isFile
@@ -1066,6 +1120,13 @@ function drawSettings() {
       openSection = null;
     }
   }
+
+  // 设置面板最底下挂一个反馈入口 —— 用着不爽的时候第一反应就是来设置里找
+  $('detailInner').insertAdjacentHTML('beforeend',
+    `<p class="hint" style="margin-top:18px;text-align:center">
+       <a id="fbOpen" style="color:var(--accent);cursor:pointer">
+         📮 用着哪里不对？点这里写反馈 ›</a></p>`);
+  $('fbOpen').onclick = () => { setPanel('feedback'); renderPanel(true); };
 }
 
 async function saveSettings() {
@@ -1214,6 +1275,59 @@ async function drawQqPanel() {
 }
 
 /* ---------- 上手清单 ---------- */
+/* 意见反馈：生成一段**自动脱敏**的话，用户复制走。
+   不做"帮我直接发出去" —— 没有服务器，而且自动上报会带走用户的群名和原文。 */
+function drawFeedbackPanel() {
+  $('detailInner').innerHTML = `
+    <div class="panelhead"><h2>意见反馈</h2></div>
+    <p class="note">哪儿不对、哪儿想要，写在这儿。点「生成反馈」之后
+      下面会出现一整段话，<b>复制走</b>贴到 QQ 群或者 GitHub Issue 里就行。</p>
+    <div class="field">
+      <label for="fbNote">我想说的</label>
+      <textarea id="fbNote" placeholder="比如：今天下午那条群通知没变成待办，
+        原文是「明天上午九点交作业」"></textarea>
+    </div>
+    <div class="field check">
+      <input type="checkbox" id="fbJunk">
+      <div><label for="fbJunk">附带最近 5 条被拦下的原文
+        <p class="hint">⚠️ 这里面会有群名和消息内容 —— 只在发给我一个人时勾。
+          不勾也能排查大部分问题（上面那段会自动带上版本、状态和后台日志）。</p>
+      </label></div>
+    </div>
+    <div class="acts">
+      <button class="primary block" id="fbMake">生成反馈</button>
+      <button class="block" id="fbCopy" disabled>复制到剪贴板</button>
+    </div>
+    <div id="fbOut"></div>
+    <p class="hint" style="margin-top:12px">
+      <b>号码会自动打码</b>（QQ 号、群号只留后 4 位，Webhook 的 key 全打掉）——
+      复制之前程序已经替你处理过了。</p>`;
+
+  $('fbMake').onclick = async () => {
+    const res = await call('feedback_report', $('fbNote').value, $('fbJunk').checked);
+    if (!res) return;
+    $('fbOut').innerHTML =
+      `<div class="field"><label>把下面这段复制走</label>
+       <textarea id="fbText" rows="14" readonly>${esc(res.text)}</textarea></div>`;
+    $('fbCopy').disabled = false;
+    $('fbText').focus();
+    $('fbText').select();
+  };
+  $('fbCopy').onclick = async () => {
+    const box = $('fbText');
+    if (!box) return;
+    try {
+      await navigator.clipboard.writeText(box.value);
+      toast('已经复制了，去贴到群里吧');
+    } catch (err) {
+      // 剪贴板被系统拦了就退回去：选中文本，让用户自己按 Ctrl+C
+      box.focus();
+      box.select();
+      toast('复制不了，已经帮你选中了 —— 按 Ctrl+C');
+    }
+  };
+}
+
 async function drawPluginsPanel() {
   const data = await call('plugins');
   if (!data || panel !== 'plugins') return;
@@ -1237,12 +1351,22 @@ async function drawPluginsPanel() {
     ${cards || `<p class="hint">把插件文件（.py）丢进下面这个文件夹就装好了，
                        删掉就是卸载，不用重启电脑。</p>`}
     <div class="quote"><em>插件文件夹</em>${esc(data.folder || '')}</div>
+    <div class="acts" style="margin-top:12px">
+      <button class="block" id="btnPluginFolder">打开插件文件夹</button>
+    </div>
     <p class="hint" style="margin-top:10px">
-      插件坏了不影响主程序 —— 上面会标红，其余功能照常。</p>`;
+      <b>装插件不用找设置</b>：把那个 .py 文件直接拖进这个窗口就行，
+      程序会当场试着加载一次，坏的就当场告诉你哪儿坏了。<br>
+      插件坏了不影响主程序 —— 上面会标红，其余功能照常。
+      <b>装完要重开一次程序才生效。</b></p>`;
 
   $('detailInner').querySelectorAll('[data-sec]').forEach(button => {
     button.onclick = () => openSettings(button.dataset.sec);
   });
+  $('btnPluginFolder').onclick = async () => {
+    const res = await call('open_plugin_folder');
+    if (res) toast('已经打开了那个文件夹');
+  };
 }
 
 function wireGuide() {
@@ -1382,35 +1506,38 @@ async function refresh() {
   const lines = [];        // {text, go}；go 为空 = 不可点
   const titles = [];
 
-  // ① 收消息的进程活着没 —— 最要紧的一条，点它去「📱 QQ 接收」
+  // ① 收消息的进程活着没 —— 最要紧的一条，点它去「📱 QQ 接收」。
+  //    带个状态点：绿的=正常，橙的=出事了。扫一眼就知道。
   const receiver = env.receiver || {};
   let receiverBad = false;
+  let statusLine;
   if (!env.qq_enabled) {
     // "还没开"是配置问题 → 去设置；下面"没在跑"是操作问题 → 去 QQ 那栏
-    lines.push({text: '○ QQ 还没开，点这里去设置', go: 'qq'});
+    statusLine = {label: 'QQ 还没开，点这里去设置', dot: '', go: 'qq'};
   } else if (receiver.alive) {
-    lines.push({text: `✅ ${receiver.detail || 'QQ 接收中'}`, go: 'panel:qq'});
+    statusLine = {label: receiver.detail || 'QQ 接收中', dot: 'ok', go: 'panel:qq'};
   } else {
     receiverBad = true;
     const waited = Math.max(1, Math.round((receiver.age_seconds || 0) / 60));
-    lines.push({text: receiver.age_seconds == null
-      ? '⚠️ 后台没在跑，点这里启动'
-      : `⚠️ 后台已经 ${waited} 分钟没动静了，点这里看`, go: 'panel:qq'});
+    statusLine = {label: receiver.age_seconds == null
+      ? '后台没在跑，点这里启动'
+      : `后台已经 ${waited} 分钟没动静了`, dot: 'bad', go: 'panel:qq'};
   }
+  const status = statusLine;
 
   // ② 企业微信没配好 —— **只在没配好时出现**（配好了不占地方）。
   // 光填地址不开开关，推送会退回控制台：用户以为配好了，手机上永远没有。
   if (!env.wecom_ready) {
-    lines.push({text: '⚠️ 企业微信还没配好，推送发不出去', go: 'wecom_bot'});
+    lines.push({label: '企业微信还没配好', value: '点这里', go: 'wecom_bot'});
   }
 
   // ③ 内存：用户想看"这东西到底吃多少"（只显示，不跳）
   if (env.memory_percent != null) {
     const mine = [env.ui_mb, env.background_mb].filter(v => typeof v === 'number');
     const total = mine.length ? mine.reduce((a, b) => a + b, 0) : null;
-    lines.push({text: total
-      ? `内存 ${Math.round(env.memory_percent)}%｜本程序 ${Math.round(total)} MB`
-      : `内存 ${Math.round(env.memory_percent)}%`});
+    lines.push({label: '内存', value: total
+      ? `${Math.round(env.memory_percent)}% · ${Math.round(total)} MB`
+      : `${Math.round(env.memory_percent)}%`});
     if (env.ui_mb != null) titles.push(`界面 ${env.ui_mb} MB（窗口开着才有）`);
     if (env.background_mb != null) titles.push(`后台 ${env.background_mb} MB（一直挂着）`);
     if (env.memory) titles.push(env.memory);
@@ -1418,23 +1545,31 @@ async function refresh() {
 
   // ④ 推送时间
   if (env.push_times && env.push_times.length) {
-    lines.push({text: `推送 ${env.push_times.join(' / ')}`, go: 'push'});
+    lines.push({label: '推送', value: env.push_times.join(' / '), go: 'push'});
   }
   // ⑤ 收几个群（这是配置，点它去设置里那一段，不是 QQ 操作面板）
-  lines.push({text: `${env.qq_groups} 个群`, go: 'qq'});
+  lines.push({label: '收的群', value: `${env.qq_groups} 个`, go: 'qq'});
   // ⑥ 插件（有几个、坏没坏）
   if (bad.length) {
-    lines.push({text: `⚠️ 插件坏了：${bad.map(p => p.title).join('、')}`, go: 'panel:plugins'});
+    lines.push({label: `插件坏了：${bad.map(p => p.title).join('、')}`,
+                value: '点这里', go: 'panel:plugins', warn: true});
     titles.push(...bad.map(p => `${p.title}：${p.error}`));
   } else if (list.length) {
-    lines.push({text: `插件 ${list.length} 个`, go: 'panel:plugins'});
+    lines.push({label: '插件', value: `${list.length} 个`, go: 'panel:plugins'});
     titles.push(...list.map(p => `${p.title}：正常`));
   }
 
   $('foot').title = titles.join('\n');
-  $('foot').innerHTML = lines.map(line => line.go
-    ? `<a data-go="${esc(line.go)}">${esc(line.text)}</a>`
-    : `<span>${esc(line.text)}</span>`).join('');
+  const row = (line) => `<span class="label">${esc(line.label)}</span>${
+    line.value === undefined ? '' : `<b class="value">${esc(line.value)}</b>`}`;
+  $('foot').innerHTML =
+    // 状态行永远在最上面，带状态点
+    `<a class="status" data-go="${esc(status.go)}">
+       <i class="dot ${esc(status.dot)}"></i><span class="label">${esc(status.label)}</span>
+     </a>` +
+    lines.map(line => line.go
+      ? `<a class="kv" data-go="${esc(line.go)}">${row(line)}</a>`
+      : `<span class="kv">${row(line)}</span>`).join('');
   $('foot').querySelectorAll('[data-go]').forEach(node => {
     node.onclick = () => {
       const go = node.dataset.go;
