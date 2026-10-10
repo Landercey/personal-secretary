@@ -1517,16 +1517,48 @@ errors="replace")`（窗口模式下这两个是 None，跳过）。这样打印
 改得动、删得掉"的一个 .py。所以第一次运行会把随包的插件**补缺**到
 `<exe 旁边>/plugins/`（`plugins.seed()`）——已经有的、被删掉的都不动。
 
+### 七、⚠️ 发出去当天就炸：`open_ui` 里少改一处参数名
+
+打包版发到别人电脑上，双击 exe 只有一个英文报错框：
+
+```
+Failed to execute script 'run' due to unhandled exception:
+name 'plugins' is not defined
+  File "run.py", line 601, in open_ui
+```
+
+起因是这次为了打包顺手把 `run_ui(store, plugins, actions)` 改成
+`open_ui(store, source, pipeline, sink, registry)`（装配点收拢到 run.py），
+函数体里 `Api(store, plugins, actions)` 那一处**忘了跟着改**。
+
+**为什么没被拦住**：
+
+1. 没有测试碰过 `open_ui` —— 界面是 HTML+JS，Python 测试一直只查"接没接上线"。
+2. 我当时"验过了"：启动 exe、等 25 秒、看进程活着、再看
+   `Get-Process msedgewebview2` 有 18 个进程。**那 18 个是全机器上所有
+   WebView2 进程**（浏览器、别的东西都算），而"进程活着"其实是那个报错框
+   在等人点确定。**这个验证方法本身就是错的。**
+
+修法与教训：
+
+· `Api(store, registry.status, actions)` —— 一行的事；
+· 新增 `tests/test_ui_wiring.py::TestUiEntryPoint`：把 `webview` 换成假的，
+  **真跑一遍 `open_ui`**，断言"走到正常返回 + 窗口标题对 + js_api 是 Api +
+  插件的加载结果真递进去了"。已反向验过：把那行改回去，这条测试立刻红。
+· 打包版的"界面起没起来"**只能看主窗口标题**（`MainWindowTitle` 是不是
+  「私人秘书」），不能看"进程活着"、更不能数 WebView2 进程。
+
 ### 实测（这次真跑了）
 
 ```
 python tools/build_exe.py                → dist/私人秘书/，81 MB
 私人秘书.exe --selftest                  → ✓ 契约完整，配置齐全（数据目录 = exe 旁边）
-私人秘书.exe（双击）                     → 窗口起得来（WebView2 子进程 18 个）
+私人秘书.exe（双击）                     → 主窗口标题 = 私人秘书（真开出来了）
 私人秘书.exe --shortcut                  → C:\...\Desktop\私人秘书.lnk
   目标 = ...\dist\私人秘书\私人秘书.exe
   图标 = ...\私人秘书.exe,0              ← 就是那条小肥鱼（已导出 32×32 图看过）
   参数 = 空（双击即开界面）
+测试 444 条全绿（含新加的 TestUiEntryPoint）
 ```
 
 **没验的**：换一台**没装过 Python**的电脑（这才是真正的"零门槛"验收，

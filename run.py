@@ -598,7 +598,8 @@ def open_ui(store, source, pipeline, sink, registry) -> int:
     # 标题栏/任务栏图标。打包后 exe 自己也带着同一个图标（打包时嵌进去的）。
     icon = RESOURCE / "assets" / "app.ico"
     webview.create_window("私人秘书", str(page), width=1040, height=680,
-                          min_size=(820, 520), js_api=Api(store, plugins, actions))
+                          min_size=(820, 520),
+                          js_api=Api(store, registry.status, actions))
     # 标题栏图标。pywebview 的 create_window 不收这个参数，只有 start 收。
     webview.start(icon=str(icon) if icon.is_file() else None)
     return 0

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -90,6 +91,60 @@ class TestWiring(unittest.TestCase):
         """契约红线：首次启动必须确认过。遮罩一开始不能是 on 之外的可关闭状态。"""
         self.assertIn('class="mask" id="riskMask"', self.html)
         self.assertIn("confirm_risk", self.html)
+
+
+class TestUiEntryPoint(unittest.TestCase):
+    """`open_ui` 真跑一遍（把 webview 换成假的）。
+
+    **为什么非要测这个**：它是"双击 exe / 双击快捷方式"唯一走到的地方。
+    这里出错的话，界面根本不会出现 —— 用户看到的是一个"Failed to execute
+    script"的英文报错框。而且**源码运行和打包版都会死**，改这里时漏改一处
+    参数名就够了。真发生过一次：参数从 `plugins` 改成 `registry`，函数体里
+    还留着 `Api(store, plugins, ...)` → 别人电脑上双击只看到弹框。
+    """
+
+    def setUp(self):
+        import run as run_module
+        import types
+
+        from app.runtime.plugins import Registry
+
+        self.run = run_module
+        self.tmp = tempfile.TemporaryDirectory()
+        page_dir = Path(self.tmp.name) / "app" / "ui"
+        page_dir.mkdir(parents=True)
+        (page_dir / "index.html").write_text("<html></html>", encoding="utf-8")
+        self._old_resource = run_module.RESOURCE
+        run_module.RESOURCE = Path(self.tmp.name)
+
+        self.calls = {}
+        fake = types.ModuleType("webview")
+        fake.create_window = lambda title, url, **kw: self.calls.update(
+            window=(title, url, kw))
+        fake.start = lambda **kw: self.calls.update(start=kw)
+        self._old_webview = sys.modules.get("webview")
+        sys.modules["webview"] = fake
+        self.registry = Registry()
+
+    def tearDown(self):
+        self.run.RESOURCE = self._old_resource
+        if self._old_webview is None:
+            sys.modules.pop("webview", None)
+        else:
+            sys.modules["webview"] = self._old_webview
+        self.tmp.cleanup()
+
+    def test_window_opens_with_the_api_attached(self):
+        # store/source/pipeline/sink 只在动作被调用时才会用到，这里给 None 就够
+        code = self.run.open_ui(None, None, None, None, self.registry)
+
+        self.assertEqual(code, 0, "open_ui 没走到正常返回，说明中途炸了")
+        title, url, kw = self.calls["window"]
+        self.assertEqual(title, "私人秘书")
+        self.assertTrue(url.endswith("index.html"), url)
+        self.assertIsInstance(kw["js_api"], Api)
+        self.assertEqual(kw["js_api"]._plugins, [])      # 插件的加载结果真的递进去了
+        self.assertIn("icon", self.calls["start"])
 
 
 if __name__ == "__main__":
