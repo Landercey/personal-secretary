@@ -958,7 +958,11 @@ def _selftest() -> int:
         # 之所以一直没暴露：作者自己的 config.toml 里还留着那行老键；
         # 而**新用户**拿到的是新生成的配置，一自检就报"配置缺项"（打包版实测到）。
         "push": ["times", "quote_max_chars", "fallback_text_chars"],
-        "ai": ["mode", "cloud_priority", "token_budget_per_day"],
+        # 2026-10-10 做 AI 插件时这一段改过键名（cloud_* → base_url/api_key/model）。
+        # 又一次"作者的老配置里还留着旧键、新用户一自检就报缺项"——
+        # 打包脚本的验证步骤当场抓住了它。
+        "ai": ["enabled", "allow_upload", "base_url", "api_key", "model",
+               "mode", "min_chars", "timeout_seconds", "token_budget_per_day"],
         "resource": ["mem_critical_percent", "mem_resume_percent"],
         "risk": ["require_secondary_account"],
     }
