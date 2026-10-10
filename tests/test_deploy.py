@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -166,6 +167,60 @@ class TestDownloadFallback(unittest.TestCase):
         finally:
             deploy.download = original
         self.assertEqual(len(tried), 1, "第一个成功了就别再试后面的")
+
+
+class TestProgressFile(unittest.TestCase):
+    """装 NapCat 时的进度：后台进程写、界面读，只能靠这个文件。
+
+    为什么值得测："装的过程界面上一动不动"是用户最容易以为卡死的地方，
+    而这两头的路径一旦对不上（换个目录、换个文件名），**不会报任何错**，
+    只会表现为"进度不显示" —— 静默失败，最难查。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name)
+        self._old = os.environ.get("SECRETARY_HOME")
+        os.environ["SECRETARY_HOME"] = str(self.home)
+
+    def tearDown(self):
+        if self._old is None:
+            os.environ.pop("SECRETARY_HOME", None)
+        else:
+            os.environ["SECRETARY_HOME"] = self._old
+        self.tmp.cleanup()
+
+    def test_write_then_read(self):
+        deploy.report("正在装 NapCat")
+        data = deploy.read_progress()
+        self.assertTrue(data["active"])
+        self.assertEqual(data["text"], "正在装 NapCat")
+        self.assertIn("started", data)
+
+    def test_started_time_is_kept_across_reports(self):
+        """连着报好几条时，"这轮从什么时候开始"不能被刷掉（不然"已等多久"永远归零）。"""
+        deploy.report("第一步")
+        first = deploy.read_progress()["started"]
+        deploy.report("第二步")
+        self.assertEqual(deploy.read_progress()["started"], first)
+
+    def test_done_clears_active(self):
+        deploy.report("在装")
+        deploy.report("装好了", active=False)
+        self.assertFalse(deploy.read_progress()["active"])
+
+    def test_no_file_means_no_progress(self):
+        self.assertEqual(deploy.read_progress(), {})
+
+    def test_windows_hides_the_console(self):
+        """装 QQ / 起 NapCat 都不许蹦黑框（用户会当病毒）。
+
+        非 Windows 上取不到这个标志，返回 0 也能跑。
+        """
+        import subprocess as sp
+
+        self.assertEqual(deploy.no_window_flags(),
+                         getattr(sp, "CREATE_NO_WINDOW", 0))
 
 
 if __name__ == "__main__":

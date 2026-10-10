@@ -380,6 +380,10 @@ class Api:
             "qr": qr_info,
             "autostart": desktop.autostart_enabled(),
             "blockers": self._qq_blockers(),
+            # 装 NapCat / 下 QQ 时的实时进度（后台进程写文件，这里读）。
+            # 没有它的话，第一次点「启动 QQ」会有好几分钟界面上什么都不动 ——
+            # 用户以为卡死了，就去点第二次、第三次。
+            "progress": deploy.read_progress(),
             # 后台没跑起来时把它的输出尾巴显示出来 ——
             # 不然"点了没反应"就只能靠猜。
             "log_tail": [] if receiver["alive"] else _tail(_background_log()),
@@ -413,12 +417,16 @@ class Api:
         import subprocess
         import sys
 
-        from ..runtime import heartbeat
+        from ..runtime import deploy, heartbeat
 
         problems = self._qq_blockers()
         if problems:
             return {"ok": False, "blockers": problems,
                     "message": "先补上这两步再启动：" + "；".join(problems)}
+        # 正在装 NapCat 时不许再起一个 —— 两个进程会在同一份目录上一起装。
+        # （装的过程会持续报心跳，一般轮不到这里；这是最后一道闸。）
+        if deploy.read_progress().get("active"):
+            return {"ok": False, "message": "正在装 NapCat，等它装完再点（QQ 那一页有进度）"}
         if heartbeat.state(self.store)["alive"]:
             return {"ok": False, "message": "后台已经在跑了"}
         from ..runtime.desktop import frozen_exe

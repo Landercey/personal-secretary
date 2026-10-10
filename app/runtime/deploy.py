@@ -37,6 +37,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -58,6 +60,56 @@ ONEKEY_MIRRORS = (
 
 ONEBOT_PATH = "/onebot/v11/ws"
 
+# 装的过程写在哪个文件里。
+# 为什么要落文件：**装是后台进程在干，界面是另一个进程**（跟心跳一个套路），
+# 不落文件的话界面只能干瞪眼，用户看到的就是"点了启动一直没反应"。
+PROGRESS_NAME = "deploy.progress.json"
+
+
+def progress_path() -> Path:
+    from .config import default_data_dir
+
+    return default_data_dir() / PROGRESS_NAME
+
+
+def report(text: str, active: bool = True) -> None:
+    """把"现在干到哪一步了"写下来给界面看。写不进去就算了，不能拖垮安装。"""
+    path = progress_path()
+    started = time.time()
+    try:
+        old = json.loads(path.read_text(encoding="utf-8"))
+        if old.get("active") and old.get("started"):
+            started = float(old["started"])      # 保留"这一轮从什么时候开始的"
+    except (OSError, ValueError):
+        pass
+    payload = {"text": text, "active": active,
+               "started": started, "at": time.time()}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def read_progress() -> dict:
+    """界面读进度。超过半小时没更新就当没在装（防止关窗口后留一条假的"正在装"）。"""
+    try:
+        data = json.loads(progress_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if time.time() - float(data.get("at") or 0) > 1800:
+        return {}
+    return data
+
+
+def no_window_flags() -> int:
+    """别弹黑框：装 QQ 的时候会蹦出终端窗口，用户会以为是病毒。
+
+    ⚠️ 不能和 DETACHED_PROCESS 一起用（Windows 会直接报错），所以只给
+    "我们自己不需要看它脸"的子进程加这个 —— 输出照样能抓到。
+    """
+    return getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 
 def download(url: str, dest: Path,
              on_progress: Callable[[str], None] | None = None,
@@ -67,8 +119,24 @@ def download(url: str, dest: Path,
     if on_progress:
         on_progress(f"下载 {url}")
     request = urllib.request.Request(url, headers={"User-Agent": "personal-secretary"})
+    chunks: list[bytes] = []
+    got = 0
+    next_mark = 25          # 每 25% 报一次，不然日志会被刷屏
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        data = response.read()
+        total = int(response.headers.get("Content-Length") or 0)
+        while True:
+            block = response.read(64 * 1024)
+            if not block:
+                break
+            chunks.append(block)
+            got += len(block)
+            if on_progress and total:
+                percent = got * 100 // total
+                if percent >= next_mark:
+                    on_progress(f"  下载中 {percent}%"
+                                f"（{got / 1048576:.1f}/{total / 1048576:.1f} MB）")
+                    next_mark = percent + 25
+    data = b"".join(chunks)
     dest.write_bytes(data)
     if on_progress:
         on_progress(f"  完成，{len(data) / 1024 / 1024:.1f} MB")
@@ -107,22 +175,51 @@ def run_installer(onekey_dir: Path,
     """跑官方安装器：它自己下 QQ + NapCat 并合并成一个目录。
 
     实测要几分钟（300 MB + 28 MB），超时给到 30 分钟。
-    它在结束时等一个按键才退出，所以喂一个回车进去。
+    · 它在结束时等一个按键才退出，所以喂一个回车进去；
+    · **窗口藏起来**（见 `no_window_flags`）—— 蹦黑框比慢更吓人；
+    · **它自己不给进度条**，所以每 30 秒报一句"已经等了 X 分 Y 秒"，
+      用户至少知道没卡死（有真进度可报的时候再报百分比，不糊弄）。
     """
     installer = onekey_dir / "NapCatInstaller.exe"
     if not installer.is_file():
         raise RuntimeError(f"一键包里没有安装器：{installer}")
     if on_progress:
-        on_progress("运行官方安装器（会下载 QQ 约 300 MB，请耐心等）…")
+        on_progress("运行官方安装器（它自己下 QQ 约 300 MB，这几分钟没有进度条，别关窗口）…")
+    proc = subprocess.Popen(
+        [str(installer)], cwd=str(onekey_dir),
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, encoding="utf-8", errors="replace",
+        creationflags=no_window_flags(),
+    )
+
+    def pump() -> None:
+        """安装器自己吐出来的话转给调用方 —— 有就赚了，没有也不等它。"""
+        for line in proc.stdout or []:
+            line = line.strip()
+            if line and on_progress:
+                on_progress(f"  {line[:200]}")
+
+    threading.Thread(target=pump, daemon=True).start()
     try:
-        proc = subprocess.run(
-            [str(installer)], cwd=str(onekey_dir),
-            input="\n", capture_output=True, timeout=timeout,
-            encoding="utf-8", errors="replace",
-        )
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("安装器跑了超过 30 分钟还没结束，可能卡在下载上了")
-    if proc.returncode != 0 and on_progress:
+        if proc.stdin:
+            proc.stdin.write("\n")
+            proc.stdin.flush()
+    except OSError:
+        pass
+
+    started = time.time()
+    told = 0.0
+    while proc.poll() is None:
+        waited = time.time() - started
+        if waited > timeout:
+            proc.kill()
+            raise RuntimeError("安装器跑了超过 30 分钟还没结束，可能卡在下载上了")
+        time.sleep(2)                       # 2 秒一次：装完了能立刻往下走
+        if on_progress and waited - told >= 30:
+            told = waited
+            on_progress(f"  还在装…已经等了 {int(waited // 60)} 分"
+                        f" {int(waited % 60)} 秒（它在下载，没卡住）")
+    if proc.returncode not in (0, None) and on_progress:
         on_progress(f"  安装器退出码 {proc.returncode}")
 
 

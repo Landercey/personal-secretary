@@ -383,23 +383,38 @@ def deploy_dir() -> Path:
     return deploy.default_dir()
 
 
-def run_setup(onekey_dir: Path, account: int, token: str, port: int) -> int:
-    """只装不启动：下包 → 跑官方安装器 → 写我们的配置。"""
+def run_setup(onekey_dir: Path, account: int, token: str, port: int,
+              notify=None) -> int:
+    """只装不启动：下包 → 跑官方安装器 → 写我们的配置。
+
+    `notify` 是"报一句进展"的钩子：默认打日志 + 写进度文件给界面看；
+    从界面启动时（run_deploy）还会顺手报个心跳 —— 装的过程中界面
+    必须知道后台在忙，否则用户会以为死了，再点一次「启动 QQ」。
+    """
     from app.runtime import deploy
+
+    # 装的过程要几分钟，而界面是**另一个进程** —— 所以每报一句都顺手写进
+    # deploy.progress.json，界面那边每 5 秒读一次，用户就能看见"到哪一步了"。
+    if notify is None:
+        def notify(text: str) -> None:        # noqa: F811
+            print(text)
+            deploy.report(text)
 
     onekey_dir.mkdir(parents=True, exist_ok=True)
     if deploy.is_installed(onekey_dir):
         print("已经装过了，跳过下载安装。")
     else:
         try:
-            zip_path = deploy.download_onekey(onekey_dir, print)
-            deploy.extract(zip_path, onekey_dir, print)
-            deploy.run_installer(onekey_dir, print)
+            zip_path = deploy.download_onekey(onekey_dir, notify)
+            deploy.extract(zip_path, onekey_dir, notify)
+            deploy.run_installer(onekey_dir, notify)
         except Exception as exc:
             print(f"\n安装失败：{exc}")
             print("可以手动去 https://github.com/NapNeko/NapCatQQ/releases "
                   "下载 OneKey 包，解压后双击 NapCatInstaller.exe。")
+            deploy.report(f"安装失败：{exc}", active=False)
             return 1
+        deploy.report("装好了，准备启动", active=False)
         # 装成功了就把安装包删掉 —— 那是个 300 MB 的 zip，留着纯占地方。
         # 用户要的是"全在一个文件夹里、删了就干净"，这个也算在里面。
         # 装失败时**不删**：留着重试就不用再下一次。
@@ -442,7 +457,14 @@ def run_deploy(store, pipeline, account: int) -> int:
     port = int(config.get("qq", "bind_port", 18080) or 18080)
 
     if not deploy.is_installed(onekey_dir):
-        code = run_setup(onekey_dir, account, token, port)
+        def tick(text: str) -> None:
+            print(text)
+            deploy.report(text)
+            # 一边装着一边报心跳：不然界面认为"后台没在跑"，
+            # 用户再点一次「启动 QQ」就会**第二个进程在同一份目录上再装一遍**。
+            heartbeat.beat(store, "正在安装 NapCat", force=True)
+
+        code = run_setup(onekey_dir, account, token, port, notify=tick)
         if code != 0:
             return code
 
@@ -464,10 +486,14 @@ def run_deploy(store, pipeline, account: int) -> int:
     print(f"  接收端已监听 127.0.0.1:{port}")
 
     # ② 再起 NapCat
-    napcat = subprocess.Popen(deploy.launch_command(shell),
-                              cwd=str(shell),
-                              creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    #    窗口藏起来：不藏的话用户点一下「启动 QQ」就蹦出两个终端，
+    #    十有八九会以为是病毒弹的（二维码我们自己在界面里显示，不需要它那个窗）。
+    napcat = subprocess.Popen(
+        deploy.launch_command(shell), cwd=str(shell),
+        creationflags=(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                       | deploy.no_window_flags()))
     print(f"  NapCat 已启动（PID {napcat.pid}）")
+    deploy.report("NapCat 已启动，等扫码登录", active=False)
 
     print()
     print("=" * 62)

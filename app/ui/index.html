@@ -1162,13 +1162,22 @@ async function drawQqPanel() {
 
   const receiver = data.receiver || {};
   const qr = data.qr || {};
+  // 第一次会先下 NapCat、再下 QQ（约 300 MB，好几分钟）。
+  // **这几分钟界面上必须动** —— 什么都不动的话用户会以为卡死，然后反复点。
+  const progress = data.progress || {};
+  const waited = progress.started
+    ? Math.max(0, Math.round(Date.now() / 1000 - progress.started)) : 0;
+  const waitedText = waited >= 60
+    ? `${Math.floor(waited / 60)} 分 ${waited % 60} 秒` : `${waited} 秒`;
   // 心跳里的 detail 是"登录号 xxx｜收到 N"就说明真连上了；
   // 是"等扫码登录"就说明进程在跑、但还没登上。
   const connected = String(receiver.detail || '').startsWith('登录号');
   const status = receiver.alive
     ? (connected
         ? `<span class="ok">✅ 正在收消息（${esc(receiver.detail)}）</span>`
-        : '<span class="ok">✅ 后台在跑</span>，但还没登录 —— 扫下面的二维码')
+        : (progress.active
+            ? '<span class="ok">✅ 后台在跑</span>：正在装 NapCat，进度见下面这一块'
+            : '<span class="ok">✅ 后台在跑</span>，但还没登录 —— 扫下面的二维码'))
     : '<span class="bad">⚠️ 后台没在跑 —— 现在收不到任何消息</span>';
 
   const qrBlock = qr.image
@@ -1196,14 +1205,24 @@ async function drawQqPanel() {
          <div class="quote">${esc(logLines.join('\n'))}</div></details>`
     : '';
 
+  const progressBlock = progress.active
+    ? `<div class="guide" style="margin:0 0 12px">
+         <p><b>⏳ ${esc(progress.text || '正在装 NapCat…')}</b></p>
+         <p class="hint">已经等了 ${waitedText}。这一步没有进度条 ——
+           是官方安装器在下载 QQ（约 300 MB），它自己不报数。
+           <b>别关窗口、别重复点</b>，装完这一块会自己消失。</p>
+       </div>`
+    : '';
+
   $('detailInner').innerHTML = `
     <h2>QQ 接收</h2>
     <p class="note">${status}</p>
     ${blockerBlock}
+    ${progressBlock}
     ${qrBlock}
     <div class="acts">
       <button class="primary block" id="btnQQStart"${
-        receiver.alive || blockers.length ? ' disabled' : ''}>
+        receiver.alive || blockers.length || progress.active ? ' disabled' : ''}>
         启动 QQ（后台常驻，收消息 + 定时推送）</button>
       ${receiver.alive && !connected
         ? '<button class="block" id="btnQQRestart">重新出码（重启一次后台）</button>' : ''}
