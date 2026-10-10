@@ -503,6 +503,12 @@ def run_serve(store, pipeline, sink, account: int | None = None) -> int:
     try:
         if account:
             return run_deploy(store, pipeline, account)
+        # 走到这儿说明没给登录号。**不能就这么去等连接** ——
+        # 没有号就不会去装/起 NapCat，而接收端会一直等一个永远不来的连接，
+        # 用户看到的就是"卡住"。说清楚，别让他猜。
+        print("⚠️ 没填要登录的 QQ 号（config.toml 的 [qq] account）。")
+        print("   没有号就没法自动起 NapCat，现在只起接收端，")
+        print("   等你自己开 NapCat 连过来。要自动装+起，请填上那个号。")
         return run_qq(store, pipeline)
     finally:
         if scheduler is not None:

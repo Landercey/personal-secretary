@@ -271,9 +271,11 @@ class TestBridge(unittest.TestCase):
         state = self.api.setup_state()
         by_key = {item["key"]: item for item in state["checks"]}
         # AI 不在清单里 —— 它还没做，摆一条"配了 AI"等于催用户去填一个不生效的框
-        self.assertEqual(set(by_key), {"risk", "wecom", "qq"})
+        # qq_account 会出现，是因为这份配置里已经填了 group_ids（确实要用 QQ）
+        self.assertEqual(set(by_key), {"risk", "wecom", "qq_account", "qq"})
         self.assertFalse(by_key["risk"]["ok"])
         self.assertFalse(by_key["wecom"]["ok"])
+        self.assertFalse(by_key["qq_account"]["ok"])
         self.assertFalse(state["done"])
 
     def test_confirm_risk_remembers(self):
@@ -285,8 +287,17 @@ class TestBridge(unittest.TestCase):
     def test_setup_done_once_the_two_required_things_are_filled(self):
         self.api.confirm_risk()
         self.api.save_settings({"wecom_bot.webhook": "https://x/y",
-                                "qq.group_ids": "123456"})
+                                "qq.group_ids": "123456",
+                                # QQ 号也得填：没填的话「启动 QQ」会去等一个
+                                # 永远不启动的 NapCat，看着就是"卡住"
+                                "qq.account": "123456789"})
         self.assertTrue(self.api.setup_state()["done"])
+
+    def test_qq_account_is_not_required_for_manual_only_users(self):
+        """只用手动记事的人不该被"填 QQ 号"拦着。"""
+        self.api.save_settings({"qq.group_ids": ""})       # 一个群都不收
+        keys = {item["key"] for item in self.api.setup_state()["checks"]}
+        self.assertNotIn("qq_account", keys)
 
     def test_add_text_goes_through_the_injected_action(self):
         """界面不自己 import 理解层，动作是 run.py 递进来的。"""

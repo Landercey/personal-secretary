@@ -1113,12 +1113,31 @@ async function drawQqPanel() {
              多半过期了。点「重新出码」拿一张新的。</p>`
         : '<p class="hint">还没出二维码。点下面「启动 QQ」—— 第一次会先自动下载安装 NapCat（约几十秒）。</p>');
 
+  // 启动之前必须满足的条件。**不提前说的话，用户点完只会看到"卡住"** ——
+  // 没有登录号时程序会跳过整套 NapCat 部署、直接去等一个永远不来的连接。
+  const blockers = data.blockers || [];
+  const blockerBlock = blockers.length
+    ? `<div class="guide warn" style="margin:0 0 12px">
+         <p><b>还不能启动，先补上：</b></p>
+         ${blockers.map(item => `<p>· ${esc(item)}</p>`).join('')}
+       </div>`
+    : '';
+
+  // 后台没起来时把它上次的输出尾巴摆出来 —— 不然"点了没反应"只能靠猜
+  const logLines = data.log_tail || [];
+  const logBlock = logLines.length
+    ? `<details class="sec"><summary>上次启动的输出<i>没跑起来时看这里</i></summary>
+         <div class="quote">${esc(logLines.join('\n'))}</div></details>`
+    : '';
+
   $('detailInner').innerHTML = `
     <h2>QQ 接收</h2>
     <p class="note">${status}</p>
+    ${blockerBlock}
     ${qrBlock}
     <div class="acts">
-      <button class="primary block" id="btnQQStart"${receiver.alive ? ' disabled' : ''}>
+      <button class="primary block" id="btnQQStart"${
+        receiver.alive || blockers.length ? ' disabled' : ''}>
         启动 QQ（后台常驻，收消息 + 定时推送）</button>
       ${receiver.alive && !connected
         ? '<button class="block" id="btnQQRestart">重新出码（重启一次后台）</button>' : ''}
@@ -1133,10 +1152,17 @@ async function drawQqPanel() {
     <p class="hint" style="margin-top:10px">
       要登录的 QQ 号在「⚙ 设置 → 收消息 → QQ 接入」里填。${
         data.account ? `现在是 <b>${data.account}</b>。` : '⚠️ 现在还没填，启动前先填上。'}</p>`;
+  $('detailInner').insertAdjacentHTML('beforeend', logBlock);
 
   $('btnQQStart').onclick = async () => {
     const res = await call('start_qq');
     if (!res) return;
+    if (!res.ok) {
+      const first = (res.blockers && res.blockers[0]) || res.message || '没起来';
+      toast(first.slice(0, 60));
+      drawQqPanel();
+      return;
+    }
     toast(res.message || '起来了');
     drawQqPanel();
   };
@@ -1301,6 +1327,20 @@ async function refresh() {
   const bad = list.filter(p => !p.ok);
   if (env.drop_max_mb) dropMaxMb = Number(env.drop_max_mb) || dropMaxMb;
   const parts = [];
+  const titles = [];
+
+  // 内存：用户想看"这东西到底吃多少"。
+  // 系统占用 + 本程序自己（界面进程 + 后台进程，后台的数从心跳里来）。
+  if (env.memory_percent != null) {
+    const mine = [env.ui_mb, env.background_mb].filter(v => typeof v === 'number');
+    const total = mine.length ? mine.reduce((a, b) => a + b, 0) : null;
+    parts.push(total
+      ? `内存 ${Math.round(env.memory_percent)}%｜本程序 ${Math.round(total)} MB`
+      : `内存 ${Math.round(env.memory_percent)}%`);
+    if (env.ui_mb != null) titles.push(`界面 ${env.ui_mb} MB（窗口开着才有）`);
+    if (env.background_mb != null) titles.push(`后台 ${env.background_mb} MB（一直挂着）`);
+    if (env.memory) titles.push(env.memory);
+  }
 
   // 收消息的进程到底还活着没有 —— 这是**状态**，
   // 和下面那个"你配了几个群"完全不是一回事。
@@ -1325,11 +1365,12 @@ async function refresh() {
   parts.push(`${env.qq_groups} 个群`);
   if (bad.length) {
     parts.push(`⚠️ 插件坏了：${bad.map(p => p.title).join('、')}`);
-    $('foot').title = bad.map(p => `${p.title}：${p.error}`).join('\n');
+    titles.push(...bad.map(p => `${p.title}：${p.error}`));
   } else if (list.length) {
     parts.push(`插件 ${list.length} 个`);
-    $('foot').title = list.map(p => `${p.title}：正常`).join('\n');
+    titles.push(...list.map(p => `${p.title}：正常`));
   }
+  $('foot').title = titles.join('\n');
   $('foot').textContent = parts.join('\n');
   $('foot').classList.toggle('warn', receiverBad);
 }

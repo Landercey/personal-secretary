@@ -166,5 +166,113 @@ class Wiring(Base):
         self.assertIn("account", DEFAULTS["qq"])
 
 
+class Preflight(Base):
+    """启动 QQ 之前必须**提前查**。
+
+    用户报的（确实是这样）：没填登录号时，`run_serve` 会**跳过整套 NapCat 部署**
+    直接进"等 NapCat 连上来"的循环 —— 而那个 NapCat 永远不会启动。
+    现象就是"卡住"，而且没有任何提示（输出还被丢进了 DEVNULL）。
+    """
+
+    def set_config(self, **qq):
+        import importlib
+
+        from app.runtime.config import Config
+
+        module = importlib.import_module("app.runtime.config")
+        self._original = getattr(self, "_original", module.config)
+        module.config = Config({"qq": qq}, Path(self.tmp.name) / "config.toml")
+
+    def tearDown(self):
+        # ⚠️ 必须还原全局 config。不还原的话，后面所有读 config 的测试
+        # （调度器的内存闸门、排班表的"我那一行"）都会看到一个假的默认配置 ——
+        # 这个泄漏真发生过：两个跟本文件毫无关系的测试红了。
+        import importlib
+
+        if hasattr(self, "_original"):
+            importlib.import_module("app.runtime.config").config = self._original
+        super().tearDown()
+
+    def test_no_blockers_when_everything_is_filled(self):
+        self.set_config(enabled=True, account=10001, group_ids=[1])
+        self.assertEqual(Api(self.store)._qq_blockers(), [])
+
+    def test_missing_account_blocks_and_says_where_to_fill(self):
+        self.set_config(enabled=True, account=0, group_ids=[1])
+        problems = Api(self.store)._qq_blockers()
+
+        self.assertEqual(len(problems), 1)
+        self.assertIn("QQ 号", problems[0])
+        self.assertIn("设置", problems[0])          # 得告诉他去哪儿填
+
+    def test_disabled_blocks(self):
+        self.set_config(enabled=False, account=10001)
+        self.assertIn("还没打开", Api(self.store)._qq_blockers()[0])
+
+    def test_both_missing_reports_both(self):
+        self.set_config(enabled=False, account=0)
+        self.assertEqual(len(Api(self.store)._qq_blockers()), 2)
+
+    def test_start_refuses_instead_of_hanging(self):
+        """**不能真去起进程** —— 那正是"卡住"的来源。它得先拒绝。"""
+        self.set_config(enabled=True, account=0, group_ids=[1])
+        result = Api(self.store).start_qq()
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["blockers"])
+
+    def test_panel_carries_the_blockers(self):
+        self.set_config(enabled=True, account=0, group_ids=[1])
+        self.assertTrue(Api(self.store).qq_panel()["blockers"])
+
+
+class BackgroundLog(Base):
+    """后台进程的输出要留档 —— 不然"点了没反应"只能靠猜。"""
+
+    def test_stale_log_is_not_shown_when_it_is_running(self):
+        heartbeat.beat(self.store, "登录号 1｜收到 2", force=True)
+        self.assertEqual(Api(self.store).qq_panel()["log_tail"], [])
+
+    def test_log_tail_is_shown_when_it_is_not_running(self):
+        import importlib
+
+        module = importlib.import_module("app.ui.bridge")
+        log = module._background_log()
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text("第一行\n\n最后一行\n", encoding="utf-8")
+
+        tail = Api(self.store).qq_panel()["log_tail"]
+        self.assertEqual(tail, ["第一行", "最后一行"])   # 空行不要，尾巴保留
+
+    def test_missing_log_is_not_an_error(self):
+        self.assertEqual(Api(self.store).qq_panel()["log_tail"], [])
+
+
+class MemoryReadout(Base):
+    """左下角要实时显示"这东西吃多少"。"""
+
+    def test_self_rss_is_a_plausible_number(self):
+        from app.runtime.sysmon import self_rss_mb
+
+        value = self_rss_mb()
+        self.assertIsNotNone(value)
+        self.assertGreater(value, 5)        # 光解释器就不止 5 MB
+        self.assertLess(value, 2000)
+
+    def test_summary_reports_own_memory(self):
+        from app.runtime.sysmon import self_rss_mb
+
+        summary = Api(self.store).config_summary()
+        self.assertEqual(summary["ui_mb"], self_rss_mb())
+        self.assertIsNone(summary["background_mb"])      # 后台没跑，就没有这个数
+
+    def test_background_memory_comes_from_the_heartbeat(self):
+        heartbeat.beat(self.store, "登录号 1", force=True)
+        summary = Api(self.store).config_summary()
+
+        self.assertIsNotNone(summary["background_mb"])
+        self.assertGreater(summary["background_mb"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

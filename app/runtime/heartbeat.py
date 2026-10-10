@@ -60,7 +60,12 @@ def beat(store, detail: str = "", *, force: bool = False) -> None:
     if not force and now - _last_write < WRITE_EVERY_SECONDS:
         return
     _last_write = now
-    payload = {"at": datetime.now().strftime(TIME_FORMAT), "detail": str(detail or "")}
+    from .sysmon import self_rss_mb
+
+    payload = {"at": datetime.now().strftime(TIME_FORMAT), "detail": str(detail or ""),
+               # 后台自己占多少内存。界面那侧要把它和"界面自己"加起来给用户看，
+               # 但界面读不到别的进程的数 —— 让它自己报最省事。
+               "rss_mb": self_rss_mb()}
     try:
         store.set_meta(KEY, json.dumps(payload, ensure_ascii=False))
     except Exception:
@@ -70,20 +75,21 @@ def beat(store, detail: str = "", *, force: bool = False) -> None:
 def state(store) -> dict:
     """读心跳。界面拿它决定显示"接收中"还是"没在跑"。"""
     if store is None:
-        return {"alive": False, "age_seconds": None, "detail": "", "at": ""}
+        return {"alive": False, "age_seconds": None, "detail": "", "at": "", "rss_mb": None}
     try:
         payload = json.loads(store.get_meta(KEY, "") or "{}")
     except (ValueError, TypeError):
         payload = {}
     at = str(payload.get("at") or "")
     if not at:
-        return {"alive": False, "age_seconds": None, "detail": "", "at": ""}
+        return {"alive": False, "age_seconds": None, "detail": "", "at": "", "rss_mb": None}
     try:
         age = (datetime.now() - datetime.strptime(at, TIME_FORMAT)).total_seconds()
     except ValueError:
-        return {"alive": False, "age_seconds": None, "detail": "", "at": at}
+        return {"alive": False, "age_seconds": None, "detail": "", "at": at, "rss_mb": None}
     return {"alive": age < STALE_SECONDS, "age_seconds": round(age),
-            "detail": str(payload.get("detail") or ""), "at": at}
+            "detail": str(payload.get("detail") or ""), "at": at,
+            "rss_mb": payload.get("rss_mb")}
 
 
 def request_stop() -> None:

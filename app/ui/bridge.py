@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import os
 import re
 import time
 from datetime import datetime
@@ -69,6 +70,26 @@ def _normalize_due(text: str) -> str:
     if len(raw) == 10:
         return raw + " 23:59:00"
     return raw
+
+
+def _background_log() -> Path:
+    """后台进程的输出写到哪。
+
+    为什么要留档（真踩过）：以前 Popen 的时候把 stdout 接到了 DEVNULL ——
+    后台一启动就报错退出，用户点完「启动 QQ」什么都看不到，
+    只能看着界面干瞪眼。现在写进这个文件，界面在它没跑起来时把尾巴显示出来。
+    """
+    from ..runtime.config import default_data_dir
+
+    return default_data_dir() / "background.log"
+
+
+def _tail(path: Path, lines: int = 12) -> list[str]:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    return [line for line in text.splitlines() if line.strip()][-lines:]
 
 
 class Api:
@@ -266,8 +287,6 @@ class Api:
 
     def open_attachment(self, task_id: int, path: str) -> dict:
         """用系统默认程序打开附件。这是用户自己的文件，双击本来也能开。"""
-        import os
-
         target = self._known_attachment(task_id, path)
         os.startfile(str(target))          # 项目只支持 Windows
         return {"ok": True}
@@ -321,7 +340,29 @@ class Api:
             "receiver": receiver,
             "qr": qr_info,
             "autostart": desktop.autostart_enabled(),
+            "blockers": self._qq_blockers(),
+            # 后台没跑起来时把它的输出尾巴显示出来 ——
+            # 不然"点了没反应"就只能靠猜。
+            "log_tail": [] if receiver["alive"] else _tail(_background_log()),
         }
+
+    @staticmethod
+    def _qq_blockers() -> list[str]:
+        """启动 QQ 之前**必须**满足的条件。缺什么就返回一句人话。
+
+        为什么必须提前查（用户报的，确实是这样）：
+        `run_serve` 在没有登录号时会**跳过整套 NapCat 部署**，
+        直接进"等 NapCat 连上来"的循环 —— 而那个 NapCat 永远不会启动。
+        用户看到的就是"卡住"，而且没有任何提示。
+        """
+        from ..runtime.config import config
+
+        problems: list[str] = []
+        if not config.get("qq", "enabled"):
+            problems.append("「QQ 接入」还没打开（设置 → 收消息 → QQ 接入 → 第一项改成 true）")
+        if not int(config.get("qq", "account", 0) or 0):
+            problems.append("没填要登录的 QQ 号（设置 → 收消息 → QQ 接入 → 「要登录哪个 QQ 号」）")
+        return problems
 
     def start_qq(self) -> dict:
         """后台起一个 `run.py --serve`（收消息 + 定时推送）。
@@ -335,6 +376,10 @@ class Api:
 
         from ..runtime import heartbeat
 
+        problems = self._qq_blockers()
+        if problems:
+            return {"ok": False, "blockers": problems,
+                    "message": "先补上这两步再启动：" + "；".join(problems)}
         if heartbeat.state(self.store)["alive"]:
             return {"ok": False, "message": "后台已经在跑了"}
         project = Path(__file__).resolve().parents[2]
@@ -345,15 +390,28 @@ class Api:
         exe = interpreter if interpreter.is_file() else Path(sys.executable)
         flags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
                  | getattr(subprocess, "DETACHED_PROCESS", 0))
+        log = _background_log()
+        log.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            sink = open(log, "w", encoding="utf-8", errors="replace")
+        except OSError:
+            sink = None
         try:
             subprocess.Popen(
                 [str(exe), str(runner), "--serve"], cwd=str(project),
                 creationflags=flags, stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                # 输出写进日志文件，别丢 —— 界面在它没起来时会把尾巴显示出来。
+                stdout=sink or subprocess.DEVNULL, stderr=subprocess.STDOUT,
+                # 子进程的输出编码得钉死 UTF-8：重定向到文件时它默认按
+                # 系统代码页（这台是 GBK）写，读的时候按 UTF-8 读就全乱了。
+                env=dict(os.environ, PYTHONIOENCODING="utf-8"),
                 close_fds=True,
             )
         except OSError as exc:
             return {"ok": False, "message": f"起不来：{exc}"}
+        finally:
+            if sink is not None:
+                sink.close()
         return {"ok": True, "lazy": True,
                 "message": "后台起来了。第一次要等几十秒下载安装 NapCat，"
                            "完了二维码会出现在这里。"}
@@ -395,10 +453,17 @@ class Api:
         from ..runtime.config import config
         from ..runtime.heartbeat import state as beat_state
         from ..runtime.sysmon import describe as mem_describe
+        from ..runtime.sysmon import memory_state, self_rss_mb
 
         receiver = beat_state(self.store)
+        system = memory_state() or {}
         return {
             "memory": mem_describe(),
+            # 用户要看"这东西到底吃多少"：界面进程自己 + 后台进程（后台从心跳报上来）。
+            # 后台读不到就是它没在跑，界面上那一栏不显示它就行。
+            "memory_percent": system.get("percent"),
+            "ui_mb": self_rss_mb(),
+            "background_mb": receiver.get("rss_mb"),
             "qq_groups": len(config.get("qq", "group_ids", []) or []),
             "push_times": config.get("push", "times", []),
             # 界面拖文件时先在前端拦一道，免得白传一遍几十 MB
@@ -456,6 +521,17 @@ class Api:
             {"key": "wecom", "section": "wecom_bot",
              "label": "填了企业微信机器人的 Webhook",
              "ok": has("wecom_bot", "webhook")},
+            # QQ 号必须**在启动之前**填好：没填的话 `run_serve` 会跳过整套
+            # NapCat 部署直接去等连接，那个 NapCat 永远不启动，看着就是"卡住"。
+            # 只在"确实要用 QQ"时才算一条 —— 纯手动记事的用户不该被它拦着。
+            *([{"key": "qq_account", "section": "qq",
+                "label": "填了要登录的 QQ 号（不填的话「启动 QQ」会卡住）",
+                "ok": bool(int(config.get("qq", "account", 0) or 0))}]
+              if (config.get("qq", "enabled")
+                  or config.get("qq", "group_ids")
+                  or config.get("qq", "private_ids")
+                  or config.get("qq", "inbox_ids")
+                  or config.get("qq", "receive_all")) else []),
             {"key": "qq", "section": "qq", "label": "选了要收的群或私聊",
              "ok": bool(config.get("qq", "group_ids") or config.get("qq", "private_ids")
                         or config.get("qq", "inbox_ids")

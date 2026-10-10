@@ -41,6 +41,49 @@ class _MemoryStatusEx(ctypes.Structure):
     ]
 
 
+class _ProcessMemoryCounters(ctypes.Structure):
+    """Windows 的 PROCESS_MEMORY_COUNTERS。只想拿 WorkingSetSize 那一项。"""
+
+    _fields_ = [
+        ("cb", ctypes.wintypes.DWORD),
+        ("PageFaultCount", ctypes.wintypes.DWORD),
+        ("PeakWorkingSetSize", ctypes.c_size_t),
+        ("WorkingSetSize", ctypes.c_size_t),
+        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+        ("PagefileUsage", ctypes.c_size_t),
+        ("PeakPagefileUsage", ctypes.c_size_t),
+    ]
+
+
+def self_rss_mb() -> float | None:
+    """**这个进程自己**占了多少内存（MB，物理内存工作集）。
+
+    用户想看"这东西到底吃多少"。界面那侧分开算：界面进程自己，
+    加后台进程（后台把自己的数写进心跳里，见 runtime/heartbeat.py）。
+
+    读不到返回 None —— 显示不出来是小事，不能因为读不到就报错。
+    """
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        counters = _ProcessMemoryCounters()
+        counters.cb = ctypes.sizeof(_ProcessMemoryCounters)
+        # ⚠️ `GetCurrentProcess()` 返回的是伪句柄 **-1**。直接把它当 Python int
+        # 传给 ctypes，它会按 32 位 int 压栈、被零扩展成 0x00000000FFFFFFFF，
+        # 变成一个无效句柄 —— 调用直接失败返回 0（这个坑真踩过：读出来是 None）。
+        # 包成 c_void_p 才会按指针宽度传。
+        handle = ctypes.c_void_p(kernel32.GetCurrentProcess())
+        ok = kernel32.K32GetProcessMemoryInfo(
+            handle, ctypes.byref(counters), ctypes.c_uint(counters.cb))
+        if not ok:
+            return None
+        return round(counters.WorkingSetSize / 1024 / 1024, 1)
+    except Exception:
+        return None
+
+
 def memory_state() -> dict[str, float] | None:
     """读一次内存：返回 {'percent': 已用百分比, 'avail_gb': 可用 GB}。
 
