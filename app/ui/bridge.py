@@ -511,9 +511,18 @@ class Api:
     def setup_state(self) -> dict:
         """还差哪几件事没做。界面拿它决定"新手引导"留不留。"""
         from ..runtime.config import config
+        from ..runtime.heartbeat import state as heartbeat_state
 
         def has(section: str, key: str) -> bool:
             return bool(str(config.get(section, key, "") or "").strip())
+
+        def qq_in_use() -> bool:
+            """这套配置到底用不用 QQ。用不着的话，跟 QQ 有关的几条就不列出来。"""
+            return bool(config.get("qq", "enabled")
+                        or config.get("qq", "group_ids")
+                        or config.get("qq", "private_ids")
+                        or config.get("qq", "inbox_ids")
+                        or config.get("qq", "receive_all"))
 
         checks = [
             {"key": "risk", "section": "risk", "label": "看过风控提示（小号还是大号）",
@@ -523,19 +532,21 @@ class Api:
              "ok": has("wecom_bot", "webhook")},
             # QQ 号必须**在启动之前**填好：没填的话 `run_serve` 会跳过整套
             # NapCat 部署直接去等连接，那个 NapCat 永远不启动，看着就是"卡住"。
-            # 只在"确实要用 QQ"时才算一条 —— 纯手动记事的用户不该被它拦着。
             *([{"key": "qq_account", "section": "qq",
                 "label": "填了要登录的 QQ 号（不填的话「启动 QQ」会卡住）",
                 "ok": bool(int(config.get("qq", "account", 0) or 0))}]
-              if (config.get("qq", "enabled")
-                  or config.get("qq", "group_ids")
-                  or config.get("qq", "private_ids")
-                  or config.get("qq", "inbox_ids")
-                  or config.get("qq", "receive_all")) else []),
+              if qq_in_use() else []),
             {"key": "qq", "section": "qq", "label": "选了要收的群或私聊",
-             "ok": bool(config.get("qq", "group_ids") or config.get("qq", "private_ids")
-                        or config.get("qq", "inbox_ids")
-                        or config.get("qq", "receive_all"))},
+             "ok": qq_in_use()},
+            # ⚠️ **这一步以前没有**（用户问"安装好的教程做了吗"时才发现的）：
+            # 配置填完 ≠ 能收到消息 —— 还得把后台起起来、扫码登录。
+            # 少了它，用户填完所有东西、清单一消失就不知道该干嘛了，
+            # 干等半天手机上什么都没有。
+            # 点它要跳到「📱 QQ 接收」那一栏（不是设置），所以带个 panel 标记。
+            *([{"key": "qq_login", "panel": "qq",
+                "label": "启动 QQ 并扫码登录（点这里）",
+                "ok": bool(heartbeat_state(self.store).get("alive"))}]
+              if qq_in_use() else []),
             # AI 不在这里列 —— 它**还没做**。
             # 摆一条"配了 AI"等于催用户去填一个不生效的框，纯坑人。
             # 等 AI 插件做出来了，再加一条真正有意义的检查。

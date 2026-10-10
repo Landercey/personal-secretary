@@ -1208,6 +1208,13 @@ async function drawQqPanel() {
 function wireGuide() {
   $('guide').querySelectorAll('li.todo, .guide.tip').forEach(node => {
     node.onclick = () => {
+      // 有的步骤不在设置里 —— 比如"启动 QQ 并扫码"，那一栏是独立面板
+      const target = node.dataset.panel;
+      if (target) {
+        setPanel(target);
+        renderPanel(true);
+        return;
+      }
       const section = node.dataset.section;
       if (section === 'risk') { $('riskMask').classList.add('on'); return; }
       openSettings(section);
@@ -1243,11 +1250,14 @@ async function renderGuide() {
   if (!state.done) {
     const rows = state.checks.map(c => c.ok
       ? `<li class="ok"><i class="mk">✓</i>${esc(c.label)}</li>`
-      : `<li class="todo" data-section="${esc(c.section)}"><i class="mk">○</i>${esc(c.label)}
-           <span class="go">去设置 ›</span></li>`).join('');
+      : `<li class="todo"${c.section ? ` data-section="${esc(c.section)}"` : ''}${
+           c.panel ? ` data-panel="${esc(c.panel)}"` : ''}>
+           <i class="mk">○</i>${esc(c.label)}
+           <span class="go">${c.panel ? '去启动 ›' : '去设置 ›'}</span></li>`).join('');
     parts.push(`<div class="guide">
         <h3>还没弄完这几步</h3>
-        <p>弄完前面两条就能收到第一条推送了。点哪一条直接跳过去。</p>
+        <p>前几条是把配置填上，<b>最后一条要真的把 QQ 起起来扫码</b> ——
+           少了它手机上什么都不会有。点哪一条都能直接跳过去。</p>
         <ul>${rows}</ul>
       </div>`);
   }

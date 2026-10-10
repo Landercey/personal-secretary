@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app.runtime.config import Config, DEFAULTS, coerce      # noqa: E402
+from app.runtime import heartbeat                             # noqa: E402
 from app.runtime.config import (                              # noqa: E402
     ADVANCED_KEYS, LOCKED_KEYS, PENDING_SECTIONS,
 )
@@ -238,6 +239,14 @@ class TestSchema(unittest.TestCase):
 class TestBridge(unittest.TestCase):
     """界面能调到的几个新方法。用临时配置，不碰真 config.toml。"""
 
+    def pretend_receiver_alive(self) -> None:
+        """假装后台在跑。这两个测试只关心清单，不该真去起一个后台进程。"""
+        original = heartbeat.state
+        heartbeat.state = lambda store: {
+            "alive": True, "age_seconds": 1, "detail": "登录号 123456789",
+            "at": "", "rss_mb": 31.0}
+        self.addCleanup(setattr, heartbeat, "state", original)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.path = Path(self.tmp.name) / "config.toml"
@@ -271,11 +280,13 @@ class TestBridge(unittest.TestCase):
         state = self.api.setup_state()
         by_key = {item["key"]: item for item in state["checks"]}
         # AI 不在清单里 —— 它还没做，摆一条"配了 AI"等于催用户去填一个不生效的框
-        # qq_account 会出现，是因为这份配置里已经填了 group_ids（确实要用 QQ）
-        self.assertEqual(set(by_key), {"risk", "wecom", "qq_account", "qq"})
+        # qq_account / qq_login 会出现，是因为这份配置里已经填了 group_ids（确实要用 QQ）
+        self.assertEqual(set(by_key),
+                         {"risk", "wecom", "qq_account", "qq", "qq_login"})
         self.assertFalse(by_key["risk"]["ok"])
         self.assertFalse(by_key["wecom"]["ok"])
         self.assertFalse(by_key["qq_account"]["ok"])
+        self.assertFalse(by_key["qq_login"]["ok"])
         self.assertFalse(state["done"])
 
     def test_confirm_risk_remembers(self):
@@ -291,7 +302,25 @@ class TestBridge(unittest.TestCase):
                                 # QQ 号也得填：没填的话「启动 QQ」会去等一个
                                 # 永远不启动的 NapCat，看着就是"卡住"
                                 "qq.account": "123456789"})
+        self.assertFalse(self.api.setup_state()["done"])      # 还差"把 QQ 起起来"
+
+        self.pretend_receiver_alive()
         self.assertTrue(self.api.setup_state()["done"])
+
+    def test_last_step_is_start_qq_and_it_opens_the_panel(self):
+        """**这一步以前没有**：配置填完 ≠ 能收到消息，还得起后台、扫码。
+
+        它点的不是设置，是「📱 QQ 接收」那一栏 —— 所以带着 panel 标记。
+        """
+        item = next(c for c in self.api.setup_state()["checks"]
+                    if c["key"] == "qq_login")
+        self.assertEqual(item["panel"], "qq")
+        self.assertFalse(item["ok"])
+
+        self.pretend_receiver_alive()
+        item = next(c for c in self.api.setup_state()["checks"]
+                    if c["key"] == "qq_login")
+        self.assertTrue(item["ok"])
 
     def test_qq_account_is_not_required_for_manual_only_users(self):
         """只用手动记事的人不该被"填 QQ 号"拦着。"""
