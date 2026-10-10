@@ -990,9 +990,13 @@ def _selftest() -> int:
     print(f"  过滤强度：  {config.get('parse', 'filter_strength')}")
     if config.load_note:
         print(f"  ⚠️ {config.load_note}")
-    # AI 还没做，但配置段留着（以后做插件时直接用）。这里如实说，
-    # 不打印"AI 模式：conservative"那种看着像已经在跑的话。
-    print("  AI 增强：   还没做（现在是纯规则解析：不联网、不花钱、不传内容出去）")
+    # AI 是插件，关着就是纯规则解析。**如实说它是开着还是关着** ——
+    # 打印"AI 模式：conservative"那种话，用户会以为它一直在跑。
+    if config.get("ai", "enabled", False) and config.get("ai", "allow_upload", False):
+        print(f"  AI 增强：   开着（{config.get('ai', 'model') or '没填模型'}"
+              f" @ {config.get('ai', 'base_url') or '没填地址'}）")
+    else:
+        print("  AI 增强：   关着（纯规则解析：不联网、不花钱、内容不出去）")
     print(f"  插件：      {len(plugins)} 个（{plugin_dir(ROOT)}）")
     for item in plugins:
         print(("    ✓ " if item.ok else "    ✕ ") + item.describe())

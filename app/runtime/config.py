@@ -100,15 +100,24 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "fallback_text_chars": 300,
     },
     "ai": {
+        # 总开关。**默认 false**：打开之后消息内容会被发到那个接口（可能是别人
+        # 的服务器），所以必须用户自己点头，不能默认替他把内容传出去。
+        "enabled": False,
+        # 第二个闸门：允许把消息内容上传到外面。两个都得开才真的会发。
+        # 分开是为了"我先填好地址，但还没决定要不要真的发出去"这种状态。
+        "allow_upload": False,
+        # OpenAI 兼容接口。云端（硅基流动/DeepSeek/OpenAI…）和本地（Ollama）
+        # 形状一样，都填这里：Ollama 是 http://127.0.0.1:11434/v1
+        "base_url": "",
+        "api_key": "",
+        "model": "",
         # conservative = 只挑明确写了要做的事，不重写不推断；aggressive = 允许归纳重写。
         "mode": "conservative",
-        "cloud_priority": True,
-        "cloud_base_url": "",
-        "cloud_api_key": "",
-        "cloud_model": "",
+        # 短消息不值当问 AI（又慢又花钱），规则解析已经够用。
+        "min_chars": 80,
+        "timeout_seconds": 60,
         # 0 = 不限制。
         "token_budget_per_day": 0,
-        "local_model": "",
     },
     "resource": {
         "mem_critical_percent": 88,
@@ -263,17 +272,24 @@ KEY_COMMENTS: dict[str, str] = {
     "push.quote_max_chars": "推送里附带的原文片段长度（方便你看它为什么被判成待办）。",
     "push.fallback_text_chars": "AI 用不了时，推送原文的前多少字作为保底。",
     # [ai]
-    # [ai] 整段都标着"还没做" —— 界面上一个输入框都不显示，
-    # 只有认字的人打开 config.toml 才会看到这些。所以每一条都先说清楚这一点。
-    "ai.mode": "⚠️ AI 增强还没做，下面这些填了不生效（功能做完会随插件发布）。\n"
-               "#   做完之后：conservative 保守（只挑明确要做的事）/\n"
-               "#   aggressive 激进（允许重写归纳，读着舒服但可能漏或编）。",
-    "ai.cloud_priority": "⚠️ 还没做。以后：true = 优先用云端；false = 优先用本地模型。",
-    "ai.cloud_base_url": "⚠️ 还没做。以后：云端接口地址，留空 = 不用云端。",
-    "ai.cloud_api_key": "⚠️ 还没做。以后：云端密钥。别把填好的文件发人、别传网盘。",
-    "ai.cloud_model": "⚠️ 还没做。以后：云端模型名。免费模型名会变，换服务商时要改。",
-    "ai.token_budget_per_day": "⚠️ 还没做。以后：每天最多用多少 token，0 = 不限制。",
-    "ai.local_model": "⚠️ 还没做。以后：本地模型名（要装 Ollama），留空 = 不用本地。",
+    "ai.enabled": "打开之后，长消息会交给 AI 挑待办。默认关闭 ——\n"
+                  "#   关着的时候走纯规则解析：不联网、不花钱、内容不出去。",
+    "ai.allow_upload": "允许把消息内容发到这个接口。默认关闭：\n"
+                       "#   地址填好、但还没想好要不要真发出去时，就让它关着。\n"
+                       "#   开了之后：消息原文（含群名、附件里读出来的字）会离开这台电脑。",
+    "ai.base_url": "OpenAI 兼容的接口地址，填到 /v1 为止。\n"
+                   "#   本地 Ollama：http://127.0.0.1:11434/v1（不用 key，随便填一个）\n"
+                   "#   云端各家都长一样：https://xxx/v1\n"
+                   "#   （也可以直接填完整的 .../chat/completions，两种都认）",
+    "ai.api_key": "接口密钥。别把填好的 config.toml 发人、别传网盘。\n"
+                  "#   本地 Ollama 随便填个 ollama 就行。",
+    "ai.model": "模型名，照服务商的写（比如 qwen2.5:7b、deepseek-chat）。\n"
+                "#   免费模型的名字会变，换服务商时要改这一行。",
+    "ai.mode": "conservative 保守（只挑明确写了要做的事）/ aggressive 激进（允许重写归纳）。\n"
+               "#   默认保守：宁可少收一条，也不要给你编一条出来。",
+    "ai.min_chars": "短于这么多字的正文不麻烦 AI（规则解析够用了，AI 又慢又花钱）。",
+    "ai.timeout_seconds": "等接口多少秒算失败。超时就退回规则解析，不会卡住收消息。",
+    "ai.token_budget_per_day": "每天最多用多少 token，0 = 不限制。超了这天就不再用 AI。",
     # [resource]
     "resource.mem_critical_percent": "内存占用超过这个百分比时，只记待办不分析不推送（别在打游戏时抢资源）。",
     "resource.mem_resume_percent": "内存降到这个百分比以下，恢复正常工作。",
@@ -369,7 +385,8 @@ ADVANCED_KEYS: frozenset[str] = frozenset({
     "qq.max_text_chars", "qq.keep_every_message",
     "parse.merge_window_seconds", "parse.due_default_hour",
     "extract.ocr_engine", "extract.max_pages", "extract.render_scale",
-    "ai.token_budget_per_day",
+    # AI 这两项一般不用动：短于多少字才问 AI、等多久算超时。
+    "ai.token_budget_per_day", "ai.min_chars", "ai.timeout_seconds",
     "title.max_len", "title.min_meaningful_chars",
 })
 
@@ -396,8 +413,6 @@ LOCKED_KEYS: dict[str, str] = {
 #
 # 做完了就把对应的那行删掉，界面上的输入框会自己出现（清单是照 DEFAULTS 生成的）。
 PENDING_SECTIONS: dict[str, str] = {
-    "ai": "AI 增强还没做。现在走的是纯规则解析：不联网、不花钱、"
-          "任何内容都不会传出去。等做成插件，这一页才会出现。",
 }
 
 
@@ -604,7 +619,10 @@ class Config:
                     "pending": pending, "keys": []}
 
         keys = []
-        for key in sorted(DEFAULTS[section]):
+        # **按 DEFAULTS 里的书写顺序**，不按字母排。那个顺序是照着"用户填的
+        # 先后"手写出来的（总开关 → 地址 → 密钥 → 模型），字母序会把
+        # 「总开关」排到第四个去 —— 用户从上往下填，第一个框不该是"密钥"。
+        for key in DEFAULTS[section]:
             full = f"{section}.{key}"
             keys.append({
                 "key": key,

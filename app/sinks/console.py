@@ -41,7 +41,10 @@ def format_task_line(task: Task, index: int = 0) -> str:
     where = f" @{task.location}" if task.location else ""
     origin = f"（{task.source_name}）" if task.source_name else ""
     head = f"{index}. " if index else ""
-    return f"{head}{task.title} — {when}{where}{origin}"
+    # confidence < 1 = 这条是 AI 归纳出来的，不是规则算出来的。
+    # 必须让用户在推送里就看得出来，不然他没法判断"这是原文说的还是模型补的"。
+    ai = "【AI】" if float(getattr(task, "confidence", 1.0) or 1.0) < 1 else ""
+    return f"{head}{task.title} — {when}{where}{origin}{ai}"
 
 
 def build_digest(tasks: list[Task], title: str = "待办汇总",
@@ -57,7 +60,12 @@ def build_digest(tasks: list[Task], title: str = "待办汇总",
     else:
         lines = [format_task_line(t, i + 1) for i, t in enumerate(tasks)]
         quotes = [f"   ↳ {t.quoted}" for t in tasks if t.quoted]
-        body = "\n".join(lines + ([""] + quotes if quotes else []))
+        tail = [""] + quotes if quotes else []
+        # 有一条是 AI 归纳的，就在末尾说清楚（合同里写明必须标）
+        if any(float(getattr(t, "confidence", 1.0) or 1.0) < 1 for t in tasks):
+            tail += ["", "【AI 整理，可能有误】带【AI】的那几条是模型归纳的，"
+                         "原文和附件都留在本地，点开详情能看到。"]
+        body = "\n".join(lines + tail)
 
     # 附件：只带前面几条的，且只带真实存在的文件。
     # 顺带去重 —— 同一张图被挂在两条待办上是常见的。

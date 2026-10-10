@@ -72,7 +72,11 @@ class TestConfig(unittest.TestCase):
         "store": ["attachment_retention_days", "keep_dropped_days"],
         "push": ["enabled", "times", "catch_up_minutes",
                  "quote_max_chars", "fallback_text_chars"],
-        "ai": ["mode", "cloud_priority", "token_budget_per_day"],
+        # AI 这一段的键在 2026-10-10 做插件时改过：从"cloud_* + local_model"
+        # 收敛成一套 OpenAI 兼容的 base_url/api_key/model（本地和云端形状一样），
+        # 另加两道隐私闸（enabled + allow_upload）。
+        "ai": ["enabled", "allow_upload", "base_url", "api_key", "model",
+               "mode", "min_chars", "timeout_seconds", "token_budget_per_day"],
         "resource": ["mem_critical_percent", "mem_resume_percent"],
         "risk": ["require_secondary_account"],
         "wecom_bot": ["enabled", "webhook", "max_per_minute", "timeout"],
@@ -92,8 +96,11 @@ class TestConfig(unittest.TestCase):
         """新仓库必须零真实信息：默认配置里不许出现真实密钥/群号。"""
         for key in ("webhook",):
             self.assertFalse(DEFAULTS["wecom_bot"][key], f"{key} 默认必须是空的")
-        for key in ("cloud_api_key", "cloud_base_url", "cloud_model", "local_model"):
+        for key in ("api_key", "base_url", "model"):
             self.assertFalse(DEFAULTS["ai"][key], f"{key} 默认必须是空的")
+        # 两道闸默认必须是关的：一装上就把用户的消息发出去是不可接受的
+        self.assertFalse(DEFAULTS["ai"]["enabled"])
+        self.assertFalse(DEFAULTS["ai"]["allow_upload"])
         self.assertFalse(DEFAULTS["wecom_bot"]["enabled"])
 
 

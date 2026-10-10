@@ -654,9 +654,9 @@ class Api:
                 "label": "启动 QQ 并扫码登录（点这里）",
                 "ok": bool(heartbeat_state(self.store).get("alive"))}]
               if qq_in_use() else []),
-            # AI 不在这里列 —— 它**还没做**。
-            # 摆一条"配了 AI"等于催用户去填一个不生效的框，纯坑人。
-            # 等 AI 插件做出来了，再加一条真正有意义的检查。
+            # AI 不在这里列 —— 它是**可选**功能（默认关着也能正常用）。
+            # 清单只放"不做就用不起来"的步骤；塞一个可选项进去，等于催用户
+            # 去填一堆接口地址，纯属添乱。要开它，去 设置 → 看懂消息 → AI 增强。
         ]
         return {"checks": checks,
                 "done": all(item["ok"] for item in checks if not item.get("optional")),

@@ -46,7 +46,11 @@ def register(registry):
     registry.add_source(MySource())
 ```
 
-现成的例子看 `timetable.py`（课表：ICS / CSV / JSON 三种格式）。
+现成的两个例子：
+
+- `timetable.py` —— **主动去外面拉**（课表：ICS / CSV / JSON 三种格式）；
+- `ai.py` —— **加工消息**（把长通知交给 AI 挑待办）。它顺便演示了两件正事：
+  怎么调外部 HTTP 接口，以及**失败时怎么退回规则解析**（插件挂了不能拖垮主程序）。
 
 **插件写坏了不会影响程序启动**：加载失败只会在这个文件夹对应的状态里
 记一笔，界面底部和 `python run.py --selftest` 都会显示出来。
