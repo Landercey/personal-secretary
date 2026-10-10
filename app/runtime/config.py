@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import time
 import tomllib
 from pathlib import Path
@@ -717,6 +718,11 @@ def default_root() -> Path:
     override = os.environ.get("SECRETARY_HOME")
     if override:
         return Path(override)
+    # 打包成 exe 之后 `__file__` 指向 `_internal` 里面（那是 PyInstaller 的
+    # 私有目录），把 data/config.toml/plugins 放进去，用户既看不见也找不着。
+    # exe 旁边的那个文件夹才是"程序自己的目录"。
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[2]
 
 

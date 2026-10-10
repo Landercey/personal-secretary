@@ -1435,6 +1435,103 @@ panel:qq      → QQ 接收面板              ✔
 显示列表 + 下载按钮就行，**不需要自己的服务器**。上传走 PR，审核就是
 "这份 JSON 里多了谁"这一件事。
 
+## 第 12 步（打包成 exe）：2026-10-10
+
+一条命令：`python tools/build_exe.py` → `dist/私人秘书/`（81 MB）。
+
+```
+私人秘书/
+  私人秘书.exe       ← 双击这个；图标是那条小肥鱼（打包时嵌进 exe）
+  用前必看.txt       ← 6 条大白话（写脚本时自动生成）
+  _internal/         ← PyInstaller 的零件，用户别动
+  config.toml  data/  plugins/  napcat/   ← 第一次双击之后才长出来
+```
+
+**做成 onedir 绿色文件夹，不做单文件 exe**：单文件每次启动都要自解压到临时
+目录（启动慢一倍以上），而且自解压行为被杀软误报的概率明显更高。
+
+### 一、打包之后"程序自己的目录"变了
+
+`default_root()` 加了 frozen 分支：打包后返回 **exe 旁边的文件夹**。
+不这么改的话，`__file__` 指向 `_internal/`，用户的待办、配置、插件全被写进
+那个看不见的目录里 —— 表现为"我的待办去哪了、卸载怎么删不干净"。
+
+顺带把散在 run.py / bridge.py / desktop.py 里的 `Path(__file__).parents[2]`
+统一到 `default_root()`（原来有五处各写一份，打包后全错）。
+
+### 二、快捷方式：目标变 exe，图标用 exe 自己
+
+| | 源码运行 | 打包版 |
+|---|---|---|
+| 快捷方式目标 | `pythonw.exe` + `run.py --ui` | `私人秘书.exe`（不带参数） |
+| 开机自启 | `pythonw.exe run.py --serve` | `私人秘书.exe --serve` |
+| 界面里"启动 QQ"起的后台 | 同上 | 同上 |
+| 图标 | `assets/app-<指纹>.ico` | **exe 自己**（`...,0` 号图标资源） |
+
+**"安装后自动生成桌面快捷方式"**：打包版第一次打开界面时，桌面上没有就自己建一个
+（`create_shortcut(only_if_missing=True)`）—— 已经有了就一根手指都不碰，
+那可能是他自己挪过位置、改过名字的。`tools/build_exe.py` 打完包也会立刻
+建一次（走的是 exe 自己的 `--shortcut`，验的就是用户点按钮时那条路）。
+
+**踩的坑**：`IconLocation` 允许写成 `...\程序.exe,0`，但 `Test-Path '...exe,0'`
+是 **False** —— 于是"设图标"那一步被静默跳过，桌面留着**上一个**快捷方式的旧图标
+（作者这台机器上留着的是仓库里那份 .ico 的路径，看着没问题，别人机器上就找不到）。
+修法：判断"文件在不在"之前先把 `,\d+$` 这个序号去掉。
+
+### 三、⚠️ 5.2 GB 的教训：一个看得见的 import
+
+第一次打包出来 **5.2 GB**，里面是 torch、transformers、librosa、faiss、
+onnxruntime…… 跟这个项目八竿子打不着。
+
+根因：`extract/ocr_rapid.py` 里那行 `from rapidocr_onnxruntime import RapidOCR`
+（**可选件、装在函数里**）—— PyInstaller 不看它在不在函数里，只要看得见就顺着
+`hook-torch` / `hook-onnxruntime` 把整个机器学习栈拖进来。
+
+修法两条：
+
+1. 改成 `importlib.import_module("rapidocr_onnxruntime")`（字符串，静态分析看不见）；
+2. `tools/build_exe.py` 里留一份 `EXCLUDES` 名单兜底，并且**加了一道体积闸门**：
+   超过 400 MB 直接报错停下，不给你一个"莫名其妙很大"的发布包。
+
+### 四、⚠️ 自检在打包版里"自杀 + 卡住"
+
+exe 跑 `--selftest` 时报 `UnicodeEncodeError`（GBK 编不出 `✓`），然后**进程不退出**
+—— 因为窗口模式的 exe 在未捕获异常时会弹一个**报错对话框**，一直在等人点确定。
+表现就是"exe 一跑就卡死"。
+
+修法：run.py 开头把 `sys.stdout/stderr` 统一 `reconfigure(encoding="utf-8",
+errors="replace")`（窗口模式下这两个是 None，跳过）。这样打印永远不会把程序弄死。
+
+### 五、打包版自检揪出一个真 bug：`push.default_times`
+
+`--selftest` 的必填清单里写的是 `push.default_times` —— 那是**早期**的键名，
+后来改成 `times` 了。作者自己的 `config.toml` 里还留着那行老键，所以源码自检
+一直"通过"；**新用户拿到的是新生成的配置**，一自检就报"配置缺项"。
+打包版第一次跑就把它顶出来了。已改成 `times`。
+
+（教训：自检要拿**全新生成的配置**跑一遍，不能只在作者机器上跑。）
+
+### 六、打包时自带插件要"补"到用户那儿
+
+`_internal/plugins/timetable.py` 用户看不见也改不动，而插件必须是"看得见、
+改得动、删得掉"的一个 .py。所以第一次运行会把随包的插件**补缺**到
+`<exe 旁边>/plugins/`（`plugins.seed()`）——已经有的、被删掉的都不动。
+
+### 实测（这次真跑了）
+
+```
+python tools/build_exe.py                → dist/私人秘书/，81 MB
+私人秘书.exe --selftest                  → ✓ 契约完整，配置齐全（数据目录 = exe 旁边）
+私人秘书.exe（双击）                     → 窗口起得来（WebView2 子进程 18 个）
+私人秘书.exe --shortcut                  → C:\...\Desktop\私人秘书.lnk
+  目标 = ...\dist\私人秘书\私人秘书.exe
+  图标 = ...\私人秘书.exe,0              ← 就是那条小肥鱼（已导出 32×32 图看过）
+  参数 = 空（双击即开界面）
+```
+
+**没验的**：换一台**没装过 Python**的电脑（这才是真正的"零门槛"验收，
+第 12 步的验收断言就是它）；以及打包版里完整走一遍"启动 QQ → 扫码 → 收消息"。
+
 ## 六、降级映射表（每条都要有可量化的验证方法）
 
 | 触发条件 | 降级行为 | 怎么证明没坏 |

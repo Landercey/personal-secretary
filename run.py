@@ -48,13 +48,24 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# 打包成 exe 之后，输出可能按系统代码页（中文 Windows 是 GBK）编码 ——
+# 自检里那几个 ✓/✗ 会直接把程序打死（UnicodeEncodeError）。窗口模式下
+# 这种死法还特别隐蔽：只在屏幕上弹一个报错框。这里统一改成 UTF-8，坏字符
+# 用 ? 代替，**任何情况下打印都不会把程序弄崩**。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass                      # 窗口模式下这两个是 None，跳过就行
+
 from app.contracts.models import STATUS_DONE, STATUS_DROPPED     # noqa: E402
 from app.pipeline.chain import Pipeline                          # noqa: E402
 from app.pipeline.chat_filter import ChatNoiseEnricher           # noqa: E402
 from app.pipeline.file_enricher import FileEnricher              # noqa: E402
 from app.pipeline.parse_enricher import RuleParseEnricher        # noqa: E402
-from app.runtime.config import config, default_data_dir          # noqa: E402
+from app.runtime.config import config, default_data_dir, default_root  # noqa: E402
 from app.runtime import heartbeat                                # noqa: E402
+from app.runtime import plugins as plugin_module                 # noqa: E402
 from app.runtime.plugins import (                                # noqa: E402
     Registry, load as load_plugins, plugin_dir,
 )
@@ -65,6 +76,23 @@ from app.sinks.router import build_sink, channel_status          # noqa: E402
 from app.sources.manual import ManualSource                      # noqa: E402
 from app.sources.qq import QQSettings, QQSource, ensure_token    # noqa: E402
 from app.store.repository import SqliteStore, open_database      # noqa: E402
+
+# 程序自己的目录。源码运行 = 这个文件夹；打包成 exe = exe 旁边那个文件夹。
+ROOT = default_root()
+# 随包发的**只读**文件（界面 html、schema.sql、脚本、自带插件）在哪。
+# 源码运行 = 项目根目录；打包后 = PyInstaller 解出来的 _internal。
+RESOURCE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+
+
+def ensure_bundled_files() -> int:
+    """第一次运行时，把随包发的插件补到用户的 plugins/ 里。返回补了几个。
+
+    只补缺不覆盖（见 plugins.seed）。源码运行时 RESOURCE 和 ROOT 是同一个地方，
+    本来就在，这个函数什么也不会做。
+    """
+    if RESOURCE == ROOT:
+        return 0
+    return plugin_module.seed(ROOT, RESOURCE / "plugins")
 
 
 def build(database: str | Path | None = None):
@@ -79,13 +107,12 @@ def build(database: str | Path | None = None):
     不影响这里把主程序装配起来（CONTRACT.md 第二节硬性约束）。
     返回值里多带的 registry 就是给 --plugins / --sync / 界面 / 自检看的。
     """
-    root = Path(__file__).resolve().parent
     db_path = Path(database) if database else default_data_dir() / "secretary.db"
     store = SqliteStore(open_database(db_path))
     source = ManualSource()
 
     registry = Registry()
-    load_plugins(root, registry)     # 加载结果记在 registry.status 上
+    load_plugins(ROOT, registry)     # 加载结果记在 registry.status 上
 
     # 理解层的零件分两组，管线保证「消息级」整组先跑：
     #   ① 文件解析（把附件读成文字拼进正文）
@@ -515,15 +542,15 @@ def run_serve(store, pipeline, sink, account: int | None = None) -> int:
             scheduler.stop()
 
 
-def run_ui(store, plugins=(), actions=None) -> int:
+def open_ui(store, source, pipeline, sink, registry) -> int:
     """打开界面窗口。
 
     ⚠️ 界面和"收消息"是**两个独立进程**，共用同一个 SQLite 库。
     好处：界面关掉不影响后台收消息；后台也不用为了显示而常驻一个窗口。
     这也解释了为什么值得用网页界面 —— 那 400 多 MB 只在窗口开着时占。
 
-    `actions` 是界面要用的"理解层动作"（手动录入、拉课表）。
-    用参数递进去而不是让界面 import 那些模块 —— 全项目只有这里能装配。
+    界面要用的"理解层动作"（手动录入、拉课表）在这里拼好再递进去，
+    而不是让界面自己去 import 那些模块 —— 全项目只有这里能装配。
     """
     try:
         import webview
@@ -534,7 +561,25 @@ def run_ui(store, plugins=(), actions=None) -> int:
 
     from app.ui.bridge import Api
 
-    page = Path(__file__).resolve().parent / "app" / "ui" / "index.html"
+    actions = {
+        "add_text": lambda text: ingest(store, source, pipeline, text),
+        "sync": lambda: sync_sources(store, pipeline, registry.sources),
+        "ingest_file": lambda path: ingest_message(
+            store, pipeline, explicit_file_message(source, path)),
+        "read_file_text": extract_preview,
+    }
+
+    # 打包版第一次被双击：桌面上还没有快捷方式就自己建一个。
+    # 只补缺：他已经有的（或者故意删掉的）不去动。
+    if getattr(sys, "frozen", False):
+        try:
+            from app.runtime.desktop import create_shortcut
+
+            create_shortcut(only_if_missing=True)
+        except Exception:
+            pass                      # 建不了也照常开界面，不是致命问题
+
+    page = RESOURCE / "app" / "ui" / "index.html"
     if not page.is_file():
         print(f"找不到界面文件：{page}")
         return 1
@@ -550,7 +595,8 @@ def run_ui(store, plugins=(), actions=None) -> int:
     except Exception:
         pass
 
-    icon = Path(__file__).resolve().parent / "assets" / "app.ico"
+    # 标题栏/任务栏图标。打包后 exe 自己也带着同一个图标（打包时嵌进去的）。
+    icon = RESOURCE / "assets" / "app.ico"
     webview.create_window("私人秘书", str(page), width=1040, height=680,
                           min_size=(820, 520), js_api=Api(store, plugins, actions))
     # 标题栏图标。pywebview 的 create_window 不收这个参数，只有 start 收。
@@ -560,7 +606,7 @@ def run_ui(store, plugins=(), actions=None) -> int:
 
 def list_plugins(statuses) -> int:
     """`--plugins`：装了哪些、哪个坏了。坏插件不影响主程序，但要说出来。"""
-    folder = plugin_dir(Path(__file__).resolve().parent)
+    folder = plugin_dir(ROOT)
     print("插件现状：")
     print(f"  插件目录：{folder}")
     if not statuses:
@@ -651,6 +697,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.selftest:
         return _selftest()
 
+    # 第一次运行（exe 第一次被双击）：把随包发的插件补到他的 plugins/ 里。
+    ensure_bundled_files()
+
     store, source, pipeline, sink, registry = build(args.db)
 
     if args.plugins:
@@ -659,7 +708,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.sync:
         if not registry.sources:
             print("没有可主动拉取的插件来源。")
-            print(f"（插件放在 {plugin_dir(Path(__file__).resolve().parent)}，"
+            print(f"（插件放在 {plugin_dir(ROOT)}，"
                   "课表插件要在 config.toml 的 [timetable] 里填 url）")
             return 0
         result = sync_sources(store, pipeline, registry.sources)
@@ -756,13 +805,7 @@ def main(argv: list[str] | None = None) -> int:
         return run_serve(store, pipeline, sink, account or None)
 
     if args.ui:
-        return run_ui(store, registry.status, {
-            "add_text": lambda text: ingest(store, source, pipeline, text),
-            "sync": lambda: sync_sources(store, pipeline, registry.sources),
-            "ingest_file": lambda path: ingest_message(
-                store, pipeline, explicit_file_message(source, path)),
-            "read_file_text": extract_preview,
-        })
+        return open_ui(store, source, pipeline, sink, registry)
 
     if args.shortcut:
         from app.runtime.desktop import create_shortcut
@@ -770,7 +813,7 @@ def main(argv: list[str] | None = None) -> int:
         ok, message = create_shortcut()
         print(("已创建：" if ok else "创建失败：") + message)
         if ok:
-            print("注意：快捷方式只打开界面；后台收消息要另外跑 python run.py --qq")
+            print("注意：快捷方式只打开界面；后台收消息在界面里点「📱 QQ 接收 → 启动」。")
         return 0 if ok else 1
 
     if args.deploy or args.setup:
@@ -830,6 +873,10 @@ def main(argv: list[str] | None = None) -> int:
 
     text = " ".join(args.text).strip()
     if not text:
+        # 双击 exe 不该弹一屏命令行帮助 —— 那就等于"双击没反应"。
+        # 打包之后没有任何参数 = 打开界面；源码运行还是打印帮助。
+        if getattr(sys, "frozen", False):
+            return open_ui(store, source, pipeline, sink, registry)
         parser.print_help()
         return 0
 
@@ -854,6 +901,7 @@ def _selftest() -> int:
     from app.runtime.plugins import Registry, plugin_dir
     from app.runtime.plugins import load as load_plugins
 
+    ensure_bundled_files()      # 打包版：先把自己带的插件补到用户那份 plugins/ 里
     problems: list[str] = []
     for name in ("Message", "TaskDraft", "Task", "PushPayload", "Attachment"):
         if not hasattr(models, name):
@@ -866,7 +914,10 @@ def _selftest() -> int:
         "parse": ["filter_strength", "merge_window_seconds", "due_default_hour"],
         "title": ["max_len", "min_meaningful_chars"],
         "store": ["attachment_retention_days", "keep_dropped_days"],
-        "push": ["default_times", "quote_max_chars", "fallback_text_chars"],
+        # 这里以前写的是 default_times —— 那是**早期**的键名，后来改叫 times 了。
+        # 之所以一直没暴露：作者自己的 config.toml 里还留着那行老键；
+        # 而**新用户**拿到的是新生成的配置，一自检就报"配置缺项"（打包版实测到）。
+        "push": ["times", "quote_max_chars", "fallback_text_chars"],
         "ai": ["mode", "cloud_priority", "token_budget_per_day"],
         "resource": ["mem_critical_percent", "mem_resume_percent"],
         "risk": ["require_secondary_account"],
@@ -887,8 +938,7 @@ def _selftest() -> int:
 
     # 插件：坏插件不该拦住启动，但自检必须把它摆出来 —— 否则用户
     # 只会觉得"我装的那个插件怎么好像没反应"。
-    root = Path(__file__).resolve().parent
-    plugins = load_plugins(root, Registry())
+    plugins = load_plugins(ROOT, Registry())
     broken = [item for item in plugins if not item.ok]
     if broken:
         problems.append(f"有 {len(broken)} 个插件加载失败（见下面 ✕ 那几行）")
@@ -903,7 +953,7 @@ def _selftest() -> int:
     # AI 还没做，但配置段留着（以后做插件时直接用）。这里如实说，
     # 不打印"AI 模式：conservative"那种看着像已经在跑的话。
     print("  AI 增强：   还没做（现在是纯规则解析：不联网、不花钱、不传内容出去）")
-    print(f"  插件：      {len(plugins)} 个（{plugin_dir(root)}）")
+    print(f"  插件：      {len(plugins)} 个（{plugin_dir(ROOT)}）")
     for item in plugins:
         print(("    ✓ " if item.ok else "    ✕ ") + item.describe())
     if problems:

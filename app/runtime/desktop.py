@@ -26,10 +26,39 @@ import base64
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
+
+from .config import default_root
 
 SHORTCUT_NAME = "私人秘书.lnk"
 AUTOSTART_NAME = "私人秘书(开机自启).lnk"
+
+
+def frozen_exe() -> Path | None:
+    """打包成 exe 之后，程序自己那个 exe 在哪。源码运行时返回 None。
+
+    为什么要区分：源码运行是「pythonw.exe run.py --ui」两个东西拼出来的命令，
+    打成 exe 之后目标就是 exe 本身、**不带任何参数**（双击它就该开界面）。
+    快捷方式指向哪儿不一样，是这整个文件里唯一需要分情况的地方。
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve()
+    return None
+
+
+def launcher(root: Path) -> tuple[Path | None, str]:
+    """(要启动的程序, 图标位置) —— 快捷方式和开机自启共用这一份判断。
+
+    图标：exe 情况下用「exe 自己,0」（第 0 号图标资源就是打包时嵌进去的小肥鱼），
+    不用旁边再放一个 .ico 文件；源码运行还是用 assets 里那个。
+    参数由调用方拼：快捷方式是开界面，开机自启是 `--serve`。
+    """
+    exe = frozen_exe()
+    if exe is not None:
+        return exe, f"{exe},0"
+    return pythonw(), str(icon_path(root))
+
 
 # 在 PowerShell 里跑的一段脚本。用 {} 占位，由 Python 填好再编码。
 _SCRIPT = """
@@ -37,21 +66,23 @@ $ErrorActionPreference = 'Stop'
 # 不关掉进度流的话，输出里会混进一坨 CLIXML（powershell 首次加载模块时的进度记录）
 $ProgressPreference = 'SilentlyContinue'
 $root  = '{root}'
-$icon  = '{icon}'
-$run   = Join-Path $root 'run.py'
-$pyw   = '{pythonw}'
+$iconloc = '{iconloc}'
+$target = '{target}'
+$args   = '{arguments}'
 $link  = Join-Path ([Environment]::GetFolderPath('Desktop')) '{name}'
 
-if (-not (Test-Path $pyw)) {{ throw 'pythonw.exe 找不到' }}
-if (-not (Test-Path $run)) {{ throw 'run.py 找不到' }}
+if ('{only_if_missing}' -eq '1' -and (Test-Path $link)) {{ Write-Output $link; exit 0 }}
+if (-not (Test-Path $target)) {{ throw ('找不到要启动的程序：' + $target) }}
+# 图标位置可以带序号（'...\程序.exe,0'）—— 判断"文件在不在"得先把序号去掉。
+$iconfile = $iconloc -replace ',\d+$', ''
 
 $shell = New-Object -ComObject WScript.Shell
 $sc = $shell.CreateShortcut($link)
-$sc.TargetPath       = $pyw
-$sc.Arguments        = '"' + $run + '" --ui'
+$sc.TargetPath       = $target
+$sc.Arguments        = $args
 $sc.WorkingDirectory = $root
 $sc.Description      = '私人秘书 · 打开待办界面'
-if (Test-Path $icon) {{ $sc.IconLocation = $icon }}
+if ($iconloc -and (Test-Path $iconfile)) {{ $sc.IconLocation = $iconloc }}
 $sc.Save()
 Write-Output $link
 """
@@ -101,19 +132,27 @@ def icon_path(project: Path) -> Path:
     return assets / "app.ico"
 
 
-def create_shortcut(root: Path | None = None) -> tuple[bool, str]:
+def create_shortcut(root: Path | None = None,
+                    only_if_missing: bool = False) -> tuple[bool, str]:
     """在桌面建「私人秘书」快捷方式。返回 (成功?, 说明)。
 
     注意：快捷方式**只打开界面**。后台收消息要另外跑 `run.py --qq`，
     因为界面关掉不该把收消息一起关掉。
+
+    `only_if_missing=True` 用在"打包版第一次打开"这条路上：桌面上已经有了
+    就一根手指都不碰（那可能是他自己调过图标位置的），没有才建。
     """
-    project = Path(root) if root else Path(__file__).resolve().parents[2]
-    interpreter = pythonw()
-    if interpreter is None:
+    project = Path(root) if root else default_root()
+    target, icon = launcher(project)
+    if target is None:
         return False, "找不到 pythonw.exe（装 Python 时没勾上？）"
+    # exe：双击它就是开界面，所以不带参数；源码：得写清楚跑哪个 run.py
+    arguments = "" if frozen_exe() else f'"{project / "run.py"}" --ui'
     script = _SCRIPT.format(root=str(project).replace("'", "''"),
-                            icon=str(icon_path(project)).replace("'", "''"),
-                            pythonw=str(interpreter).replace("'", "''"),
+                            iconloc=str(icon).replace("'", "''"),
+                            target=str(target).replace("'", "''"),
+                            arguments=arguments.replace("'", "''"),
+                            only_if_missing="1" if only_if_missing else "0",
                             name=SHORTCUT_NAME)
     ok, output = _run_powershell(script)
     return ok, output
@@ -189,13 +228,13 @@ def set_autostart(enabled: bool, root: Path | None = None) -> tuple[bool, str]:
             return False, f"删不掉：{exc}"
         return True, "已关掉开机自启"
 
-    project = Path(root) if root else Path(__file__).resolve().parents[2]
-    interpreter = pythonw()
-    if interpreter is None:
+    project = Path(root) if root else default_root()
+    target, icon = launcher(project)
+    if target is None:
         return False, "找不到 pythonw.exe（装 Python 时没勾上？）"
-    runner = project / "run.py"
-    if not runner.is_file():
-        return False, f"找不到 {runner}"
+    # exe：`私人秘书.exe --serve`；源码：`pythonw.exe run.py --serve`
+    arguments = ("--serve" if frozen_exe()
+                 else f'"{project / "run.py"}" --serve')
     try:
         entry.parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -206,9 +245,10 @@ def set_autostart(enabled: bool, root: Path | None = None) -> tuple[bool, str]:
         "$ProgressPreference = 'SilentlyContinue'\n"
         "$shell = New-Object -ComObject WScript.Shell\n"
         f"$link = $shell.CreateShortcut('{str(entry).replace(chr(39), chr(39) * 2)}')\n"
-        f"$link.TargetPath = '{str(interpreter).replace(chr(39), chr(39) * 2)}'\n"
-        f"$link.Arguments = '\"{runner}\" --serve'\n"
+        f"$link.TargetPath = '{str(target).replace(chr(39), chr(39) * 2)}'\n"
+        f"$link.Arguments = '{arguments.replace(chr(39), chr(39) * 2)}'\n"
         f"$link.WorkingDirectory = '{str(project).replace(chr(39), chr(39) * 2)}'\n"
+        f"$link.IconLocation = '{str(icon).replace(chr(39), chr(39) * 2)}'\n"
         "$link.Description = '私人秘书 · 后台收消息 + 定时推送'\n"
         "$link.Save()\n"
     )

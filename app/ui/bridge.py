@@ -90,7 +90,9 @@ def _plugin_root() -> Path:
     单独抽成一个函数是为了**测试能替换它** —— 不抽的话，
     装插件的测试会往真的 `plugins/` 里写文件，把作者自己的插件弄脏。
     """
-    return Path(__file__).resolve().parents[2]
+    from ..runtime.config import default_root
+
+    return default_root()
 
 
 def _tail(path: Path, lines: int = 12) -> list[str]:
@@ -419,12 +421,20 @@ class Api:
                     "message": "先补上这两步再启动：" + "；".join(problems)}
         if heartbeat.state(self.store)["alive"]:
             return {"ok": False, "message": "后台已经在跑了"}
-        project = Path(__file__).resolve().parents[2]
-        runner = project / "run.py"
-        if not runner.is_file():
-            return {"ok": False, "message": f"找不到 {runner}"}
-        interpreter = Path(sys.executable).with_name("pythonw.exe")
-        exe = interpreter if interpreter.is_file() else Path(sys.executable)
+        from ..runtime.desktop import frozen_exe
+
+        project = _plugin_root()
+        program = frozen_exe()
+        if program is None:
+            # 源码运行：pythonw.exe + run.py --serve（打包后不用这一套）
+            runner = project / "run.py"
+            if not runner.is_file():
+                return {"ok": False, "message": f"找不到 {runner}"}
+            interpreter = Path(sys.executable).with_name("pythonw.exe")
+            program = interpreter if interpreter.is_file() else Path(sys.executable)
+            argv = [str(program), str(runner), "--serve"]
+        else:
+            argv = [str(program), "--serve"]      # 打包后：exe 自己带参数跑
         flags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
                  | getattr(subprocess, "DETACHED_PROCESS", 0))
         log = _background_log()
@@ -435,7 +445,7 @@ class Api:
             sink = None
         try:
             subprocess.Popen(
-                [str(exe), str(runner), "--serve"], cwd=str(project),
+                argv, cwd=str(project),
                 creationflags=flags, stdin=subprocess.DEVNULL,
                 # 输出写进日志文件，别丢 —— 界面在它没起来时会把尾巴显示出来。
                 stdout=sink or subprocess.DEVNULL, stderr=subprocess.STDOUT,
@@ -477,7 +487,7 @@ class Api:
         from ..runtime.config import config, default_data_dir
 
         return {
-            "root": str(Path(__file__).resolve().parents[2]),
+            "root": str(_plugin_root()),
             "data": str(default_data_dir()),
             "napcat": str(deploy.default_dir()),
             "config": str(config.path or ""),

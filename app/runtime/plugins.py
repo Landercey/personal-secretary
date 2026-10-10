@@ -120,6 +120,34 @@ def discover(root: Path) -> list[Path]:
     return sorted(p for p in folder.glob("*.py") if not p.name.startswith("_"))
 
 
+def seed(root: Path, source: Path) -> int:
+    """把**随包发的**插件补进用户自己的 plugins/，只补缺、不覆盖。
+
+    为什么要补：打包成 exe 之后，程序自己的文件都收在 `_internal` 里（用户看不见），
+    而插件必须是"看得见、改得动、删得掉"的一个 .py —— 自带的课表插件
+    得在他那份 plugins/ 里也放一份。
+
+    **只补缺**：他已经改过的、或者故意删掉的，重开一次不能被我们塞回去。
+    返回补了几个。
+    """
+    import shutil
+
+    if not source.is_dir():
+        return 0
+    target_dir = plugin_dir(root)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for item in source.iterdir():
+        if not item.is_file() or item.suffix != ".py":
+            continue
+        target = target_dir / item.name
+        if target.exists():
+            continue
+        shutil.copy2(item, target)
+        copied += 1
+    return copied
+
+
 def load(root: Path, registry: Registry) -> list[PluginStatus]:
     """把 `plugins/` 下的插件全加载一遍。**这个函数不会抛异常。**
 

@@ -68,9 +68,15 @@ def engine():
     if _load_error:
         return None
     try:
-        from rapidocr_onnxruntime import RapidOCR
+        # ⚠️ 这里**故意**用 importlib 动态导入，不写 `from ... import`：
+        # 打包时（tools/build_exe.py）PyInstaller 会把看得见的 import 全部拖进包里，
+        # 而 rapidocr → onnxruntime → torch → transformers → librosa… 是 5 GB 的
+        # 雪球（实测：整个程序从 90 MB 涨到 5.2 GB）。它是"装了才用"的可选件，
+        # 打进包里对绝大多数用户没有意义。
+        import importlib
 
-        _engine = RapidOCR()
+        module = importlib.import_module("rapidocr_onnxruntime")
+        _engine = module.RapidOCR()          # type: ignore[attr-defined]
         return _engine
     except Exception as exc:
         _load_error = f"{type(exc).__name__}: {exc}"

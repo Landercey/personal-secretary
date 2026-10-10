@@ -39,7 +39,39 @@
 | 9 | 界面（网页界面，TickTick 那种克制风 + 设置面板 + 新手引导） | ✅ 完成 |
 | 10 | 插件系统（坏插件不影响启动） | ✅ 完成 |
 | 11 | 课表插件（ICS / CSV / JSON 三种格式） | ✅ 完成 |
-| 12 | 打磨 + 文档 + 发布 | ⬜ 待做 |
+| 12 | 打磨 + 打包成 exe | 🟡 能用了（`python tools/build_exe.py`，81 MB） |
+| 12b | 发布准备（干净电脑验收、3 个外部用户） | ⬜ 待做 |
+
+---
+
+## 打包成 exe（给不想装 Python 的人）
+
+```bat
+python tools/build_exe.py
+```
+
+跑完在 `dist\私人秘书\`，**81 MB**，整个文件夹复制走就能用：
+
+```
+私人秘书\
+  私人秘书.exe      ← 双击这个。图标就是那条小肥鱼（打包时就嵌在 exe 里）
+  用前必看.txt      ← 帮别人看的那 6 条
+  _internal\        ← 程序自己的零件，别删
+  config.toml  data\  plugins\  napcat\   ← 第一次双击之后才长出来
+```
+
+几个已经替你踩平的坑：
+
+· **数据和程序在一起**：打包后"程序自己的目录"= exe 旁边那个文件夹，
+  不是 `_internal`。卸载还是那两步：关自启、删文件夹。
+· **桌面快捷方式自动建**：打包版第一次打开界面时自己建（已经有了就不碰）；
+  打包脚本跑完也会立刻建一次。
+· **快捷方式图标不会变成 Python 的图标**：指向 exe 自己带的那个小肥鱼
+  （`私人秘书.exe,0`）。
+· **重新打包会删掉 `dist\私人秘书\` 整个文件夹** —— 里面可能已经有你的待办，
+  要重打包先把那一份复制到别处。
+· 打包脚本自带一道**体积闸门**（超过 400 MB 直接报错），防止哪天一个
+  `import` 手滑又把 5 GB 的机器学习库拖进来（第一次打包就这么炸过，见 CONTRACT.md 第 12 步）。
 
 ---
 
@@ -200,7 +232,10 @@
 
 ## 现在就能跑
 
-不需要装任何东西（Windows + Python 3.11 以上即可）：
+**不想装 Python 的话**：拿打包好的文件夹，双击 `私人秘书.exe` 就行
+（怎么打见上面「打包成 exe」）。
+
+自己跑源码的话（Windows + Python 3.11 以上）：
 
 ```bat
 python run.py --selftest          检查契约和环境
@@ -246,6 +281,9 @@ python -m unittest discover -s tests -t . -v
 | 界面和 Python 之间能调什么 | `app/ui/bridge.py` 的 `Api` |
 | 插件拖进来之后装到哪儿、怎么试 | `app/ui/bridge.py` 的 `install_drop()` |
 | 反馈那段话里带什么、什么被打码 | `app/ui/bridge.py` 的 `feedback_report()` / `_redact()` |
+| 打包要带哪些文件、排除哪些 | `tools/build_exe.py` 的 `DATA_FILES` / `EXCLUDES` |
+| 快捷方式指向哪儿（源码 / exe） | `app/runtime/desktop.py` 的 `launcher()` |
+| 打包后"程序自己的目录"算在哪 | `app/runtime/config.py` 的 `default_root()` |
 | 怎么判断一句话是待办 | `app/pipeline/quick_parse.py` |
 | 什么样的碎片该丢掉 | `app/pipeline/quick_parse.py` 的 `is_fragment()` |
 | 过滤的松紧 | `config.toml` 的 `[parse] filter_strength`（严格/宽松/关闭三档） |
