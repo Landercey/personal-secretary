@@ -70,13 +70,19 @@ $iconloc = '{iconloc}'
 $target = '{target}'
 $args   = '{arguments}'
 $link  = Join-Path ([Environment]::GetFolderPath('Desktop')) '{name}'
+$shell = New-Object -ComObject WScript.Shell
 
-if ('{only_if_missing}' -eq '1' -and (Test-Path $link)) {{ Write-Output $link; exit 0 }}
+# 只在"是我们要的那个"时才不动它：
+#   · 快捷方式不存在          → 要建
+#   · 存在但指向别的地方      → 也要建（软件挪过位置，比如从"下载"挪到 D 盘）；
+#     不重建的话用户双击桌面那个图标什么都不会发生，只会以为软件坏了。
+if ('{only_if_missing}' -eq '1' -and (Test-Path $link)) {{
+  if ($shell.CreateShortcut($link).TargetPath -eq $target) {{ Write-Output $link; exit 0 }}
+}}
 if (-not (Test-Path $target)) {{ throw ('找不到要启动的程序：' + $target) }}
 # 图标位置可以带序号（'...\程序.exe,0'）—— 判断"文件在不在"得先把序号去掉。
 $iconfile = $iconloc -replace ',\d+$', ''
 
-$shell = New-Object -ComObject WScript.Shell
 $sc = $shell.CreateShortcut($link)
 $sc.TargetPath       = $target
 $sc.Arguments        = $args
