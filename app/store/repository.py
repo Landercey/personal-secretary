@@ -349,7 +349,16 @@ class SqliteStore(Store):
                     " AND substr(due_at,1,10) BETWEEN ? AND ?")
 
         if view == "today":
-            return "status='open' AND is_archived=0 AND substr(due_at,1,10)=?", (today,)
+            # ⚠️ **没写时间的也算「今天」**（用户定的）。
+            #
+            # 你不写时间，就等于"今天要做"。不这么算的话，「拿快递」这种随手记的
+            # 只有点开「全部未完成」才看得到 —— 而默认视图是「今天」，
+            # 用户会以为它丢了。（和"第一眼一片白"是同一类问题。）
+            #
+            # 只在「今天」这么算：「明天/本周」是问"那一天有什么事"，
+            # 无时间的塞进去才叫乱；「逾期」也不能算 —— 它没时间，凭什么算过期。
+            return ("status='open' AND is_archived=0 AND (substr(due_at,1,10)=?"
+                    " OR due_at IS NULL OR due_at='')"), (today,)
         if view == "tomorrow":
             return "status='open' AND is_archived=0 AND substr(due_at,1,10)=?", (tomorrow,)
         if view == "week":

@@ -61,6 +61,55 @@ class Base(unittest.TestCase):
         return created[0].task_id
 
 
+class TestNoDueDateCountsAsToday(Base):
+    """没写时间的待办，算「今天」。
+
+    用户定的："要不默认今天"。不这么算的话，`拿快递` 这种随手记的
+    只有点开「全部未完成」才看得到 —— 默认视图是「今天」，他会以为它丢了。
+
+    但**只在「今天」**这么算：「明天/本周」问的是"那一天有什么事"，
+    无时间的塞进去才叫乱；「逾期」更不能算 —— 它没时间，凭什么算过期。
+    """
+
+    def test_undated_shows_up_in_today(self):
+        task_id = self.add("拿快递")
+        self.assertIn(task_id, [t.task_id for t in self.store.list_tasks("today")])
+        self.assertEqual(self.store.count_tasks("today"), 1)
+
+    def test_undated_stays_in_the_all_list(self):
+        task_id = self.add("拿快递")
+        self.assertIn(task_id, [t.task_id for t in self.store.list_tasks("open")])
+
+    def test_undated_is_not_tomorrow_or_this_week(self):
+        self.add("拿快递")
+        for view in ("tomorrow", "week", "next_week"):
+            with self.subTest(view=view):
+                self.assertEqual(self.store.list_tasks(view), [])
+
+    def test_undated_is_never_overdue(self):
+        """没写时间的东西凭什么算过期？变红了用户只会莫名其妙。"""
+        self.add("拿快递")
+        self.assertEqual(self.store.list_tasks("overdue"), [])
+
+    def test_it_shows_up_together_with_timed_ones(self):
+        timed = self.add("交作业", due=stamp(0, 15))
+        undated = self.add("拿快递")
+        today = [t.task_id for t in self.store.list_tasks("today")]
+
+        self.assertEqual(set(today), {timed, undated})
+        # 有时间的排前面，没时间的垫底（先看赶时间的）
+        self.assertEqual(today[0], timed)
+
+    def test_edit_clearing_the_time_puts_it_back_into_today(self):
+        """「改内容」把时间清空之后，它应该还在今天，不是消失。"""
+        task_id = self.add("交作业", due=stamp(5))
+        self.assertEqual(self.store.list_tasks("today"), [])
+
+        self.api.edit_task(task_id, "交作业", "", "")
+
+        self.assertIn(task_id, [t.task_id for t in self.store.list_tasks("today")])
+
+
 class TestDoneView(Base):
     """打勾之后那条得还看得见。"""
 
