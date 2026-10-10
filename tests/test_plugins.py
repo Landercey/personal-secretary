@@ -204,5 +204,78 @@ class TestLoad(unittest.TestCase):
         self.assertEqual(len(self.registry.draft_enrichers), 1)
 
 
+class TestPluginMetadata(unittest.TestCase):
+    """插件自己声明"我的设置在设置面板的哪一段"。
+
+    为什么不让界面写死一张表：那张表一定会过期 ——
+    加了插件忘了登记，用户就找不到它的设置在哪（用户的原话是
+    "没有设置或不明显用户不知在哪里搞"）。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.folder = self.root / plugins.PLUGIN_DIRNAME
+        self.folder.mkdir()
+        self.registry = plugins.Registry()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_declaration_is_carried_through(self):
+        (self.folder / "demo.py").write_text(
+            'CONFIG_SECTION = "demo"\n'
+            'DESCRIPTION = "演示用的插件"\n'
+            'def register(registry):\n    pass\n', encoding="utf-8")
+        status = plugins.load(self.root, self.registry)[0]
+
+        self.assertTrue(status.ok, status.error)
+        self.assertEqual(status.section, "demo")
+        self.assertEqual(status.description, "演示用的插件")
+
+    def test_plugin_without_declaration_still_loads(self):
+        """不声明也能跑，就是没有「去设置」按钮而已。"""
+        (self.folder / "bare.py").write_text(
+            'def register(registry):\n    pass\n', encoding="utf-8")
+        status = plugins.load(self.root, self.registry)[0]
+
+        self.assertTrue(status.ok)
+        self.assertEqual(status.section, "")
+        self.assertEqual(status.description, "")
+
+    def test_broken_plugin_keeps_what_it_declared(self):
+        """坏插件也要能显示说明 —— 不然用户不知道该去修哪个设置。"""
+        (self.folder / "half.py").write_text(
+            'DESCRIPTION = "坏掉的演示"\n'
+            'def register(registry):\n    raise RuntimeError("炸了")\n',
+            encoding="utf-8")
+        status = plugins.load(self.root, self.registry)[0]
+
+        self.assertFalse(status.ok)
+        self.assertEqual(status.description, "坏掉的演示")
+
+    def test_shipped_timetable_declares_its_section(self):
+        """自带的课表插件必须声明 —— 它就是"用户找不到在哪儿配"的那个。"""
+        registry = plugins.Registry()
+        status = {s.name: s for s in plugins.load(ROOT, registry)}["timetable"]
+
+        self.assertEqual(status.section, "timetable")
+        self.assertTrue(status.description)
+
+
+class TestBridgePluginList(unittest.TestCase):
+    def test_list_carries_section_and_folder(self):
+        from app.ui.bridge import Api
+
+        registry = plugins.Registry()
+        statuses = plugins.load(ROOT, registry)
+        data = Api(None, statuses).plugins()
+
+        self.assertTrue(data["folder"].endswith("plugins"))
+        item = {p["name"]: p for p in data["items"]}["timetable"]
+        self.assertEqual(item["section"], "timetable")
+        self.assertTrue(item["description"])
+
+
 if __name__ == "__main__":
     unittest.main()

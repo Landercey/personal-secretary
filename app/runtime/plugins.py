@@ -66,6 +66,10 @@ class PluginStatus:
     title: str                   # 插件自己声明的显示名
     ok: bool
     error: str = ""              # 失败原因，说人话
+    # 插件可以自己声明"我的设置在设置面板的哪一段"，界面就能给一个「去设置」。
+    # 不声明也没有：那就只有名字和状态。
+    section: str = ""
+    description: str = ""        # 一句话说它是干什么的
 
     def describe(self) -> str:
         if self.ok:
@@ -136,6 +140,8 @@ def _module_name(stem: str) -> str:
 def _load_one(path: Path, registry: Registry) -> PluginStatus:
     name = path.stem
     title = name
+    section = ""
+    description = ""
     # 注册前的长度。出任何事都截回这里，不留半个插件在管线里。
     text_before = len(registry.text_enrichers)
     draft_before = len(registry.draft_enrichers)
@@ -157,6 +163,8 @@ def _load_one(path: Path, registry: Registry) -> PluginStatus:
             raise
 
         title = str(getattr(module, "TITLE", "") or name)
+        section = str(getattr(module, "CONFIG_SECTION", "") or "")
+        description = str(getattr(module, "DESCRIPTION", "") or "")
         register = getattr(module, "register", None)
         if not callable(register):
             raise AttributeError("插件里没写 register(registry) 函数")
@@ -168,9 +176,10 @@ def _load_one(path: Path, registry: Registry) -> PluginStatus:
         del registry.text_enrichers[text_before:]
         del registry.draft_enrichers[draft_before:]
         del registry.sources[source_before:]
-        return PluginStatus(name, title, False, f"{type(exc).__name__}: {exc}")
+        return PluginStatus(name, title, False, f"{type(exc).__name__}: {exc}",
+                            section, description)
 
-    return PluginStatus(name, title, True)
+    return PluginStatus(name, title, True, "", section, description)
 
 
 def _verify(registry: Registry, text_before: int, draft_before: int,

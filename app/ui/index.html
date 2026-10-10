@@ -75,6 +75,10 @@ nav .gap { height: 14px }
 .foot { padding: 10px 6px 0; font-size: 11px; line-height: 1.7; color: var(--text-3); white-space: pre-line }
 /* 收消息的进程没在跑 —— 这是**状态**，得让它显眼，不然用户只会觉得"发了没反应" */
 .foot.warn { color: var(--today) }
+/* 左下角每一行都能点：点哪儿跳哪儿。鼠标上去要看得出来能点。 */
+.foot a { display: block; cursor: pointer; color: inherit }
+.foot a:hover { color: var(--accent); text-decoration: underline }
+.foot span { display: block }
 
 /* ---------- 中间：列表 ---------- */
 main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22px 20px 0 8px }
@@ -562,6 +566,7 @@ function renderPanel(force) {
   if (panel === 'new') return drawComposer();
   if (panel === 'drop') return drawDrop();
   if (panel === 'qq') return drawQqPanel();
+  if (panel === 'plugins') return drawPluginsPanel();
   return drawDetail();
 }
 
@@ -1152,6 +1157,10 @@ async function drawQqPanel() {
     <p class="hint" style="margin-top:10px">
       要登录的 QQ 号在「⚙ 设置 → 收消息 → QQ 接入」里填。${
         data.account ? `现在是 <b>${data.account}</b>。` : '⚠️ 现在还没填，启动前先填上。'}</p>`;
+  $('detailInner').insertAdjacentHTML('beforeend',
+    `<p class="hint" style="margin-top:10px">
+       ⓘ <b>关掉这个窗口不影响后台</b> —— 后台是另一个进程，
+       会继续收消息、照常推送。想让它也停，点上面的「停止后台」。</p>`);
   $('detailInner').insertAdjacentHTML('beforeend', logBlock);
 
   $('btnQQStart').onclick = async () => {
@@ -1205,6 +1214,37 @@ async function drawQqPanel() {
 }
 
 /* ---------- 上手清单 ---------- */
+async function drawPluginsPanel() {
+  const data = await call('plugins');
+  if (!data || panel !== 'plugins') return;
+  const list = data.items || [];
+
+  const cards = list.map(p => `
+    <div class="guide" style="margin:0 0 10px">
+      <h3>${esc(p.title)} <span class="${p.ok ? 'ok' : 'bad'}">${
+        p.ok ? '正常' : '加载失败'}</span></h3>
+      <p>${esc(p.description || '（这个插件没写说明）')}</p>
+      ${p.ok ? '' : `<p class="bad">${esc(p.error)}</p>`}
+      ${p.section ? `<div class="acts" style="margin-top:10px">
+          <button class="block" data-sec="${esc(p.section)}">去设置</button></div>` : ''}
+    </div>`).join('');
+
+  $('detailInner').innerHTML = `
+    <h2>插件</h2>
+    <p class="note">${list.length
+      ? `装了 ${list.length} 个。插件是可选的，不装也照常用。`
+      : '一个插件都没装。插件是可选的，不装也照常用。'}</p>
+    ${cards || `<p class="hint">把插件文件（.py）丢进下面这个文件夹就装好了，
+                       删掉就是卸载，不用重启电脑。</p>`}
+    <div class="quote"><em>插件文件夹</em>${esc(data.folder || '')}</div>
+    <p class="hint" style="margin-top:10px">
+      插件坏了不影响主程序 —— 上面会标红，其余功能照常。</p>`;
+
+  $('detailInner').querySelectorAll('[data-sec]').forEach(button => {
+    button.onclick = () => openSettings(button.dataset.sec);
+  });
+}
+
 function wireGuide() {
   $('guide').querySelectorAll('li.todo, .guide.tip').forEach(node => {
     node.onclick = () => {
@@ -1336,52 +1376,78 @@ async function refresh() {
   const list = (plug && plug.items) || [];
   const bad = list.filter(p => !p.ok);
   if (env.drop_max_mb) dropMaxMb = Number(env.drop_max_mb) || dropMaxMb;
-  const parts = [];
+  // 左下角：**每一行都能点，点哪儿跳哪儿**。
+  // 只放主要的（后台活没活 / 企微配好没 / 内存 / 推送时间 / 几个群 / 插件），
+  // 再多就眼杂了 —— 想看细节去「⚙ 设置」。
+  const lines = [];        // {text, go}；go 为空 = 不可点
   const titles = [];
 
-  // 内存：用户想看"这东西到底吃多少"。
-  // 系统占用 + 本程序自己（界面进程 + 后台进程，后台的数从心跳里来）。
+  // ① 收消息的进程活着没 —— 最要紧的一条，点它去「📱 QQ 接收」
+  const receiver = env.receiver || {};
+  let receiverBad = false;
+  if (!env.qq_enabled) {
+    // "还没开"是配置问题 → 去设置；下面"没在跑"是操作问题 → 去 QQ 那栏
+    lines.push({text: '○ QQ 还没开，点这里去设置', go: 'qq'});
+  } else if (receiver.alive) {
+    lines.push({text: `✅ ${receiver.detail || 'QQ 接收中'}`, go: 'panel:qq'});
+  } else {
+    receiverBad = true;
+    const waited = Math.max(1, Math.round((receiver.age_seconds || 0) / 60));
+    lines.push({text: receiver.age_seconds == null
+      ? '⚠️ 后台没在跑，点这里启动'
+      : `⚠️ 后台已经 ${waited} 分钟没动静了，点这里看`, go: 'panel:qq'});
+  }
+
+  // ② 企业微信没配好 —— **只在没配好时出现**（配好了不占地方）。
+  // 光填地址不开开关，推送会退回控制台：用户以为配好了，手机上永远没有。
+  if (!env.wecom_ready) {
+    lines.push({text: '⚠️ 企业微信还没配好，推送发不出去', go: 'wecom_bot'});
+  }
+
+  // ③ 内存：用户想看"这东西到底吃多少"（只显示，不跳）
   if (env.memory_percent != null) {
     const mine = [env.ui_mb, env.background_mb].filter(v => typeof v === 'number');
     const total = mine.length ? mine.reduce((a, b) => a + b, 0) : null;
-    parts.push(total
+    lines.push({text: total
       ? `内存 ${Math.round(env.memory_percent)}%｜本程序 ${Math.round(total)} MB`
-      : `内存 ${Math.round(env.memory_percent)}%`);
+      : `内存 ${Math.round(env.memory_percent)}%`});
     if (env.ui_mb != null) titles.push(`界面 ${env.ui_mb} MB（窗口开着才有）`);
     if (env.background_mb != null) titles.push(`后台 ${env.background_mb} MB（一直挂着）`);
     if (env.memory) titles.push(env.memory);
   }
 
-  // 收消息的进程到底还活着没有 —— 这是**状态**，
-  // 和下面那个"你配了几个群"完全不是一回事。
-  // 以前界面上只有后者，所以进程没起来时界面照样显示得一切正常。
-  let receiverBad = false;
-  if (env.qq_enabled) {
-    const receiver = env.receiver || {};
-    if (receiver.alive) {
-      parts.push(`✅ ${receiver.detail || 'QQ 接收中'}`);
-    } else {
-      receiverBad = true;
-      const waited = Math.max(1, Math.round((receiver.age_seconds || 0) / 60));
-      parts.push(receiver.age_seconds == null
-        ? '⚠️ QQ 接收没在跑（要另外开 python run.py --qq）'
-        : `⚠️ QQ 接收已经 ${waited} 分钟没动静了`);
-    }
-  }
-
+  // ④ 推送时间
   if (env.push_times && env.push_times.length) {
-    parts.push(`推送 ${env.push_times.join(' / ')}`);
+    lines.push({text: `推送 ${env.push_times.join(' / ')}`, go: 'push'});
   }
-  parts.push(`${env.qq_groups} 个群`);
+  // ⑤ 收几个群（这是配置，点它去设置里那一段，不是 QQ 操作面板）
+  lines.push({text: `${env.qq_groups} 个群`, go: 'qq'});
+  // ⑥ 插件（有几个、坏没坏）
   if (bad.length) {
-    parts.push(`⚠️ 插件坏了：${bad.map(p => p.title).join('、')}`);
+    lines.push({text: `⚠️ 插件坏了：${bad.map(p => p.title).join('、')}`, go: 'panel:plugins'});
     titles.push(...bad.map(p => `${p.title}：${p.error}`));
   } else if (list.length) {
-    parts.push(`插件 ${list.length} 个`);
+    lines.push({text: `插件 ${list.length} 个`, go: 'panel:plugins'});
     titles.push(...list.map(p => `${p.title}：正常`));
   }
+
   $('foot').title = titles.join('\n');
-  $('foot').textContent = parts.join('\n');
+  $('foot').innerHTML = lines.map(line => line.go
+    ? `<a data-go="${esc(line.go)}">${esc(line.text)}</a>`
+    : `<span>${esc(line.text)}</span>`).join('');
+  $('foot').querySelectorAll('[data-go]').forEach(node => {
+    node.onclick = () => {
+      const go = node.dataset.go;
+      // "panel:xxx" = 打开右栏那个独立面板（QQ / 插件）；
+      // 其余都当设置里的一段名，跳过去并展开。
+      if (go.startsWith('panel:')) {
+        setPanel(go.slice('panel:'.length));
+        renderPanel(true);
+        return;
+      }
+      openSettings(go);
+    };
+  });
   $('foot').classList.toggle('warn', receiverBad);
 }
 

@@ -466,6 +466,10 @@ class Api:
             "background_mb": receiver.get("rss_mb"),
             "qq_groups": len(config.get("qq", "group_ids", []) or []),
             "push_times": config.get("push", "times", []),
+            # 企业微信真的能推出去吗（两项都要）。不为真时左下角要提醒一句 ——
+            # 不然用户填完地址以为配好了，手机上永远什么都没有。
+            "wecom_ready": (bool(str(config.get("wecom_bot", "webhook", "") or "").strip())
+                            and bool(config.get("wecom_bot", "enabled"))),
             # 界面拖文件时先在前端拦一道，免得白传一遍几十 MB
             "drop_max_mb": int(config.get("ui", "drop_max_mb", 12) or 12),
             # ⚠️ 这是**状态**，不是配置：收消息的进程还在不在。
@@ -476,11 +480,18 @@ class Api:
         }
 
     def plugins(self) -> dict:
-        """装了哪些插件、哪个坏了。坏的要在界面上看得见（契约第二节）。"""
+        """装了哪些插件、哪个坏了。坏的要在界面上看得见（契约第二节）。
+
+        连插件文件夹一起给出去：光有数量没用，用户还想知道**往哪儿装**。
+        """
+        from ..runtime.plugins import plugin_dir
+
         return {"items": [
-            {"name": p.name, "title": p.title, "ok": p.ok, "error": p.error}
+            {"name": p.name, "title": p.title, "ok": p.ok, "error": p.error,
+             "section": getattr(p, "section", ""),
+             "description": getattr(p, "description", "")}
             for p in self._plugins
-        ]}
+        ], "folder": str(plugin_dir(Path(__file__).resolve().parents[2]))}
 
     # ------------------------------------------------------------------ 设置
     def settings(self) -> dict:
@@ -528,8 +539,12 @@ class Api:
             {"key": "risk", "section": "risk", "label": "看过风控提示（小号还是大号）",
              "ok": bool(config.get("risk", "confirmed_secondary_account"))},
             {"key": "wecom", "section": "wecom_bot",
-             "label": "填了企业微信机器人的 Webhook",
-             "ok": has("wecom_bot", "webhook")},
+             # ⚠️ 光是填了地址还不够：`wecom_bot.enabled` 默认是 **false**，
+             # 不打开的话推送会退回控制台 —— 界面上什么都看不出来，
+             # 用户填完地址、清单打勾、然后手机上永远收不到。
+             # 这两项必须一起查（真踩过这一类的静默失败）。
+             "label": "填了企业微信机器人，并且把推送打开（两项都要）",
+             "ok": has("wecom_bot", "webhook") and bool(config.get("wecom_bot", "enabled"))},
             # QQ 号必须**在启动之前**填好：没填的话 `run_serve` 会跳过整套
             # NapCat 部署直接去等连接，那个 NapCat 永远不启动，看着就是"卡住"。
             *([{"key": "qq_account", "section": "qq",

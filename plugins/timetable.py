@@ -57,6 +57,10 @@ from app.runtime.config import config
 
 NAME = "timetable"
 TITLE = "课表"
+# 我的设置在设置面板的哪一段 —— 界面靠它给一个「去设置」的按钮。
+# 插件自己声明，省得界面写死一张"哪个插件在哪配"的表（那张表一定会过期）。
+CONFIG_SECTION = "timetable"
+DESCRIPTION = "把课表（iCal 订阅 / CSV / JSON）变成待办"
 
 # 服务器不爱理没带 UA 的请求，给一个常见的浏览器标识
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

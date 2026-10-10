@@ -298,6 +298,9 @@ class TestBridge(unittest.TestCase):
     def test_setup_done_once_the_two_required_things_are_filled(self):
         self.api.confirm_risk()
         self.api.save_settings({"wecom_bot.webhook": "https://x/y",
+                                # 光填地址不够 —— enabled 默认是 false，
+                                # 不打开的话推送会退回控制台
+                                "wecom_bot.enabled": True,
                                 "qq.group_ids": "123456",
                                 # QQ 号也得填：没填的话「启动 QQ」会去等一个
                                 # 永远不启动的 NapCat，看着就是"卡住"
@@ -306,6 +309,19 @@ class TestBridge(unittest.TestCase):
 
         self.pretend_receiver_alive()
         self.assertTrue(self.api.setup_state()["done"])
+
+    def test_webhook_alone_is_not_enough(self):
+        """**这是真踩过的一类静默失败**：填了地址但没打开开关，
+        推送会退回控制台 —— 界面上看不出任何异常，手机上永远收不到。"""
+        self.api.save_settings({"wecom_bot.webhook": "https://x/y"})
+
+        item = next(c for c in self.api.setup_state()["checks"] if c["key"] == "wecom")
+        self.assertFalse(item["ok"])
+        self.assertIn("打开", item["label"])        # 标签里得说清楚是两件事
+
+        self.api.save_settings({"wecom_bot.enabled": True})
+        item = next(c for c in self.api.setup_state()["checks"] if c["key"] == "wecom")
+        self.assertTrue(item["ok"])
 
     def test_last_step_is_start_qq_and_it_opens_the_panel(self):
         """**这一步以前没有**：配置填完 ≠ 能收到消息，还得起后台、扫码。
