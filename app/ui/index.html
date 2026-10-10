@@ -449,6 +449,8 @@ let editing = false;        // 详情面板是不是在编辑模式
 let jumped = false;         // 第一次进来做过"今天没安排"的自动跳转没有
 let viewHint = '';          // 标题旁边那句小提示
 let qqTimer = null;         // 「QQ 接收」那一块的轮询（等二维码出来）
+let qrWaiting = 0;          // 点过「重新出码」之后：这段时间里说"正在等新码"，
+                            // 不说"还没出二维码，点启动"（用户刚点完，会以为没生效）
 
 const $ = (id) => document.getElementById(id);
 
@@ -1162,6 +1164,8 @@ async function drawQqPanel() {
 
   const receiver = data.receiver || {};
   const qr = data.qr || {};
+  // 新码出来了（或者等了太久）就结束"正在等新码"的状态
+  if (qr.image || Date.now() - qrWaiting > 300000) qrWaiting = 0;
   // 第一次会先下 NapCat、再下 QQ（约 300 MB，好几分钟）。
   // **这几分钟界面上必须动** —— 什么都不动的话用户会以为卡死，然后反复点。
   const progress = data.progress || {};
@@ -1186,7 +1190,22 @@ async function drawQqPanel() {
     : (qr.ready
         ? `<p class="hint">二维码已经 ${Math.max(1, Math.round((qr.age_seconds || 0) / 60))} 分钟了，
              多半过期了。点「重新出码」拿一张新的。</p>`
-        : '<p class="hint">还没出二维码。点下面「启动 QQ」—— 第一次会先自动下载安装 NapCat（约几十秒）。</p>');
+        : (receiver.alive || qrWaiting
+            ? `<p class="hint">⏳ 正在等新的二维码……NapCat 起来之后十几秒才写出图，
+                 这一页会自己刷新（旧码在重启时已经删掉了，不会拿一张过期的糊弄你）。</p>`
+            : '<p class="hint">还没出二维码。点下面「启动 QQ」—— 第一次会先自动下载安装 NapCat（约几十秒）。</p>'));
+
+  // 登上了却一条消息都不来 —— 十有八九是"一个群都没勾"。
+  // 这时候最该说的不是"正在收消息"，而是"你现在什么都收不到，去勾群"。
+  const scope = data.scope || {};
+  const scopeBlock = (scope.empty && receiver.alive && connected)
+    ? `<div class="guide warn" style="margin:0 0 12px">
+         <p><b>⚠️ 已经登录上了，但一个群、一个私聊、一个收件箱都没勾</b> ——
+           所以现在任何消息都不会进来（左下角会显示"收到 0"）。</p>
+         <p>去「⚙ 设置 → 收消息 → QQ 接入」勾上要收的群，
+           <b>改完点保存再重启一次后台</b>（NapCat 不热读配置）。</p>
+       </div>`
+    : '';
 
   // 启动之前必须满足的条件。**不提前说的话，用户点完只会看到"卡住"** ——
   // 没有登录号时程序会跳过整套 NapCat 部署、直接去等一个永远不来的连接。
@@ -1219,6 +1238,7 @@ async function drawQqPanel() {
     <p class="note">${status}</p>
     ${blockerBlock}
     ${progressBlock}
+    ${scopeBlock}
     ${qrBlock}
     <div class="acts">
       <button class="primary block" id="btnQQStart"${
@@ -1236,7 +1256,9 @@ async function drawQqPanel() {
       不开机自启的话，每天得自己点一次「启动 QQ」。</p>
     <p class="hint" style="margin-top:10px">
       要登录的 QQ 号在「⚙ 设置 → 收消息 → QQ 接入」里填。${
-        data.account ? `现在是 <b>${data.account}</b>。` : '⚠️ 现在还没填，启动前先填上。'}</p>`;
+        data.account ? `现在是 <b>${data.account}</b>。` : '⚠️ 现在还没填，启动前先填上。'}<br>
+      现在在收：<b>${esc(scope.text || '（读不到）')}</b>${scope.empty
+        ? ' —— <b>空的，什么都收不到</b>' : ''}</p>`;
   $('detailInner').insertAdjacentHTML('beforeend',
     `<p class="hint" style="margin-top:10px">
        ⓘ <b>关掉这个窗口不影响后台</b> —— 后台是另一个进程，
@@ -1266,6 +1288,7 @@ async function drawQqPanel() {
   const restart = $('btnQQRestart');
   if (restart) restart.onclick = async () => {
     toast('正在重启后台，几秒钟…');
+    qrWaiting = Date.now();       // 从现在起显示"正在等新码"，别再说"点启动"
     await call('stop_background');
     for (let i = 0; i < 12; i += 1) {          // 等它真的退下去
       await new Promise(r => setTimeout(r, 1500));

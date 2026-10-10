@@ -384,10 +384,41 @@ class Api:
             # 没有它的话，第一次点「启动 QQ」会有好几分钟界面上什么都不动 ——
             # 用户以为卡死了，就去点第二次、第三次。
             "progress": deploy.read_progress(),
+            # **登上了却收不到消息**，十有八九是这里空的。摆出来，别让用户猜：
+            # 他刚扫码成功、特别期待手机上的东西，结果一条都不来。
+            "scope": self._scope_summary(),
             # 后台没跑起来时把它的输出尾巴显示出来 ——
             # 不然"点了没反应"就只能靠猜。
             "log_tail": [] if receiver["alive"] else _tail(_background_log()),
         }
+
+    @staticmethod
+    def _scope_summary() -> dict:
+        """现在到底"在收什么"：几个群、几个私聊、几个收件箱。
+
+        为什么必须摆到界面上：用户扫码登录成功、左下角也显示登录号了，
+        然后手机上一条都不来 —— 因为**一个群都没勾**。他只会觉得"登录了却没用"，
+        而这条信息以前只在 config.toml 里躺着。
+        """
+        from ..runtime.config import config
+
+        def ids(key: str) -> list:
+            value = config.get("qq", key, []) or []
+            return [item for item in value if str(item).strip()]
+
+        groups = ids("group_ids")
+        privates = ids("private_ids")
+        inbox = ids("inbox_ids")
+        all_groups = bool(config.get("qq", "receive_all", False))
+        all_privates = bool(config.get("qq", "receive_private_all", False))
+        parts = [
+            "全部群" if all_groups else f"{len(groups)} 个群",
+            "全部私聊" if all_privates else f"{len(privates)} 个私聊",
+            f"{len(inbox)} 个收件箱",
+        ]
+        return {"text": "｜".join(parts),
+                "empty": not (groups or privates or inbox
+                              or all_groups or all_privates)}
 
     @staticmethod
     def _qq_blockers() -> list[str]:
@@ -429,6 +460,12 @@ class Api:
             return {"ok": False, "message": "正在装 NapCat，等它装完再点（QQ 那一页有进度）"}
         if heartbeat.state(self.store)["alive"]:
             return {"ok": False, "message": "后台已经在跑了"}
+
+        # 旧二维码先删掉（见 deploy.clear_qr 的注释）。
+        shell = deploy.find_shell_dir(deploy.default_dir())
+        if shell is not None:
+            deploy.clear_qr(shell)
+
         from ..runtime.desktop import frozen_exe
 
         project = _plugin_root()

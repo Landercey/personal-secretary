@@ -282,6 +282,20 @@ def qr_path(shell_dir: Path) -> Path:
     return config_dir(shell_dir).parent / "cache" / "qrcode.png"
 
 
+def clear_qr(shell_dir: Path) -> None:
+    """删掉上一张二维码。重启后台之前调用。
+
+    不删会同时出两个毛病（用户报的）：
+      ① 界面上继续显示一张已经作废的码，用户扫它当然登不上；
+      ② 二维码的"年龄"是按文件修改时间算的 —— 刚重启完就显示
+         "已经 5 分钟了，多半过期了"，用户只会觉得程序在胡说。
+    """
+    try:
+        qr_path(shell_dir).unlink()
+    except OSError:
+        pass          # 本来就没有，正常（第一次装）
+
+
 def default_dir() -> Path:
     """NapCat 默认装哪儿：跟着数据目录走（绿色版就是程序旁边的 napcat/）。
 

@@ -84,6 +84,49 @@ class StopSignal(Base):
         self.assertTrue(heartbeat.stop_requested())
 
 
+class StopSignalIsClearedOnStart(unittest.TestCase):
+    """后台启动时必须清掉上一次的停止请求。
+
+    **这是一次真事故**（用户报的："第一次登上了、左下角也显示了，然后突然退了"）：
+    他早先点过「停止后台」，那个文件一直躺在 data/ 里；之后每次启动后台，
+    等扫码的循环一开头就看到它 —— 登录成功后两秒自己退出，还把 NapCat 杀了。
+    原来只有命令行那条路（`--qq`）清了，界面按钮走的 `--serve` 没清。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old = os.environ.get("SECRETARY_HOME")
+        os.environ["SECRETARY_HOME"] = self.tmp.name
+
+    def tearDown(self):
+        heartbeat.clear_stop()
+        if self._old is None:
+            os.environ.pop("SECRETARY_HOME", None)
+        else:
+            os.environ["SECRETARY_HOME"] = self._old
+        self.tmp.cleanup()
+
+    def test_prelude_clears_a_leftover_stop(self):
+        import run
+
+        heartbeat.request_stop()
+        self.assertTrue(heartbeat.stop_requested())
+
+        run.background_prelude()
+
+        self.assertFalse(heartbeat.stop_requested(),
+                         "上一次的停止请求没清掉，后台一起来就会自己退")
+
+    def test_serve_calls_the_prelude(self):
+        """`--serve` 走的就是这条路（界面那个按钮起的也是它）。"""
+        import inspect
+
+        import run
+
+        source = inspect.getsource(run.run_serve)
+        self.assertIn("background_prelude()", source)
+
+
 class Autostart(unittest.TestCase):
     """开机自启 = 往「启动」文件夹里放一个快捷方式。"""
 
@@ -132,6 +175,24 @@ class QqPanel(Base):
         self.assertTrue(data["qr"]["ready"])
         self.assertEqual(data["qr"]["image"], "")
         self.assertGreater(data["qr"]["age_seconds"], 300)
+
+    def test_restarting_throws_the_old_code_away(self):
+        """重启后台时先把旧码删掉。
+
+        不删的两个后果（用户报的）：界面上还挂着那张作废的码；
+        而且"年龄"按文件时间算，刚重启完就显示"已经 N 分钟，多半过期了"。
+        """
+        shell = fake_napcat()
+        qr = write_qr(shell, age_seconds=600)
+
+        deploy.clear_qr(shell)
+
+        self.assertFalse(qr.exists())
+        data = Api(self.store).qq_panel()
+        self.assertFalse(data["qr"]["ready"], "旧码没删干净，界面还会把它端出来")
+
+    def test_clearing_a_code_that_never_existed_is_fine(self):
+        deploy.clear_qr(fake_napcat())       # 第一次装：本来就没有码
 
     def test_connected_detail_comes_from_the_heartbeat(self):
         heartbeat.beat(self.store, "登录号 123456789｜收到 42", force=True)

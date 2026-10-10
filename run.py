@@ -383,6 +383,19 @@ def deploy_dir() -> Path:
     return deploy.default_dir()
 
 
+def background_prelude() -> None:
+    """后台进程启动的第一步：清掉上一次留下的停止请求。
+
+    ⚠️ 不清的话出**真事故**（2026-10-10 用户报的）：上回点过「停止后台」，
+    那个文件一直躺在 data/ 里；这次启动后台，run_deploy 等扫码的循环每次
+    开头都看它一眼 —— 结果是**登录成功之后两秒就自己退出**，顺手把 NapCat
+    也杀了。用户看到的是"扫上码了、左下角也显示了，然后突然退了"。
+
+    （原来只有命令行那条路 `--qq` 清了，界面按钮走的 `--serve` 没清。）
+    """
+    heartbeat.clear_stop()
+
+
 def run_setup(onekey_dir: Path, account: int, token: str, port: int,
               notify=None) -> int:
     """只装不启动：下包 → 跑官方安装器 → 写我们的配置。
@@ -539,6 +552,7 @@ def run_serve(store, pipeline, sink, account: int | None = None) -> int:
       · 界面上那个「启动 QQ」按钮起的也是它。
     定时推送本来就跑在自己的线程里（`Scheduler.start()`），塞进来很自然。
     """
+    background_prelude()
     scheduler = None
     if config.get("push", "enabled", True) and parse_times_or_empty():
         scheduler = Scheduler(store, sink, on_event=lambda text: print(f"  [推送] {text}"))
