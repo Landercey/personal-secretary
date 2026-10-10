@@ -385,5 +385,63 @@ class TestPushTimeSuggestion(unittest.TestCase):
         self.assertEqual(api.sync_now(), {"ok": True, "added": 3, "notes": []})
 
 
+class TestFullwidthPunctuation(unittest.TestCase):
+    """中文输入法下打出来的全角标点，不能把整份配置打回默认值。
+
+    用户报的原话是"设置的逗号能不能是中文输入法的逗号"。查下来界面那侧
+    本来就认（coerce 同时按半角/全角切），**真正会出事的是 config.toml**：
+
+        group_ids = [123456，789012]
+
+    整份文件解析失败 → 所有设置静默退回默认值：webhook 没了、群号空了。
+    用户看到的现象是"我就打了个逗号，怎么设置全丢了"。
+    """
+
+    def load(self, text: str) -> Config:
+        folder = tempfile.mkdtemp(prefix="ps-fw-")
+        path = Path(folder) / "config.toml"
+        path.write_text(text, encoding="utf-8")
+        return Config.load(path)
+
+    def test_fullwidth_comma_in_a_list_is_tolerated(self):
+        cfg = self.load('[qq]\ngroup_ids = [123456，789012]\n')
+
+        self.assertEqual(cfg.get("qq", "group_ids"), [123456, 789012])
+        self.assertEqual(cfg.load_error, "")          # 不再谎报"读不了"
+        self.assertIn("全角", cfg.load_note)          # 但要说一声
+
+    def test_fullwidth_syntax_does_not_wipe_other_settings(self):
+        """这才是不纠的可怕之处：一个逗号，把 webhook 也带走了。"""
+        cfg = self.load(
+            '[qq]\ngroup_ids = [1，2]\n\n'
+            '[wecom_bot]\nwebhook = "https://example/hook"\nenabled = true\n')
+
+        self.assertEqual(cfg.get("qq", "group_ids"), [1, 2])
+        self.assertEqual(cfg.get("wecom_bot", "webhook"), "https://example/hook")
+        self.assertTrue(cfg.get("wecom_bot", "enabled"))
+
+    def test_fullwidth_equals_sign(self):
+        """全角等号也是中文输入法常打出来的。"""
+        cfg = self.load('[qq]\naccount ＝ 123456789\n')
+        self.assertEqual(cfg.get("qq", "account"), 123456789)
+
+    def test_good_file_records_no_note(self):
+        cfg = self.load('[qq]\ngroup_ids = [1, 2]\n')
+        self.assertEqual(cfg.load_note, "")
+        self.assertEqual(cfg.load_error, "")
+
+    def test_really_broken_file_still_falls_back(self):
+        """别把"纠标点"变成"什么都能收" —— 真写坏的还得退回默认值。"""
+        cfg = self.load('[qq\ngroup_ids = [1, 2\n')
+        self.assertTrue(cfg.load_error)
+        self.assertEqual(cfg.get("qq", "group_ids"), [])
+
+    def test_ui_side_already_accepts_chinese_commas(self):
+        for section, key in (("qq", "group_ids"), ("qq", "inbox_ids"),
+                             ("push", "times"), ("parse", "my_names")):
+            with self.subTest(key=key):
+                self.assertEqual(len(coerce(section, key, "a，b")), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -165,9 +165,19 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
 /* ---------- 右侧：详情 / 设置 ---------- */
 .detail {
   width: 0; flex: none; overflow: hidden; background: var(--panel);
+  position: relative;
   border-left: 1px solid transparent;
   transition: width .2s cubic-bezier(.4,0,.2,1), border-color .2s;
 }
+/* 关掉右栏的 ✕。以前只能点左边换个分组才收得起来，不直观 */
+.closer {
+  position: absolute; top: 12px; right: 12px; z-index: 2;
+  width: 26px; height: 26px; padding: 0; line-height: 1;
+  border-radius: 7px; font-size: 13px; color: var(--text-3);
+  opacity: 0; pointer-events: none; transition: opacity .15s;
+}
+.detail.open .closer { opacity: 1; pointer-events: auto }
+.closer:hover { color: var(--text); background: #f2f2f4 }
 .detail.open { width: 320px; border-left-color: var(--line) }
 .detail .inner { width: 320px; padding: 22px 20px; height: 100%; overflow-y: auto }
 .detail.wide.open { width: 420px }
@@ -336,6 +346,7 @@ details.adv[open] > summary::before { content: "▾ " }
         <button id="btnSync" title="拉一遍课表等插件来源">⟳ 同步</button>
         <button id="btnSettings" title="推送时间、企业微信、AI…">⚙ 设置</button>
       </div>
+      <button id="btnQq" title="启动/停止 QQ 接收、扫登录码、开机自启">📱 QQ 接收</button>
     </div>
     <div class="foot" id="foot">正在连接…</div>
   </aside>
@@ -352,6 +363,7 @@ details.adv[open] > summary::before { content: "▾ " }
   </main>
 
   <section class="detail" id="detail">
+    <button class="closer" id="btnClose" title="关闭这一栏">✕</button>
     <div class="inner" id="detailInner"></div>
   </section>
 </div>
@@ -549,7 +561,16 @@ function renderPanel(force) {
   if (panel === 'settings') return drawSettings();
   if (panel === 'new') return drawComposer();
   if (panel === 'drop') return drawDrop();
+  if (panel === 'qq') return drawQqPanel();
   return drawDetail();
+}
+
+function closePanel() {
+  selected = null;
+  editing = false;
+  setPanel(null);
+  renderList();          // 顺手把选中高亮也去掉
+  renderPanel(false);
 }
 
 /* ---------- 待办详情 ---------- */
@@ -989,12 +1010,26 @@ function drawSettings() {
     });
   }
 
-  // 「收消息」那一页：二维码 + 启动/停止 + 开机自启。
-  // 放在这里是因为"QQ 接不接得上"就是这一页的事，不用另开一个入口。
-  const qqPane = $('detailInner').querySelector('.tabpane[data-g="group_receive"]');
-  if (qqPane) {
-    qqPane.insertAdjacentHTML('beforeend', '<div class="qqbox" id="qqBox"></div>');
-    drawQqBox();
+  // 「数据与资源」那一页底部：装在哪儿、怎么卸干净。
+  // 用户问过"是不是全在一个文件夹里、好不好卸" —— 直接把答案摆出来。
+  const dataPane = $('detailInner').querySelector('.tabpane[data-g="group_data"]');
+  if (dataPane) {
+    dataPane.insertAdjacentHTML('beforeend', '<div id="placeBox"></div>');
+    call('locations').then(res => {
+      const box = $('placeBox');
+      if (!box || !res) return;
+      box.innerHTML = `<div class="guide">
+          <h3>装在哪儿 · 怎么卸干净</h3>
+          <p>程序、你的数据、NapCat 全在<b>一个文件夹</b>里：<br>
+             <code>${esc(res.root)}</code></p>
+          <p><b>卸载 = ① 关掉开机自启 ② 删掉这个文件夹</b>，就这两步，不留东西。
+             ${res.autostart
+               ? '⚠️ 开机自启现在还开着 —— 先去左侧「📱 QQ 接收」把它关掉，再删文件夹。'
+               : '（开机自启现在是关着的）'}</p>
+          <p>想留证据就先把 <code>data</code>（你的待办）拷走；
+             QQ 本体在 <code>napcat</code>，删了下次会重新下。</p>
+        </div>`;
+    });
   }
 
   // 从"还没弄完这几步"点进来时，跳到对应的那一段并展开它
@@ -1037,11 +1072,9 @@ function openSettings(section) {
 }
 
 /* ---------- QQ 接收：二维码 / 启动 / 停止 / 开机自启 ---------- */
-async function drawQqBox() {
-  const box = $('qqBox');
-  if (!box) return;                       // 面板已经关了
+async function drawQqPanel() {
   const data = await call('qq_panel');
-  if (!data || !$('qqBox')) return;
+  if (!data || panel !== 'qq') return;      // 已经切走了，别乱画
 
   const receiver = data.receiver || {};
   const qr = data.qr || {};
@@ -1062,36 +1095,38 @@ async function drawQqBox() {
              多半过期了。点「重新出码」拿一张新的。</p>`
         : '<p class="hint">还没出二维码。点下面「启动 QQ」—— 第一次会先自动下载安装 NapCat（约几十秒）。</p>');
 
-  box.innerHTML = `<div class="guide" style="margin:0 0 14px">
-      <h3>QQ 接收</h3>
-      <p>${status}</p>
-      ${qrBlock}
-      <div class="acts">
-        <button class="primary block" id="btnQQStart"${receiver.alive ? ' disabled' : ''}>
-          启动 QQ（后台常驻，收消息 + 定时推送）</button>
-        ${receiver.alive && !connected
-          ? '<button class="block" id="btnQQRestart">重新出码（重启一次后台）</button>' : ''}
-        <button class="block" id="btnQQStop"${receiver.alive ? '' : ' disabled'}>
-          停止后台</button>
-      </div>
-      <p class="hint" style="margin-top:10px">
-        开机自启：<a id="btnAuto" data-on="${data.autostart ? 1 : 0}">${
-          data.autostart ? '已开启，点一下关掉' : '点一下开启'}</a><br>
-        开启后每次开机它自己在后台跑（一个进程干两件事）。
-        不开机自启的话，每天得自己点一次「启动 QQ」。</p>
-    </div>`;
+  $('detailInner').innerHTML = `
+    <h2>QQ 接收</h2>
+    <p class="note">${status}</p>
+    ${qrBlock}
+    <div class="acts">
+      <button class="primary block" id="btnQQStart"${receiver.alive ? ' disabled' : ''}>
+        启动 QQ（后台常驻，收消息 + 定时推送）</button>
+      ${receiver.alive && !connected
+        ? '<button class="block" id="btnQQRestart">重新出码（重启一次后台）</button>' : ''}
+      <button class="block" id="btnQQStop"${receiver.alive ? '' : ' disabled'}>
+        停止后台</button>
+    </div>
+    <p class="hint" style="margin-top:14px">
+      开机自启：<a id="btnAuto" data-on="${data.autostart ? 1 : 0}">${
+        data.autostart ? '已开启，点一下关掉' : '点一下开启'}</a><br>
+      开启后每次开机它自己在后台跑（一个进程干两件事）。
+      不开机自启的话，每天得自己点一次「启动 QQ」。</p>
+    <p class="hint" style="margin-top:10px">
+      要登录的 QQ 号在「⚙ 设置 → 收消息 → QQ 接入」里填。${
+        data.account ? `现在是 <b>${data.account}</b>。` : '⚠️ 现在还没填，启动前先填上。'}</p>`;
 
   $('btnQQStart').onclick = async () => {
     const res = await call('start_qq');
     if (!res) return;
     toast(res.message || '起来了');
-    drawQqBox();
+    drawQqPanel();
   };
   $('btnQQStop').onclick = async () => {
     const res = await call('stop_background');
     if (!res) return;
     toast(res.message || '让它收工了');
-    setTimeout(drawQqBox, 3000);
+    setTimeout(drawQqPanel, 3000);
   };
   // 二维码约 2 分钟过期，而 NapCat 不会自己刷新 —— 只能重启一次。
   // 这就是为什么必须给一个「重新出码」：不然用户对着一个扫不上的码干瞪眼。
@@ -1106,22 +1141,22 @@ async function drawQqBox() {
     }
     await call('start_qq');
     toast('重启了。NapCat 会写一张新码，等十几秒');
-    drawQqBox();
+    drawQqPanel();
   };
   $('btnAuto').onclick = async () => {
     const on = $('btnAuto').dataset.on === '1';
     const res = await call('set_autostart', !on);
     if (!res) return;
     toast(res.message || (on ? '已关掉' : '已开启'));
-    drawQqBox();
+    drawQqPanel();
   };
 
   // 二维码是 NapCat 启动几十秒后才写出来的，所以得自己盯着点。
   // 面板一关就停 —— 别让一个看不见的定时器一直在那儿敲桥。
   clearTimeout(qqTimer);
   qqTimer = setTimeout(async () => {
-    if (!$('qqBox')) return;
-    await drawQqBox();
+    if (panel !== 'qq') return;
+    await drawQqPanel();
   }, 5000);
 }
 
@@ -1191,7 +1226,9 @@ async function refresh() {
 
   // 搜索优先：搜的时候不管当前停在哪个分组
   if (keyword) {
-    const res = await load(['search', keyword]);
+    // **只在当前分组里搜**。用户报过：在「今天」里搜，已完成/已归档/
+    // 下个月的全冒出来了 ——"不搜索没事，一搜全出来了"。
+    const res = await load(['search', keyword, current]);
     if (mine !== refreshToken) return;      // 有人抢先刷新了，我这份作废
     items = (res && res.items) || [];
   } else if (current === 'junk') {
@@ -1231,7 +1268,9 @@ async function refresh() {
   const meta = VIEWS.find(v => v.id === current) || {};
   $('viewTitle').textContent = keyword ? `搜索：${keyword}` : (meta.label || '今天');
   $('viewSub').textContent = items.length ? `${items.length} 条` : '';
-  $('viewHint').textContent = keyword ? '' : viewHint;
+  $('viewHint').textContent = keyword
+    ? `只在「${meta.label || '当前分组'}」里找`
+    : viewHint;
   renderNav();
   renderList();
   renderPanel(false);
@@ -1284,6 +1323,12 @@ window.addEventListener('pywebviewready', () => {
     openSettings(null);
   };
   $('btnNew').onclick = () => { setPanel('new'); renderPanel(true); };
+  $('btnQq').onclick = () => {
+    if (panel === 'qq') { closePanel(); return; }
+    setPanel('qq');
+    renderPanel(true);
+  };
+  $('btnClose').onclick = closePanel;
   $('btnSync').onclick = async (e) => {
     e.target.disabled = true;
     const res = await call('sync_now');

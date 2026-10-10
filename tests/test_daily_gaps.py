@@ -18,6 +18,7 @@ import sys
 import tempfile
 import time
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +31,13 @@ from app.contracts.models import (                            # noqa: E402
 from app.runtime import heartbeat                              # noqa: E402
 from app.store.repository import SqliteStore, open_database    # noqa: E402
 from app.ui.bridge import Api, _normalize_due                  # noqa: E402
+
+
+def stamp(days: int, hour: int = 9) -> str:
+    """今天往后第 N 天的某个整点。"""
+    moment = datetime.now() + timedelta(days=days)
+    return moment.replace(hour=hour, minute=0, second=0,
+                          microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
 
 
 class Base(unittest.TestCase):
@@ -188,6 +196,34 @@ class TestSearch(Base):
         item = self.api.search("作业")["items"][0]
         self.assertEqual(item["due_raw"], "2026-10-12T09:00")
         self.assertIn("files", item)
+
+    def test_search_stays_inside_the_current_view(self):
+        """用户报的：在「今天」里搜索，已完成/已归档/下个月的**全冒出来了**。
+
+        "不搜索没事，一搜全出来了" —— 搜索框就在那个分组的标题旁边，
+        预期当然是"在这个列表里筛"。
+        """
+        today = self.add("今天交作业", due=stamp(0))
+        self.add("下个月的事", due=stamp(40))
+        archived = self.add("去年的作业总结")
+        self.store.archive(archived, "过期")
+        finished = self.add("已经做完的作业")
+        self.store.set_status(finished, STATUS_DONE, "x")
+
+        found = [t.task_id for t in self.store.search("作业", view="today")]
+        self.assertEqual(found, [today])
+
+        # 全库搜（view="all"）才把归档和已完成的也捞出来
+        everything = {t.task_id for t in self.store.search("作业", view="all")}
+        self.assertIn(archived, everything)
+        self.assertIn(finished, everything)
+
+    def test_bridge_passes_the_view_through(self):
+        self.add("今天交作业", due=stamp(0))
+        self.add("下个月的作业", due=stamp(40))
+        result = self.api.search("作业", "today")
+        self.assertEqual(result["view"], "today")
+        self.assertEqual(len(result["items"]), 1)
 
 
 class TestReceiverHeartbeat(Base):

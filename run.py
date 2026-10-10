@@ -373,6 +373,13 @@ def run_setup(onekey_dir: Path, account: int, token: str, port: int) -> int:
             print("可以手动去 https://github.com/NapNeko/NapCatQQ/releases "
                   "下载 OneKey 包，解压后双击 NapCatInstaller.exe。")
             return 1
+        # 装成功了就把安装包删掉 —— 那是个 300 MB 的 zip，留着纯占地方。
+        # 用户要的是"全在一个文件夹里、删了就干净"，这个也算在里面。
+        # 装失败时**不删**：留着重试就不用再下一次。
+        try:
+            zip_path.unlink()
+        except OSError:
+            pass
 
     shell = deploy.find_shell_dir(onekey_dir)
     if shell is None:
@@ -885,6 +892,8 @@ def _selftest() -> int:
     print(f"  配置文件：  {config.path}")
     print(f"  数据目录：  {data_dir}")
     print(f"  过滤强度：  {config.get('parse', 'filter_strength')}")
+    if config.load_note:
+        print(f"  ⚠️ {config.load_note}")
     # AI 还没做，但配置段留着（以后做插件时直接用）。这里如实说，
     # 不打印"AI 模式：conservative"那种看着像已经在跑的话。
     print("  AI 增强：   还没做（现在是纯规则解析：不联网、不花钱、不传内容出去）")

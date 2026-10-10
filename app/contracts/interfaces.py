@@ -129,8 +129,14 @@ class Store(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def search(self, keyword: str, limit: int = 100) -> list[Task]:
-        """按关键字找待办。标题、正文、地点、原始片段都要能搜到。"""
+    def search(self, keyword: str, view: str = "all",
+               limit: int = 100) -> list[Task]:
+        """在**给定分组里**按关键字找待办。
+
+        标题、正文、地点、原始片段都要能搜到。
+        `view` 的口径和 list_tasks 一样 —— 搜索框长在某个分组的标题旁边，
+        用户的预期就是"在这个列表里筛"，而不是把全库翻出来。
+        """
         raise NotImplementedError
 
     @abstractmethod

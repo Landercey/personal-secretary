@@ -432,23 +432,29 @@ class SqliteStore(Store):
             self._event(task_id, "edited", "；".join(f"{k}={v}" for k, v in changes.items()))
 
     @_synchronized
-    def search(self, keyword: str, limit: int = 100) -> list[Task]:
+    def search(self, keyword: str, view: str = "all",
+               limit: int = 100) -> list[Task]:
         """按关键字找。标题、正文、地点、原始片段都搜。
+
+        **只在给定分组里找**（用户报的问题）：他在「今天」里搜索，
+        结果已完成、已归档、下个月的全被捞出来了 ——
+        "不搜索没事，一搜全出来了"。搜索框就长在那个分组的标题旁边，
+        人的预期当然是"在这个列表里筛"。
 
         为什么原始片段也进搜索范围：用户记得的往往是**原话**
         （"老师说那个实验报告"），不是我们提炼出来的标题。
-        归档的也搜得到 —— 找旧东西时没人希望它凭空消失。
         """
         word = str(keyword or "").strip()
         if not word:
             return []
         like = f"%{word}%"
+        where, params = self._view_filter(view)
         rows = self.conn.execute(
-            """SELECT * FROM tasks
-               WHERE title LIKE ? OR detail LIKE ? OR location LIKE ? OR quoted LIKE ?
-               ORDER BY is_archived, (due_at IS NULL), due_at DESC, task_id DESC
-               LIMIT ?""",
-            (like, like, like, like, int(limit)),
+            "SELECT * FROM tasks WHERE (" + where + ") AND ("
+            "title LIKE ? OR detail LIKE ? OR location LIKE ? OR quoted LIKE ?)"
+            " ORDER BY is_archived, (due_at IS NULL), due_at DESC, task_id DESC"
+            " LIMIT ?",
+            (*params, like, like, like, like, int(limit)),
         ).fetchall()
         return [self._row_to_task(row) for row in rows]
 

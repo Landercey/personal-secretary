@@ -185,6 +185,41 @@ DEFAULTS: dict[str, dict[str, Any]] = {
 # 新建项目必须零真实信息（CONTRACT.md 第十节）。这里只放占位值。
 _PLACEHOLDER_KEYS = {"webhook", "cloud_api_key", "cloud_base_url", "cloud_model", "local_model"}
 
+# 中文输入法下很容易打出全角标点。TOML 里当语法用的标点**全是半角**，
+# 所以全角的一定是笔误。
+#
+# 不纠的后果很吓人（真踩过）：用户在 config.toml 里写
+#     group_ids = [123456，789012]
+# 于是整份配置解析失败，**所有设置静默退回默认值** ——
+# 企业微信 webhook 没了、群号空了、token 没了。
+# 用户看到的现象是"我就打了个逗号，怎么设置全丢了"。
+#
+# 只在**第一次解析失败之后**才用这张表，所以正常文件一个字都不会被动。
+FULLWIDTH_FIXES = str.maketrans({
+    "，": ",", "：": ":", "＝": "=", "＃": "#",
+    "＂": '"', "“": '"', "”": '"',
+    "［": "[", "］": "]", "｛": "{", "｝": "}",
+})
+
+
+def _loads_tolerant(raw: str) -> tuple[dict[str, Any] | None, bool]:
+    """读 TOML 文本。返回 (结果, 是不是纠过标点)；读不动返回 (None, False)。
+
+    只在第一次解析失败时才纠标点重试一次 —— 为的是一种笔误不要把
+    用户整份配置打回默认值。
+    """
+    try:
+        return tomllib.loads(raw), False
+    except tomllib.TOMLDecodeError:
+        pass
+    fixed = raw.translate(FULLWIDTH_FIXES)
+    if fixed == raw:
+        return None, False
+    try:
+        return tomllib.loads(fixed), True
+    except tomllib.TOMLDecodeError:
+        return None, False
+
 # ---------------------------------------------------------------------------
 # 生成给用户看的 config.toml 时，每一项上面带一句人话说明。
 # 用户唯一会亲手改的就是这个文件，所以说明写在配置里、而不是只写在代码里。
@@ -470,6 +505,8 @@ class Config:
         self.path = path
         self._mtime = self._read_mtime()
         self._last_check = 0.0
+        # 配置里有全角标点、程序自己纠过：说一声，别让它变成神秘现象
+        self.load_note = ""
 
     # ------------------------------------------------------------------ 热重载
     def _read_mtime(self) -> float:
@@ -497,12 +534,16 @@ class Config:
             return
         self._mtime = mtime
         try:
-            with open(self.path, "rb") as handle:
-                fresh = tomllib.load(handle)
-        except (OSError, tomllib.TOMLDecodeError):
+            raw = self.path.read_text(encoding="utf-8")
+        except OSError:
             # 用户改到一半、语法还没写对时会读失败。保留旧值，等他写完再说 ——
             # 不能因为一次读失败就把正在运行的程序搞乱。
             return
+        fresh, fixed = _loads_tolerant(raw)
+        if fresh is None:
+            return                      # 还是读不动，保留旧值
+        self.load_note = ("配置里有中文输入法的全角标点，已经自动按半角读了"
+                          if fixed else "")
         self._values = _merge(DEFAULTS, fresh)
 
     # ------------------------------------------------------------------ 读取
@@ -633,15 +674,23 @@ class Config:
         values: dict[str, Any] = {}
         if target.is_file():
             try:
-                with open(target, "rb") as handle:
-                    values = tomllib.load(handle)
-            except (OSError, tomllib.TOMLDecodeError):
+                raw = target.read_text(encoding="utf-8")
+            except OSError:
+                raw = ""
+            loaded, fixed = _loads_tolerant(raw)
+            if loaded is None:
                 # 配置写坏了不能把程序带崩：退回默认值，调用方可以通过
                 # cfg.load_error 知道自己写错了。
                 values = {}
                 cfg = cls(values, target)
                 cfg.load_error = f"配置文件读不了（{target.name}），已改用默认值"
                 return cfg
+            values = loaded
+            cfg = cls(values, target)
+            cfg.load_note = ("配置里有中文输入法的全角标点，已经自动按半角读了"
+                             if fixed else "")
+            cfg.load_error = ""
+            return cfg
         else:
             try:
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -653,6 +702,8 @@ class Config:
         return cfg
 
     load_error: str = ""
+    # 配置里有全角标点、程序自己纠过。不是错误，但要说一声（见 FULLWIDTH_FIXES）
+    load_note: str = ""
 
     def is_placeholder(self, section: str, key: str) -> bool:
         """这个值还是不是占位/空值（用来判断"用户还没配置"）。"""

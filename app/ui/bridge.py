@@ -127,10 +127,15 @@ class Api:
             "done": task.status == STATUS_DONE,
         }
 
-    def search(self, keyword: str) -> dict:
-        """找待办。用户记得的往往是原话，所以标题/正文/地点/原文都搜。"""
-        rows = self.store.search(keyword, limit=200)
-        return {"items": [self._task_dict(t) for t in rows], "keyword": str(keyword or "")}
+    def search(self, keyword: str, view: str = "all") -> dict:
+        """在当前分组里找。
+
+        **只在当前分组里**（用户报的问题）：在「今天」里搜，已完成/已归档/
+        下个月的全冒出来了。搜索框就在这个分组的标题旁边，预期是"筛这个列表"。
+        """
+        rows = self.store.search(keyword, view=view or "all", limit=200)
+        return {"items": [self._task_dict(t) for t in rows],
+                "keyword": str(keyword or ""), "view": view or "all"}
 
     def counts(self) -> dict:
         """左侧导航上的数字。"""
@@ -360,6 +365,19 @@ class Api:
 
         ok, message = desktop.set_autostart(bool(enabled))
         return {"ok": ok, "message": message}
+
+    def locations(self) -> dict:
+        """东西都装在哪儿、怎么卸干净。设置里那一块就靠它。"""
+        from ..runtime import deploy, desktop
+        from ..runtime.config import config, default_data_dir
+
+        return {
+            "root": str(Path(__file__).resolve().parents[2]),
+            "data": str(default_data_dir()),
+            "napcat": str(deploy.default_dir()),
+            "config": str(config.path or ""),
+            "autostart": desktop.autostart_enabled(),
+        }
 
     # ------------------------------------------------------------------ 环境
     def config_summary(self) -> dict:
