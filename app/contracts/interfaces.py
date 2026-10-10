@@ -119,6 +119,14 @@ class Store(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def unarchive(self, task_id: int) -> None:
+        """把归档的放回去。是 `SqliteStore.archive()` 的反向操作。
+
+        没这个的话，一旦归档就**再也移不出来**了。
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def update_fields(self, task_id: int, fields: dict) -> None:
         """改标题 / 时间 / 地点这些**内容**字段。界面上手改用的。
 

@@ -125,6 +125,7 @@ class Api:
                        "kind": a.kind} for a in task.attachments],
             "status": task.status,
             "done": task.status == STATUS_DONE,
+            "archived": bool(task.is_archived),
         }
 
     def search(self, keyword: str, view: str = "all") -> dict:
@@ -198,12 +199,21 @@ class Api:
         return {"ok": True}
 
     def restore(self, task_id: int) -> dict:
-        """把误判、或者手滑完成的待办放回主列表。
+        """把完成的 / 归档的 / 标成误判的，**移出到「全部未完成」**。
 
-        没有这个出口的话，用户点错一次「这不是待办」就再也找不回来了 ——
-        数据还在库里，可他看不到、也点不着。
+        **这就是"移到哪"的答案：目标只有一个 —— 全部未完成。**
+        移出之后不用选去哪，它自己会按截止时间回到该去的分组
+        （今天 / 本周 / 逾期…）；没写时间的就只在「全部未完成」里躺着。
+
+        要让一条待办"变成明天的"，那是改时间（「改内容」）的事，
+        不是移出的事 —— 两件事混在一起，用户会以为自己在搬文件夹。
+
+        ⚠️ 归档的必须**额外清掉 `is_archived`**：`set_status` 不碰这个字段，
+        所以以前归档的点恢复等于什么都没发生（界面上还找不着）。
         """
-        self.store.set_status(int(task_id), STATUS_OPEN, "用户从废件箱/已完成里恢复")
+        task_id = int(task_id)
+        self.store.set_status(task_id, STATUS_OPEN, "用户把它移出到未完成")
+        self.store.unarchive(task_id)
         self._revision += 1
         return {"ok": True}
 

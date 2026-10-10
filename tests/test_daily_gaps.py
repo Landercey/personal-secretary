@@ -124,6 +124,80 @@ class TestJunkBoxMerges(Base):
         self.assertEqual(task.drop_reason, "当时觉得是误判")
 
 
+class TestMoveOut(Base):
+    """"移出"= 回到「全部未完成」。目标只有一个，落在哪个分组由时间自己决定。
+
+    用户报的原话："已完成的，归档的没有移出的按钮，还有要想好移能移到哪"。
+    查下来是两层问题：
+      · 界面上归档的确实没按钮；
+      · **代码里也没有反向操作** —— `archive()` 有，`unarchive()` 没有，
+        所以归档之后根本移不出来。`restore()` 只改 status，不碰 is_archived，
+        对归档的等于什么都没做。
+    """
+
+    def test_archived_can_come_back(self):
+        task_id = self.add("去年的团费", due=stamp(1))
+        self.store.archive(task_id, "过期了")
+        self.assertEqual(self.store.list_tasks("open"), [])
+
+        self.api.restore(task_id)
+
+        self.assertEqual([t.task_id for t in self.store.list_tasks("open")], [task_id])
+        self.assertEqual(self.store.count_tasks("archive"), 0)
+
+    def test_restore_must_clear_the_archive_flag(self):
+        """归档的 status 本来就是 open —— 光改 status 是看不见效果的。
+
+        这就是原来那个 bug：点了恢复，界面上什么都没变。
+        """
+        task_id = self.add("x")
+        self.store.archive(task_id, "x")
+        self.assertEqual(self.store.get_task(task_id).status, STATUS_OPEN)
+        self.assertTrue(self.store.get_task(task_id).is_archived)
+
+        self.api.restore(task_id)
+
+        self.assertFalse(self.store.get_task(task_id).is_archived)
+
+    def test_moved_out_task_lands_where_its_time_says(self):
+        """移出之后不用选去哪：它自己按截止时间回到该去的分组。"""
+        today = self.add("今天的事", due=stamp(0))
+        far = self.add("下个月的事", due=stamp(40))
+        for task_id in (today, far):
+            self.store.archive(task_id, "x")
+            self.api.restore(task_id)
+
+        opens = {t.task_id for t in self.store.list_tasks("open")}
+        self.assertEqual(opens, {today, far})
+        self.assertIn(today, [t.task_id for t in self.store.list_tasks("today")])
+        self.assertNotIn(far, [t.task_id for t in self.store.list_tasks("today")])
+
+    def test_move_out_from_done(self):
+        task_id = self.add("x")
+        self.store.set_status(task_id, STATUS_DONE, "x")
+        self.api.restore(task_id)
+
+        self.assertEqual(self.store.count_tasks("done"), 0)
+        self.assertEqual(self.store.count_tasks("open"), 1)
+
+    def test_move_out_from_junk(self):
+        task_id = self.add("我点错了")
+        self.store.set_status(task_id, STATUS_DROPPED, "手滑")
+        self.api.restore(task_id)
+
+        self.assertEqual(self.store.count_tasks("junk"), 0)
+        self.assertEqual(self.store.count_tasks("open"), 1)
+
+    def test_ui_can_tell_an_archived_task_apart(self):
+        """界面得知道这条是不是归档的，不然不知道该显示哪个"移出"按钮。"""
+        task_id = self.add("x")
+        self.store.archive(task_id, "x")
+
+        item = self.api.tasks("archive")["items"][0]
+        self.assertTrue(item["archived"])
+        self.assertFalse(item["done"])
+
+
 class TestEdit(Base):
     """解析错了得能改，而不是"判误判再重新发一遍"。"""
 

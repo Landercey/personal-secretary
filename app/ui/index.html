@@ -596,8 +596,11 @@ function drawDetail() {
         也是以后调规则的案例。</p>
       <div class="acts">
         ${t.junkKind === 'task'
-          ? '<button class="primary block" id="btnRestore">恢复成待办</button>'
-          : ''}
+          ? `<button class="primary block" id="btnRestore">移出「废件箱」</button>
+             <p class="hint" style="margin-top:2px">移到「全部未完成」——
+               之后它在哪个分组，由截止时间自己决定（今天 / 本周 / 逾期…）。</p>`
+          : `<p class="hint">这是一段被拦下的原文，不是待办，没有"移出"可言。
+               想把它变成待办的话，复制下来贴到「＋ 新建待办」里。</p>`}
       </div>`;
     const back = $('btnRestore');
     if (back) back.onclick = () => act('restore', t.junkId);
@@ -613,19 +616,34 @@ function drawDetail() {
     ${t.quoted ? `<div class="quote"><em>原始消息（判错了你能看出为什么）</em>${esc(t.quoted)}</div>` : ''}
     ${t.detail ? `<div class="quote">${esc(t.detail).slice(0, 800)}</div>` : ''}
     ${(t.files && t.files.length) ? '<div class="files" id="files"></div>' : ''}
-    <div class="acts">
-      ${t.done
-        ? '<button class="primary block" id="btnRestore">撤销完成，放回列表</button>'
-        : `<button class="primary block" onclick="act('complete')">标记完成</button>`}
-      <div class="two">
-        <button onclick="editTask()">改内容</button>
-        <button onclick="act('archive')">归档</button>
-      </div>
-      <button class="block" onclick="act('drop')">这不是待办</button>
-    </div>`;
+    ${detailActions(t)}`;
   const back = $('btnRestore');
   if (back) back.onclick = () => act('restore', t.id);
   if (t.files && t.files.length) renderFiles(t);
+}
+
+/* 已完成 / 已归档的不在主列表里，所以动作只有一个：**移出**。
+   界面上必须说清楚"移到哪"，不然用户点完不知道它去哪了。
+   答案：目标只有一个（全部未完成），剩下的分组由截止时间自己决定。 */
+function detailActions(t) {
+  if (!t.done && !t.archived) {
+    return `<div class="acts">
+        <button class="primary block" onclick="act('complete')">标记完成</button>
+        <div class="two">
+          <button onclick="editTask()">改内容</button>
+          <button onclick="act('archive')">归档</button>
+        </div>
+        <button class="block" onclick="act('drop')">这不是待办</button>
+      </div>`;
+  }
+  // 归档优先：一条既完成又归档的，只会出现在「已归档」里
+  const where = t.archived ? '已归档' : '已完成';
+  return `<div class="acts">
+      <button class="primary block" id="btnRestore">移出「${where}」</button>
+      <p class="hint" style="margin-top:2px">移到「全部未完成」——
+        之后它在哪个分组，由截止时间自己决定（今天 / 本周 / 逾期…）；
+        没写时间的就只在「全部未完成」里。</p>
+    </div>`;
 }
 
 function drawEdit(t) {

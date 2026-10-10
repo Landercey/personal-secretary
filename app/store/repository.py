@@ -535,6 +535,24 @@ class SqliteStore(Store):
             )
             self._event(task_id, "archived", reason)
 
+    @_synchronized
+    def unarchive(self, task_id: int) -> None:
+        """把归档的放回去。**归档的反向操作**。
+
+        为什么必须补这一个（用户报的）：`archive()` 有，反向的却没有 ——
+        归档之后**没有任何办法移出来**：界面上没按钮，代码里也没方法。
+        点错了只能删库重来。这是漏了，不是取舍。
+
+        `archive_reason` 留着不删：和 `drop_reason` 一样，
+        "当初为什么归档的"是以后调规则的案例。
+        """
+        with self.conn:
+            self.conn.execute(
+                "UPDATE tasks SET is_archived=0, updated_at=? WHERE task_id=?",
+                (now_text(), task_id),
+            )
+            self._event(task_id, "unarchived", "用户把它从归档里放回来")
+
     # ------------------------------------------------------------------ 废件箱
     @_synchronized
     def log_dropped(self, draft: TaskDraft, reason: str) -> None:
