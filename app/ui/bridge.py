@@ -542,7 +542,7 @@ class Api:
     # ------------------------------------------------------------------ 环境
     def config_summary(self) -> dict:
         """界面上显示"现在什么状态"用。"""
-        from ..runtime.config import config
+        from ..runtime.config import config, default_data_dir
         from ..runtime.heartbeat import state as beat_state
         from ..runtime.sysmon import describe as mem_describe
         from ..runtime.sysmon import memory_state, self_rss_mb
@@ -893,8 +893,9 @@ class Api:
         所以做成：自动把该带的信息整理好、把号码打掉，用户自己看一眼、复制、贴过去。
         """
         import platform
+        import sys
 
-        from ..runtime.config import config
+        from ..runtime.config import config, default_data_dir
         from ..runtime.heartbeat import state as beat_state
         from ..runtime.sysmon import memory_state, self_rss_mb
 
@@ -909,12 +910,23 @@ class Api:
             return len(value) if isinstance(value, list) else 0
 
         own_mb = (self_rss_mb() or 0) + (receiver.get("rss_mb") or 0)
+        # 构建标识。**这条很重要**：用户报问题时我第一眼要看的就是"他装的是哪一版"。
+        # 打包版读 build-info.txt（打脚本写的，含时分和提交号）；没有就退回文件时间。
         built = ""
-        try:
-            built = f"{(root / 'run.py').stat().st_mtime:.0f}"
-            built = datetime.fromtimestamp(float(built)).strftime("%Y-%m-%d")
-        except (OSError, ValueError):
-            built = "?"
+        info = root / "build-info.txt"
+        if info.is_file():
+            try:
+                built = info.read_text(encoding="utf-8", errors="replace").strip()
+            except OSError:
+                built = ""
+        if not built:
+            try:
+                target = (Path(sys.executable) if getattr(sys, "frozen", False)
+                          else root / "run.py")
+                built = datetime.fromtimestamp(
+                    target.stat().st_mtime).strftime("%Y-%m-%d")
+            except (OSError, ValueError):
+                built = "?"
 
         lines = [
             "【私人秘书 · 反馈】",
@@ -925,6 +937,11 @@ class Api:
             "—— 收消息 ——",
             "后台：" + ("在跑" if receiver.get("alive") else "没在跑")
             + (f"（{_redact(receiver.get('detail'))}）" if receiver.get("detail") else ""),
+            # 这行是给"点启动→自己退了"这类问题准备的：现场留着这个文件，
+            # 就一定是上回点过「停止后台」，一眼定位，不用再翻日志。
+            "停止请求文件："
+            + ("有 ← 后台一启动就会自己退，删掉 data/stop.request 再试"
+               if (default_data_dir() / "stop.request").exists() else "没有"),
             f"配置：{count('group_ids')} 个群 / {count('private_ids')} 个私聊 / "
             f"{count('inbox_ids')} 个收件箱"
             f"｜登录号 {'填了' if int(config.get(qq, 'account', 0) or 0) else '没填'}",

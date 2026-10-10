@@ -45,6 +45,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -213,12 +214,41 @@ def write_readme() -> None:
     print(f"已放好：{target.name}")
 
 
+def write_build_info() -> None:
+    """在 exe 边上写一行"这是哪一版"（时间 + 提交号）。
+
+    为什么要这个东西：用户报问题时会附带一份"意见反馈"，第一行就是构建日期。
+    以前打包版读不到 run.py，那里只会显示一个 `?` —— 我就得靠猜他装的是哪一版
+    （真发生过：只能从他的日志里反推是哪一版）。有了这行就是一眼的事。
+    """
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT),
+            capture_output=True, text=True, timeout=10,
+            encoding="utf-8", errors="replace").stdout.strip()
+        # 工作区脏的话标一下：不标的话这一版的提交号是**上一个**提交的，
+        # 以后照着它去查代码会看错文件。
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=str(ROOT),
+            capture_output=True, text=True, timeout=10,
+            encoding="utf-8", errors="replace").stdout.strip()
+        if dirty and commit:
+            commit += "+未提交改动"
+    except (OSError, subprocess.SubprocessError):
+        commit = ""
+    text = f"{stamp}｜提交 {commit or '未知'}"
+    (DIST / "build-info.txt").write_text(text, encoding="utf-8")
+    print(f"已记下这一版：{text}")
+
+
 def main() -> int:
     check_inputs()
     build()
     verify()
     make_shortcut()
     write_readme()
+    write_build_info()
     print()
     print("打包完成。软件就在这儿：")
     print(f"    {DIST}")

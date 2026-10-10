@@ -84,6 +84,36 @@ class StopSignal(Base):
         self.assertTrue(heartbeat.stop_requested())
 
 
+class FeedbackCarriesTheSmokingGun(Base):
+    """反馈第一屏就该带一行"现场有没有那个停止请求文件"。
+
+    真事（2026-10-10）：用户报"点启动、登录上了、然后突然退了"，
+    我拿到的那份反馈里没有这行信息，只能顺着日志尾巴才看出来是上一轮的
+    停止请求把新后台干掉了。加上这行，同类问题一眼可辨。
+    """
+
+    def test_says_when_the_stop_file_is_there(self):
+        heartbeat.request_stop()
+
+        text = Api(self.store).feedback_report()["text"]
+
+        self.assertIn("停止请求文件：有", text)
+
+    def test_says_when_there_is_none(self):
+        heartbeat.clear_stop()
+
+        text = Api(self.store).feedback_report()["text"]
+
+        self.assertIn("停止请求文件：没有", text)
+
+    def test_carries_a_build_mark(self):
+        """构建标识必须有内容 —— 用户报问题时我第一眼就是看它。"""
+        text = Api(self.store).feedback_report()["text"]
+
+        self.assertIn("构建日期：", text)
+        self.assertNotIn("构建日期：\n", text)
+
+
 class StopSignalIsClearedOnStart(unittest.TestCase):
     """后台启动时必须清掉上一次的停止请求。
 

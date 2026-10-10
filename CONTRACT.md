@@ -1620,6 +1620,20 @@ Node 程序往里写会直接报错退出，现象是"点启动，几秒后 QQ �
 > · **登上了却一条消息都不来** → 页面上直接摊牌："一个群/私聊/收件箱都没勾，
 >   所以现在什么都收不到"（`_scope_summary()`），并指路去哪儿勾。
 
+### 十一、反馈箱要带"现场证据"（2026-10-10）
+
+用户发来一份反馈，第一行是 `构建日期：?` —— 打包版读不到 `run.py`（它在
+`_internal` 里），所以那一行永远是问号。我**没法一眼看出他装的是哪一版**，
+只能从他贴的日志尾巴里反推。
+
+两处补上：
+
+· 打包时在 exe 旁边写 `build-info.txt`（时间 + 提交号，工作区脏了会标出来），
+  反馈优先读它，读不到再退回文件修改时间；
+· 反馈里加一行 **`停止请求文件：有/没有`** —— 用户那次"点了启动、登录上了、
+  然后突然退了"，如果当时有这一行，一眼就能定位（就是第九节那个坑），
+  不用顺着一屏日志找。
+
 ### 实测（这次真跑了）
 
 ```
@@ -1633,8 +1647,8 @@ python tools/build_exe.py                → dist/私人秘书/，81 MB
 QQ 面板（真浏览器）：装着中 → 进度块 + 按钮灰掉；装完 → 进度块消失；
                     "登上了但一个群都没勾" → 弹出红字提示；
                     点「重新出码」→ 显示"正在等新的二维码"
-测试 455 条全绿（含 TestUiEntryPoint / TestProgressFile / TestStartShell /
-              StopSignalIsClearedOnStart）
+测试 458 条全绿（含 TestUiEntryPoint / TestProgressFile / TestStartShell /
+              StopSignalIsClearedOnStart / FeedbackCarriesTheSmokingGun）
 ```
 
 **没验的**：换一台**没装过 Python**的电脑（这才是真正的"零门槛"验收，
