@@ -303,6 +303,31 @@ def launch_command(shell_dir: Path, qq: int | None = None) -> list[str]:
     return [str(exe), str(qq)] if qq else [str(exe)]
 
 
+def start_shell(shell_dir: Path, qq: int | None = None,
+                log_path: Path | None = None):
+    """起 NapCat。**返回 Popen**。窗口藏起来，但输出写进日志文件。
+
+    为什么输出一定要有个去处（不能让它空着）：
+      窗口藏掉之后子进程没有控制台，标准输出就是个空句柄。有些程序
+      （NapCat 是 Node 写的）往里写会直接报错退出 —— 表现是"点启动，几秒后
+      QQ 掉线"。写进文件就没事，而且**看得懂**：控制台那个窗口的编码不对，
+      中文全是乱码，文件里是好的。
+    """
+    if log_path is None:
+        log_path = default_dir() / "napcat.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    sink = open(log_path, "a", encoding="utf-8", errors="replace")
+    try:
+        return subprocess.Popen(
+            launch_command(shell_dir, qq), cwd=str(shell_dir),
+            stdout=sink, stderr=subprocess.STDOUT,
+            creationflags=(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                           | no_window_flags()),
+        )
+    finally:
+        sink.close()          # 父进程这边关掉，子进程自己留着那个句柄
+
+
 def is_installed(onekey_dir: Path) -> bool:
     """装好了吗：有 Shell 目录、有启动器、有配置目录。"""
     shell = find_shell_dir(onekey_dir)

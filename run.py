@@ -488,11 +488,10 @@ def run_deploy(store, pipeline, account: int) -> int:
     # ② 再起 NapCat
     #    窗口藏起来：不藏的话用户点一下「启动 QQ」就蹦出两个终端，
     #    十有八九会以为是病毒弹的（二维码我们自己在界面里显示，不需要它那个窗）。
-    napcat = subprocess.Popen(
-        deploy.launch_command(shell), cwd=str(shell),
-        creationflags=(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-                       | deploy.no_window_flags()))
-    print(f"  NapCat 已启动（PID {napcat.pid}）")
+    #    它的输出照样留着（写 napcat.log）—— 窗口藏起来之后空句柄会让它报错退出。
+    napcat = deploy.start_shell(shell)
+    print(f"  NapCat 已启动（PID {napcat.pid}），它的输出在 "
+          f"{deploy.default_dir() / 'napcat.log'}")
     deploy.report("NapCat 已启动，等扫码登录", active=False)
 
     print()

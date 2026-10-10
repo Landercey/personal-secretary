@@ -169,6 +169,52 @@ class TestDownloadFallback(unittest.TestCase):
         self.assertEqual(len(tried), 1, "第一个成功了就别再试后面的")
 
 
+class TestStartShell(unittest.TestCase):
+    """起 NapCat：窗口藏起来，但**输出必须有个去处**。
+
+    为什么值得测：窗口藏掉之后子进程的标准输出会变成空句柄，
+    Node 写的程序（NapCat 就是）往里写会直接报错退出 —— 现象是
+    "点启动，几秒后 QQ 掉线"，而且一点错误信息都没有。
+    """
+
+    def test_output_goes_into_the_log_file(self):
+        import subprocess as sp
+
+        code = "import sys; print('NAPCAT-OK'); sys.stderr.write('ERR-OK\\n')"
+        original = deploy.launch_command
+        deploy.launch_command = lambda shell, qq=None: [sys.executable, "-c", code]
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                log = Path(tmp) / "napcat.log"
+                proc = deploy.start_shell(Path(tmp), log_path=log)
+                proc.wait(timeout=30)
+                text = log.read_text(encoding="utf-8", errors="replace")
+        finally:
+            deploy.launch_command = original
+
+        self.assertIn("NAPCAT-OK", text)
+        self.assertIn("ERR-OK", text, "stderr 也要收进去，别漏")
+
+    def test_window_is_hidden_and_output_is_wired(self):
+        """藏窗口 + 接输出，两件事都真的传给了 Popen（缺一个都会出乱码窗口/静默退出）。"""
+        import subprocess as sp
+
+        captured: dict = {}
+        real = deploy.subprocess.Popen
+        deploy.subprocess.Popen = lambda cmd, **kw: captured.update(kw) or None
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                deploy.start_shell(Path(tmp), log_path=Path(tmp) / "l.log")
+        finally:
+            deploy.subprocess.Popen = real
+
+        expected = (deploy.no_window_flags()
+                    | getattr(sp, "CREATE_NEW_PROCESS_GROUP", 0))
+        self.assertEqual(captured.get("creationflags"), expected)
+        self.assertIn("stdout", captured)
+        self.assertEqual(captured.get("stderr"), sp.STDOUT)
+
+
 class TestProgressFile(unittest.TestCase):
     """装 NapCat 时的进度：后台进程写、界面读，只能靠这个文件。
 
