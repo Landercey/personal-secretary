@@ -248,6 +248,41 @@ class TestInstallerOutput(unittest.TestCase):
         self.assertEqual(deploy.read_percent("999%"), 100)
 
 
+class TestOnebotConfigWatch(unittest.TestCase):
+    """盯着我们写的那份 OneBot 配置有没有被 NapCat 覆盖。
+
+    用户报的："扫码登录成功后要再点一次启动 QQ 才配置好。"
+    根因：首次登录时 NapCat 会用登录号**重建一份空白配置**，把我们写好的覆盖掉 ——
+    它那份没指向我们，于是永远连不上；再点一次「启动 QQ」我们才又写一遍。
+    现在部署循环一直看这份文件，被换掉就自动补好 + 重启一次。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.shell = fake_install(Path(self.tmp.name))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_our_config_is_recognised(self):
+        deploy.write_onebot_config(self.shell, 123456789, "tok-abc", 18080)
+        self.assertTrue(deploy.onebot_config_ok(self.shell, 123456789, "tok-abc", 18080))
+
+    def test_missing_file_is_a_problem(self):
+        self.assertFalse(deploy.onebot_config_ok(self.shell, 123456789, "tok-abc", 18080))
+
+    def test_blank_config_from_napcat_is_a_problem(self):
+        """NapCat 首次登录会写一份空的 —— 这正好是要自动补好的那一刻。"""
+        target = deploy.config_dir(self.shell) / "onebot11_123456789.json"
+        target.write_text('{"network": {}}', encoding="utf-8")
+        self.assertFalse(deploy.onebot_config_ok(self.shell, 123456789, "tok-abc", 18080))
+
+    def test_wrong_token_or_port_is_a_problem(self):
+        deploy.write_onebot_config(self.shell, 123456789, "tok-abc", 18080)
+        self.assertFalse(deploy.onebot_config_ok(self.shell, 123456789, "别的令牌", 18080))
+        self.assertFalse(deploy.onebot_config_ok(self.shell, 123456789, "tok-abc", 19999))
+
+
 class TestProgressFile(unittest.TestCase):
     """装 NapCat 时的进度：后台进程写、界面读，只能靠这个文件。
 

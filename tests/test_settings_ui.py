@@ -22,7 +22,9 @@ sys.path.insert(0, str(ROOT))
 
 from app.runtime.config import Config, DEFAULTS, coerce      # noqa: E402
 from app.runtime import heartbeat                             # noqa: E402
-from app.runtime.config import ADVANCED_KEYS, LOCKED_KEYS      # noqa: E402
+from app.runtime.config import (                                # noqa: E402
+    ADVANCED_KEYS, LOCKED_KEYS, RESTART_KEYS,
+)
 from app.ui.bridge import Api                                # noqa: E402
 
 # 必须按模块路径取，不能写 `from app.runtime import config` ——
@@ -193,6 +195,20 @@ class TestSchema(unittest.TestCase):
                 levels = [item["level"] for item in section["keys"]]
                 self.assertEqual(levels, sorted(levels, key=lambda x: x == "advanced"),
                                  f"{section['name']} 的字段顺序不对")
+
+    def test_restart_keys_are_declared_and_marked(self):
+        """改完要重启的项必须**在界面上标出来**。
+
+        用户原话："要重启的提醒力度小" —— 保存完弹一句"已保存"，
+        他以为立刻生效了，结果没反应。所以这些项要在清单里带 restart 标记，
+        界面保存后据此竖一条明显的警告 + 一键重启。
+        """
+        # 标的必须真存在，不然界面会以为某项要重启、其实它根本不在清单里
+        for path in RESTART_KEYS:
+            section, _, key = path.partition(".")
+            self.assertIn(key, DEFAULTS.get(section, {}), f"RESTART_KEYS 里有不存在的项：{path}")
+        marked = {path for path, item in self.fields.items() if item.get("restart")}
+        self.assertEqual(marked, set(RESTART_KEYS))
 
     def test_connection_settings_are_locked_with_a_reason(self):
         """监听地址/端口/路径/令牌由程序写进 NapCat 配置。

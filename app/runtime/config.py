@@ -398,6 +398,19 @@ LOCKED_KEYS: dict[str, str] = {
                 "要重新装一次 NapCat 才能对上。",
 }
 
+# **改完要重启才生效**的项。
+#
+# 为什么值得单独列出来：用户在界面上改完、点保存、弹一句"已保存"，
+# 然后以为立刻生效了 —— 结果没反应，只能来问作者或者骂程序。
+# （用户原话："要重启的提醒力度小"。）
+# 界面拿到这个标记之后，保存完会**在保存条那里竖一条明显的警告**，
+# 并给一个「现在重启后台」的按钮。
+RESTART_KEYS: frozenset[str] = frozenset({
+    # 端口/地址在接收端启动时就绑好了，改完不重启等于没改。
+    "qq.enabled", "qq.bind_host", "qq.bind_port", "qq.token", "qq.path",
+    "qq.account",
+})
+
 def _kind(value: Any) -> str:
     """这个配置项在界面上用什么控件。
 
@@ -606,6 +619,8 @@ class Config:
                 "hint": KEY_COMMENTS.get(full, ""),
                 "level": "advanced" if full in ADVANCED_KEYS else "common",
                 "locked": LOCKED_KEYS.get(full, ""),
+                # 改完要重启才生效的项：界面保存后会竖一条明显的提醒
+                "restart": full in RESTART_KEYS,
             })
         # 常用的排前面，高级的排后面 —— 界面上高级那几项要单独折叠起来
         keys.sort(key=lambda item: item["level"] == "advanced")

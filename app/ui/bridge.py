@@ -783,9 +783,14 @@ class Api:
                 shutil.copy2(path, target)    # 快捷方式指向的是用户的原件，只复制
         except OSError:
             target = path                     # 挪不动就用原地，总比入库失败强
-        added = self._act("ingest_file", str(target)) or 0
+        result = self._act("ingest_file", str(target))
+        if isinstance(result, dict):              # 新形状：带"为什么没读出"的原因
+            added = int(result.get("added") or 0)
+            notes = [str(item) for item in (result.get("notes") or [])]
+        else:                                     # 兜底：老装配只返回个数
+            added, notes = int(result or 0), []
         self._revision += 1
-        return {"ok": True, "added": added}
+        return {"ok": True, "added": added, "notes": notes}
 
     def peek_drop(self, token: str) -> dict:
         """只把文件里的字读出来，不入库（界面上"只看写了什么"）。

@@ -210,10 +210,13 @@ README_TXT = """私人秘书 —— 用前必看
    因为里面塞了一整个 QQ）。它跟你电脑上原本装的 QQ 是两份，互不影响；
    你想删掉它，就把整个文件夹删了 —— 不会在别处留东西。
 
-6. 第一次打开，界面中间会有一张「还没弄完这几步」的清单，
+6. 以后升级**不用重新安装**：拿到「补丁包-日期.zip」就关掉程序，
+   把它解压到这个文件夹里覆盖，再打开就行。你的配置、待办、下好的 QQ 都不动。
+
+7. 第一次打开，界面中间会有一张「还没弄完这几步」的清单，
    点哪一条就跳到对应的设置，跟着点完就能在手机上收到推送了。
 
-7. 收 QQ 消息要么用小号、要么用大号：小号封了不心疼，大号群都加好了但风险
+8. 收 QQ 消息要么用小号、要么用大号：小号封了不心疼，大号群都加好了但风险
    落在主号上。作者自己用的是大号，自从用到现在没出过事 —— 这是经验，
    不是保证。本工具只收不发，不会主动发任何 QQ 消息。
 """
@@ -268,6 +271,35 @@ def write_readme() -> None:
     print(f"已放好：{target.name}")
 
 
+def make_patch_zip(dist: Path | None = None) -> Path:
+    """打一个**只含程序文件**的补丁包（exe + `_internal/`），放在 dist 外面。
+
+    为什么要有这个（用户的诉求）：
+    "以后像这样的升级能不能不重新安装，比如拖入补丁啥的直接重新设好，
+    原本的配置不变。"
+
+    整包（81 MB，解压后 81 MB + 1.5 GB NapCat）复制一遍很烦；
+    而每次升级真正变的只有 `私人秘书.exe` 和 `_internal/` 里的东西。
+    用户那边的升级动作就变成：**关掉程序 → 把补丁包解压到软件文件夹（覆盖）
+    → 再打开**。`config.toml`、`data/`、`plugins/`、`napcat/` 都不在包里，
+    所以配置、待办、下好的 QQ 一个都不会动。
+    """
+    import zipfile
+
+    dist = dist or DIST
+    stamp = datetime.now().strftime("%Y%m%d-%H%M")
+    target = dist.parent / f"补丁包-{stamp}.zip"
+    items = [dist / f"{APP_NAME}.exe"]
+    internal = dist / "_internal"
+    if internal.is_dir():
+        items += [p for p in internal.rglob("*") if p.is_file()]
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path in items:
+            if path.is_file():
+                zf.write(path, path.relative_to(dist))
+    return target
+
+
 def write_build_info() -> None:
     """在 exe 边上写一行"这是哪一版"（时间 + 提交号）。
 
@@ -305,10 +337,13 @@ def main() -> int:
     write_readme()
     write_build_info()
     restore_user_data(hold)
+    patch = make_patch_zip()
     print()
     print("打包完成。软件就在这儿：")
     print(f"    {DIST}")
     print(f"（双击 {APP_NAME}.exe 就能用，桌面快捷方式已经建好了）")
+    print(f"升级用的小包（~{patch.stat().st_size / 1048576:.0f} MB）：{patch.name}")
+    print("    别人升级：把补丁包解压到软件文件夹里覆盖，配置和待办都不动。")
     return 0
 
 

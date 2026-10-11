@@ -86,6 +86,53 @@ class TestOtherSourcesStayStrict(unittest.TestCase):
         self.assertFalse(RuleParseEnricher._strict(msg))
 
 
+class TestIngestFileExplainsItself(unittest.TestCase):
+    """拖进去的文件没读出东西时，必须能**说清为什么**。
+
+    用户原话："我下完了发送一个 PPT，结果什么都没有读取。"
+    以前 `ingest` 只回一个数字（0）—— 为什么（旧版格式读不了 / 扫描件没有文字层 /
+    内容不像待办所以进了废件箱）全被丢掉，用户只能猜或者来问作者。
+    """
+
+    def setUp(self):
+        import run as run_module
+
+        self.run = run_module
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old_home = os.environ.get("SECRETARY_HOME")
+        os.environ["SECRETARY_HOME"] = self.tmp.name
+        self.store, self.source, self.pipeline, _sink, _reg = self.run.build(
+            Path(self.tmp.name) / "t.db")
+
+    def tearDown(self):
+        self.store.close()
+        if self._old_home is None:
+            os.environ.pop("SECRETARY_HOME", None)
+        else:
+            os.environ["SECRETARY_HOME"] = self._old_home
+        self.tmp.cleanup()
+
+    def write(self, name: str, payload: bytes) -> Path:
+        target = Path(self.tmp.name) / name
+        target.write_bytes(payload)
+        return target
+
+    def test_old_ppt_says_why_it_could_not_be_read(self):
+        target = self.write("旧课件.ppt", b"\xd0\xcf\x11\xe0" + b"0" * 64)
+
+        result = self.run.ingest_file(self.store, self.source, self.pipeline, str(target))
+
+        self.assertEqual(result["added"], 0)
+        self.assertTrue(any("旧版格式" in note for note in result["notes"]), result)
+
+    def test_a_real_todo_still_gets_created(self):
+        target = self.write("作业.txt", "明天下午三点交作业".encode("utf-8"))
+
+        result = self.run.ingest_file(self.store, self.source, self.pipeline, str(target))
+
+        self.assertEqual(result["added"], 1)
+
+
 class TestDropStaging(unittest.TestCase):
     """界面拖进来的文件：先落暂存，用户选了再干活。"""
 
@@ -124,7 +171,8 @@ class TestDropStaging(unittest.TestCase):
         staged = self.stage()
         result = self.api.ingest_drop(staged["id"])
 
-        self.assertEqual(result, {"ok": True, "added": 2})
+        # added = 建了几条；notes = 为什么（没读出东西时界面要拿它解释给用户听）
+        self.assertEqual(result, {"ok": True, "added": 2, "notes": []})
         self.assertEqual(len(self.seen), 1)
         archived = Path(self.seen[0])
         self.assertTrue(archived.is_file())

@@ -200,6 +200,20 @@ def explicit_file_message(source, path: str):
     return message
 
 
+def ingest_file(store, source, pipeline, path: str) -> dict:
+    """拖进来的文件走这条：除了"建了几条"，还要把**为什么没建**带回去。
+
+    只回一个数字的话，用户看到的就是"我把 PPT 拖进去了，结果什么都没读取"——
+    他分不清是文件里没字、格式不支持、还是内容不像待办（那样会进废件箱）。
+    理解层其实已经算出了原因（`message.raw["extract_notes"]`），
+    以前只是没人往界面上带。
+    """
+    message = explicit_file_message(source, path)
+    added = ingest_message(store, pipeline, message)
+    return {"added": added,
+            "notes": [str(item) for item in (message.raw.get("extract_notes") or [])]}
+
+
 def extract_preview(path: str) -> dict:
     """只把文件里的字读出来，不入库（界面上「只看写了什么」用）。
 
@@ -519,6 +533,7 @@ def run_deploy(store, pipeline, account: int) -> int:
     print("=" * 62)
 
     last_line = ""
+    repaired = 0
     try:
         while True:
             time.sleep(2)
@@ -529,6 +544,28 @@ def run_deploy(store, pipeline, account: int) -> int:
             if heartbeat.stop_requested():
                 print("  收到停止请求，收工。")
                 break
+
+            # ③ 盯着我们写的那份 OneBot 配置。
+            #    首次登录时 NapCat 会用登录号重建一份**空白**配置，把我们写好的覆盖掉 ——
+            #    它那份没指向我们，于是永远连不上，用户只能再点一次「启动 QQ」。
+            #    这里自动补好并重启一次（此时 QQ 已经登录，重启不用再扫码）。
+            if (not state.get("connected") and repaired < 2
+                    and not deploy.onebot_config_ok(shell, account, token, port)):
+                repaired += 1
+                print(f"  ⚠️ NapCat 自己重建了配置（首次登录就会这样），"
+                      f"已重新写好并重启它（第 {repaired} 次）")
+                deploy.write_onebot_config(shell, account, token, port)
+                deploy.report("NapCat 重建了配置，已自动补好并重启一次", active=False)
+                if napcat.poll() is None:
+                    napcat.terminate()
+                    try:
+                        napcat.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        napcat.kill()
+                napcat = deploy.start_shell(shell)
+                time.sleep(3)                  # 让它先起来，别立刻又判一次
+                continue
+
             if state.get("connected"):
                 line = (f"  [已连接] 登录号 {state.get('self_id') or '?'}｜"
                         f"收到 {state.get('received', 0)}｜收下 {state.get('accepted', 0)}｜"
@@ -607,8 +644,7 @@ def open_ui(store, source, pipeline, sink, registry) -> int:
     actions = {
         "add_text": lambda text: ingest(store, source, pipeline, text),
         "sync": lambda: sync_sources(store, pipeline, registry.sources),
-        "ingest_file": lambda path: ingest_message(
-            store, pipeline, explicit_file_message(source, path)),
+        "ingest_file": lambda path: ingest_file(store, source, pipeline, path),
         "read_file_text": extract_preview,
     }
 

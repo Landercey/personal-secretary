@@ -468,6 +468,8 @@ let qqTimer = null;         // 「QQ 接收」那一块的轮询（等二维码�
 let qrWaiting = 0;          // 点过「重新出码」之后：这段时间里说"正在等新码"，
                             // 不说"还没出二维码，点启动"（用户刚点完，会以为没生效）
 let settingsDirty = false;  // 设置页有没有没保存的改动（关掉窗口前要拦一下）
+let restartKeys = {};       // 要重启才生效的项：{路径: {label, was}}（保存时比原值）
+let pendingRestart = "";    // 存完之后要提醒用户重启的那句话（空 = 不用提醒）
 
 const $ = (id) => document.getElementById(id);
 
@@ -600,6 +602,7 @@ function renderPanel(force) {
   if (panel === 'qq') return drawQqPanel();
   if (panel === 'plugins') return drawPluginsPanel();
   if (panel === 'feedback') return drawFeedbackPanel();
+  if (panel === 'features') return drawFeaturesPanel();
   return drawDetail();
 }
 
@@ -901,7 +904,27 @@ function drawDrop() {
     if (isFile) {
       const res = await call('ingest_drop', d.id);
       if (!res) return;
-      toast(res.added ? `已建 ${res.added} 条待办` : '这份文件里没读出待办，进了废件箱');
+      // 没读出东西时**必须说清为什么** —— 只说"没读出待办"，
+      // 用户分不清是文件里没字、格式不支持、还是内容不像待办（用户报过）。
+      if (res.added) {
+        toast(`已建 ${res.added} 条待办`);
+        dropped = null; setPanel(null); refresh();
+        return;
+      }
+      const why = (res.notes || [])[0] || '文件里没找到像待办的内容';
+      $('dropOut').innerHTML = `
+        <div class="quote"><em>没读出待办</em>${esc(why)}</div>
+        <div class="acts" style="margin-top:12px">
+          <a class="block" id="dropJunk" style="cursor:pointer;color:var(--accent)">
+            它到底写了什么？去废件箱看一眼 ›</a>
+        </div>`;
+      $('dropJunk').onclick = () => {
+        dropped = null;
+        current = 'junk';
+        setPanel(null);
+        renderNav(); refresh();
+      };
+      return;
     } else {
       const res = await call('add_text', d.text);
       if (!res) return;
@@ -1080,6 +1103,14 @@ function drawSettings() {
        保存后大多数设置立刻生效；带「要重启」的那几项按提示重启。</p>
     <div class="tabs">${tabs}</div>
     ${panes}
+    ${pendingRestart ? `<div class="guide warn" id="restartWarn" style="margin-top:14px">
+         <p><b>⚠️ 还没生效</b>：${esc(pendingRestart)}</p>
+         <p class="hint">QQ 那段（端口/令牌/登录号）是在后台启动时读的，
+           NapCat 也不热读配置 —— 所以要重启一次后台。</p>
+         <div class="acts" style="margin-top:8px">
+           <button class="block" id="btnRestartNow">现在重启后台（几秒钟）</button>
+         </div>
+       </div>` : ''}
     <div class="savebar">
       <span class="hint" id="saveHint">改完点右边保存</span>
       <button class="primary" id="btnSave">保存</button>
@@ -1088,6 +1119,30 @@ function drawSettings() {
   $('detailInner').querySelectorAll('.tab').forEach(b =>
     b.onclick = () => activateTab(b.dataset.g));
   $('btnSave').onclick = saveSettings;
+  // 一键重启后台：QQ 那段配置改完必须重启才读得到。
+  // 复用「重新出码」那套（停 → 等它真退下去 → 起动），不另写一套。
+  const restartNow = $('btnRestartNow');
+  if (restartNow) restartNow.onclick = async () => {
+    restartNow.disabled = true;
+    toast('正在重启后台，几秒钟…');
+    await call('stop_background');
+    for (let i = 0; i < 12; i += 1) {
+      await new Promise(r => setTimeout(r, 1500));
+      const now = await call('qq_panel');
+      if (now && !(now.receiver || {}).alive) break;
+    }
+    const res = await call('start_qq');
+    pendingRestart = '';
+    toast((res && res.message) || '重启完了，改动生效');
+    drawSettings();
+  };
+  // 记下"要重启才生效"那几项的原值 —— 保存时比一下，变了就竖提醒。
+  // （用户原话："要重启的提醒力度小"。）
+  restartKeys = {};
+  for (const g of groups) for (const sec of g.sections) for (const k of sec.keys) {
+    if (!k.restart) continue;
+    restartKeys[`${sec.name}.${k.key}`] = { label: fieldLabel(k).label, was: k.value };
+  }
   // 有改动就提醒 —— 这句是给"滚下去改完、直接叉掉窗口"那种情况准备的。
   // 用委托：设置项的输入框是动态生成的，一个个挂监听容易漏。
   $('detailInner').addEventListener('input', markSettingsDirty);
@@ -1153,8 +1208,11 @@ function drawSettings() {
   const savebar = $('detailInner').querySelector('.savebar');
   (savebar || $('detailInner')).insertAdjacentHTML(savebar ? 'beforebegin' : 'beforeend',
     `<p class="hint" style="margin-top:18px;text-align:center">
+       <a id="featOpen" style="color:var(--accent);cursor:pointer">
+         🧭 这个软件能干什么？点这里看 ›</a><br>
        <a id="fbOpen" style="color:var(--accent);cursor:pointer">
          📮 用着哪里不对？点这里写反馈 ›</a></p>`);
+  $('featOpen').onclick = () => { setPanel('features'); renderPanel(true); };
   $('fbOpen').onclick = () => { setPanel('feedback'); renderPanel(true); };
 }
 
@@ -1163,6 +1221,19 @@ async function saveSettings() {
   $('detailInner').querySelectorAll('[data-path]').forEach(el => {
     updates[el.dataset.path] = el.type === 'checkbox' ? el.checked : el.value;
   });
+  // 比一下"要重启才生效"的那几项有没有真被改动 —— 改了就等会儿竖提醒。
+  // 为什么不能只看"保存里有这个键"：保存是把**所有**字段打包送出去的，
+  // 那样每次保存都会喊"要重启"，喊多了就等于没喊。
+  const touched = [];
+  $('detailInner').querySelectorAll('[data-path]').forEach(el => {
+    const info = restartKeys[el.dataset.path];
+    if (!info) return;
+    const now = el.type === 'checkbox'
+      ? String(el.checked) : String(el.value);
+    if (now.toLowerCase() !== String(info.was).toLowerCase()) touched.push(info.label);
+  });
+  pendingRestart = touched.length
+    ? `这几项改完要重启后台才生效：${touched.join('、')}` : '';
   const button = $('btnSave');
   button.disabled = true;
   const res = await call('save_settings', updates);
@@ -1366,6 +1437,36 @@ async function drawQqPanel() {
 /* ---------- 上手清单 ---------- */
 /* 意见反馈：生成一段**自动脱敏**的话，用户复制走。
    不做"帮我直接发出去" —— 没有服务器，而且自动上报会带走用户的群名和原文。 */
+/* 能干什么：一页把"这软件有哪些本事、怎么触发"说清楚。
+   为什么要有：用户的原话是"功能不知道有什么，比如我下完了发送一个 PPT，
+   结果什么都没有读取"—— 功能发现全靠猜，等于没做。放在设置最底下和
+   空列表提示里各一个入口。 */
+function drawFeaturesPanel() {
+  const rows = [
+    ['📋 三个入口', '左边「＋ 新建待办」粘一句话；把文件/一段字直接拖进窗口；发到你的 QQ 小号。'],
+    ['🔍 自动认时间', '「明天下午三点交作业」「周五前交到学习通」都会自己变成带时间的待办（规则识别，不联网）。'],
+    ['📄 文件也读', 'Word / PPT / Excel / PDF / 图片（系统 OCR）/ zip / xmind 拖进来就能读。读不出会告诉你为什么。'],
+    ['🖼️ 附件跟手机', '待办带着的图/文件会一起推到企业微信，手机上点开就能看。'],
+    ['⏰ 定时汇总', '默认早 07:30、晚 21:30 各推一次（设置里能改）；没收到还能看「最近推过什么」。'],
+    ['🧹 重复和噪声', '同一件事重复发只留一条；"哈哈""收到"这类闲聊不会变成待办；判错的在「废件箱」里能找到。'],
+    ['✅ 完成 / 归档 / 找回', '打勾进「已完成」，还能撤销；删错的去「废件箱」恢复。'],
+    ['🔌 插件', '课表（iCal/CSV/JSON）、AI 增强（长通知交给 AI 挑待办）已经自带；插件就是把 .py 拖进窗口。'],
+    ['🤖 小号当收件箱', '微信/短信里的通知截图发给小号，就自动变成待办（不过滤、连图里读出来的字也算）。'],
+    ['📱 QQ 接收', '左下角「📱 QQ 接收」：启动/停止后台、扫登录码、开机自启都在那儿。'],
+  ];
+  $('detailInner').innerHTML = `
+    <div class="panelhead"><h2>能干什么</h2></div>
+    <p class="note">都是已经能用的功能。用不上的不用管，不装插件也照常用。</p>
+    ${rows.map(([title, body]) => `
+      <div class="guide" style="margin:0 0 10px">
+        <h3>${esc(title)}</h3><p>${esc(body)}</p>
+      </div>`).join('')}
+    <p class="hint" style="margin-top:14px">
+      详细教程（从零到手机上收到第一条推送）在软件文件夹里的
+      <code>说明</code> 和 GitHub 的 README 里。</p>`;
+}
+
+
 function drawFeedbackPanel() {
   $('detailInner').innerHTML = `
     <div class="panelhead"><h2>意见反馈</h2></div>

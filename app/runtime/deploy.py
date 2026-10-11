@@ -327,6 +327,23 @@ def qr_path(shell_dir: Path) -> Path:
     return config_dir(shell_dir).parent / "cache" / "qrcode.png"
 
 
+def onebot_config_ok(shell_dir: Path, qq: int, token: str, port: int) -> bool:
+    """我们写的那份 OneBot 配置还在不在、还是不是我们写的。
+
+    **为什么必须盯着它**（用户报的"扫码登录成功后还要再点一次启动 QQ"）：
+    首次登录时 NapCat 会用登录号**重建一份空白配置**，把我们写好的那份覆盖掉 ——
+    它自己那份没有指向我们的地址，于是永远连不上；用户再点一次「启动 QQ」，
+    我们又写一遍，这次它读到了才通。
+    所以部署循环里要一直看这份文件：字被换掉了就重写 + 重启一次。
+    """
+    target = config_dir(shell_dir) / f"onebot11_{qq}.json"
+    try:
+        text = target.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return token in text and f":{port}" in text
+
+
 def clear_qr(shell_dir: Path) -> None:
     """删掉上一张二维码。重启后台之前调用。
 
