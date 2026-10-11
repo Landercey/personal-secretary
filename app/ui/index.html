@@ -1141,7 +1141,10 @@ function drawSettings() {
   restartKeys = {};
   for (const g of groups) for (const sec of g.sections) for (const k of sec.keys) {
     if (!k.restart) continue;
-    restartKeys[`${sec.name}.${k.key}`] = { label: fieldLabel(k).label, was: k.value };
+    // 只要第一句：像「监听端口。和 NapCat 那边配的端口要一致。」这种提示，
+    // 整句塞进警告里读着别扭。
+    const label = fieldLabel(k).label.split('。')[0];
+    restartKeys[`${sec.name}.${k.key}`] = { label, was: k.value };
   }
   // 有改动就提醒 —— 这句是给"滚下去改完、直接叉掉窗口"那种情况准备的。
   // 用委托：设置项的输入框是动态生成的，一个个挂监听容易漏。

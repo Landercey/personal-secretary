@@ -54,7 +54,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = "私人秘书"
-DIST = ROOT / "dist" / APP_NAME
+# 默认打进 dist/；临时想打到别处（比如用户正开着 dist 里那份、锁着数据库），
+# 就设 SECRETARY_BUILD_DIST=别的目录。这时**不会**去动桌面快捷方式 ——
+# 那个必须指向用户真正在用的安装目录。
+_OUT_ROOT = Path(os.environ.get("SECRETARY_BUILD_DIST") or (ROOT / "dist"))
+DIST = _OUT_ROOT / APP_NAME
 EXE = DIST / f"{APP_NAME}.exe"
 
 # 用户自己的东西：重打包时会被 PyInstaller 连带删掉，所以要挪到一边再挪回来。
@@ -119,6 +123,9 @@ def build() -> None:
         # 中间产物放到 build/ 里，别把项目根目录弄乱
         "--workpath", str(ROOT / "build"),
         "--specpath", str(ROOT / "build"),
+        # 产物目录必须显式给：不给的话 PyInstaller 永远写 cwd 下的 dist/，
+        # 上面那个 SECRETARY_BUILD_DIST 就只对我自己的后处理生效了（踩过）。
+        "--distpath", str(_OUT_ROOT),
         "--collect-data", "zhconv",
     ]
     for src, dest in DATA_FILES:
@@ -180,6 +187,9 @@ def make_shortcut() -> None:
     注意是**让 exe 自己去建**（`--shortcut`），不是这边代劳：
     这样验证的正好是用户点那个按钮时走的同一条路。
     """
+    if _OUT_ROOT != ROOT / "dist":
+        print("（这次打在别处，跳过桌面快捷方式 —— 它该指向用户真正在用的那份）")
+        return
     proc = subprocess.run([str(EXE), "--shortcut"], cwd=str(DIST),
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace", timeout=120,
