@@ -65,6 +65,9 @@ ORDER = 90          # 规则解析是 10/20，AI 排在最后（先有草稿，�
 # 推送那边靠它标【AI 整理，可能有误】。
 AI_CONFIDENCE = 0.6
 MAX_INPUT_CHARS = 4000      # 再长的正文只送前这么多字，不然费钱又慢
+# 一次回答最多读这么大。正常一次函数调用就几 KB —— 上限是为了防
+# "地址填错指到别的东西上"（那个东西可能回几十 MB，直接把内存吃掉）。
+MAX_RESPONSE_BYTES = 1024 * 1024
 
 _SYSTEM = """你是一个待办抽取器。只做一件事：从用户给的中文内容里挑出「明确写了要做的事」。
 
@@ -200,7 +203,7 @@ def call_model(text: str) -> str:
         method="POST")
     timeout = float(config.get("ai", "timeout_seconds", 60) or 60)
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        body = json.loads(response.read().decode("utf-8", "replace"))
+        body = json.loads(response.read(MAX_RESPONSE_BYTES).decode("utf-8", "replace"))
     add_usage(int((body.get("usage") or {}).get("total_tokens") or 0))
     choices = body.get("choices") or [{}]
     return str((choices[0].get("message") or {}).get("content") or "")

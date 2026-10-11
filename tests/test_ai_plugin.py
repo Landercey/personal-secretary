@@ -299,6 +299,23 @@ class TestDegradation(Base):
 
         self.assertEqual(AI.used_today(), 120)      # 假接口每次报 120
 
+    def test_a_huge_broken_response_does_not_blow_up(self):
+        """地址填错、指到别的东西上时，对面可能回几十 MB。
+
+        上限是 1 MB：超了就读一半 → JSON 解析失败 → 走失败兜底。
+        重点是**不崩、不把内存吃掉**，而不是"一定要读懂"。
+        """
+        self.turn_on()
+        FakeModel.answers = ["x" * (3 * 1024 * 1024)]
+
+        result = AI.AiEnricher().process(self.message, [])
+
+        self.assertEqual(len(result), 1)                  # 保底那条，不是崩掉
+        self.assertIn("AI 没连上", result[0].title)
+
+    def test_response_bigger_than_the_cap_is_truncated(self):
+        self.assertEqual(AI.MAX_RESPONSE_BYTES, 1024 * 1024)
+
 
 class TestWiring(unittest.TestCase):
     """插件能不能被插件系统正常加载、注册到管线上。"""
