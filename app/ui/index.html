@@ -258,6 +258,9 @@ button:disabled { opacity: .5; cursor: default }
 .savebar .hint { flex: 1; margin: 0; font-size: 11px }
 .savebar button.dirty { box-shadow: 0 0 0 3px rgba(91, 91, 214, .18) }
 .savebar .dirtytext { color: var(--accent) }
+/* 安装进度条：安装器自己报百分比时才有（它不报的那一段就不画，不糊弄） */
+.pbar { height: 6px; margin: 8px 0 6px; border-radius: 3px; background: #e8e8ee; overflow: hidden }
+.pbar i { display: block; height: 100%; background: var(--accent); transition: width .4s }
 .savepath { font-size: 11px; color: var(--text-3); line-height: 1.6; margin: 0 0 14px; word-break: break-all }
 .note { font-size: 12px; color: var(--text-2); line-height: 1.8; margin: 0 0 14px }
 
@@ -1226,10 +1229,13 @@ async function drawQqPanel() {
     : (qr.ready
         ? `<p class="hint">二维码已经 ${Math.max(1, Math.round((qr.age_seconds || 0) / 60))} 分钟了，
              多半过期了。点「重新出码」拿一张新的。</p>`
-        : (receiver.alive || qrWaiting
+        : (progress.active
+            ? `<p class="hint">装完它才会出二维码 —— 上面那块进度走完就有了，
+                 那时候这一页会自己刷新。</p>`
+            : (receiver.alive || qrWaiting
             ? `<p class="hint">⏳ 正在等新的二维码……NapCat 起来之后十几秒才写出图，
                  这一页会自己刷新（旧码在重启时已经删掉了，不会拿一张过期的糊弄你）。</p>`
-            : '<p class="hint">还没出二维码。点下面「启动 QQ」—— 第一次会先自动下载安装 NapCat（约几十秒）。</p>'));
+            : '<p class="hint">还没出二维码。点下面「启动 QQ」—— 第一次会先自动下载安装 NapCat（约几分钟）。</p>')));
 
   // 登上了却一条消息都不来 —— 十有八九是"一个群都没勾"。
   // 这时候最该说的不是"正在收消息"，而是"你现在什么都收不到，去勾群"。
@@ -1263,9 +1269,14 @@ async function drawQqPanel() {
   const progressBlock = progress.active
     ? `<div class="guide" style="margin:0 0 12px">
          <p><b>⏳ ${esc(progress.text || '正在装 NapCat…')}</b></p>
-         <p class="hint">已经等了 ${waitedText}。这一步没有进度条 ——
-           是官方安装器在下载 QQ（约 300 MB），它自己不报数。
-           <b>别关窗口、别重复点</b>，装完这一块会自己消失。</p>
+         ${progress.percent != null
+            ? `<div class="pbar"><i style="width:${Math.max(2, Math.min(100, progress.percent))}%"></i></div>`
+            : ''}
+         <p class="hint">已经等了 ${waitedText}。${
+           progress.percent != null
+             ? `安装器自己报的进度是 ${progress.percent}%（下 QQ 那一步走完还有解压）。`
+             : '这一段它不报数，等下一段就有进度条了。'}<b>别关窗口、别重复点</b>，
+           装完这一块会自己消失。</p>
        </div>`
     : '';
 

@@ -413,9 +413,9 @@ def run_setup(onekey_dir: Path, account: int, token: str, port: int,
     # 装的过程要几分钟，而界面是**另一个进程** —— 所以每报一句都顺手写进
     # deploy.progress.json，界面那边每 5 秒读一次，用户就能看见"到哪一步了"。
     if notify is None:
-        def notify(text: str) -> None:        # noqa: F811
+        def notify(text: str, percent: int | None = None) -> None:   # noqa: F811
             print(text)
-            deploy.report(text)
+            deploy.report(text, percent=percent)
 
     onekey_dir.mkdir(parents=True, exist_ok=True)
     if deploy.is_installed(onekey_dir):
@@ -474,9 +474,9 @@ def run_deploy(store, pipeline, account: int) -> int:
     port = int(config.get("qq", "bind_port", 18080) or 18080)
 
     if not deploy.is_installed(onekey_dir):
-        def tick(text: str) -> None:
+        def tick(text: str, percent: int | None = None) -> None:
             print(text)
-            deploy.report(text)
+            deploy.report(text, percent=percent)
             # 一边装着一边报心跳：不然界面认为"后台没在跑"，
             # 用户再点一次「启动 QQ」就会**第二个进程在同一份目录上再装一遍**。
             heartbeat.beat(store, "正在安装 NapCat", force=True)

@@ -215,6 +215,39 @@ class TestStartShell(unittest.TestCase):
         self.assertEqual(captured.get("stderr"), sp.STDOUT)
 
 
+class TestInstallerOutput(unittest.TestCase):
+    """安装器的输出：编码要认对，进度要抠出来。
+
+    用户报的乱码就是这么来的：这些第三方 exe 在中文 Windows 上按 **GBK** 输出，
+    我们按 UTF-8 读 → 一屏"�"。而它其实在报进度（`26% [<====>] (78MB/300MB)`），
+    读串了不光难看，还把进度条一起弄丢了。
+    """
+
+    def test_gbk_bytes_are_readable(self):
+        line = "下载 QQ 26% (78MB/300MB)".encode("gbk")
+
+        self.assertIn("下载 QQ", deploy.decode_output(line))
+        self.assertIn("26%", deploy.decode_output(line))
+
+    def test_utf8_still_works(self):
+        self.assertEqual(deploy.decode_output("解压中".encode("utf-8")), "解压中")
+
+    def test_broken_bytes_do_not_raise(self):
+        self.assertTrue(deploy.decode_output(b"\xff\xfe\x00bad"))
+
+    def test_percent_from_the_percent_sign(self):
+        self.assertEqual(deploy.read_percent("下载 QQ 26% [<======>] (78MB/300MB)"), 26)
+        self.assertEqual(deploy.read_percent("100%"), 100)
+        self.assertIsNone(deploy.read_percent("正在解压…"))
+
+    def test_percent_computed_from_sizes_when_no_sign(self):
+        self.assertEqual(deploy.read_percent("(150MB/300MB)"), 50)
+        self.assertIsNone(deploy.read_percent("(0MB/0MB)"))
+
+    def test_percent_is_clamped(self):
+        self.assertEqual(deploy.read_percent("999%"), 100)
+
+
 class TestProgressFile(unittest.TestCase):
     """装 NapCat 时的进度：后台进程写、界面读，只能靠这个文件。
 
@@ -242,6 +275,13 @@ class TestProgressFile(unittest.TestCase):
         self.assertTrue(data["active"])
         self.assertEqual(data["text"], "正在装 NapCat")
         self.assertIn("started", data)
+
+    def test_percent_travels_to_the_ui(self):
+        """安装器报的百分比要一路带到界面（不然进度条画不出来）。"""
+        deploy.report("下载 QQ 26%", percent=26)
+        self.assertEqual(deploy.read_progress()["percent"], 26)
+        deploy.report("正在解压")
+        self.assertIsNone(deploy.read_progress()["percent"])
 
     def test_started_time_is_kept_across_reports(self):
         """连着报好几条时，"这轮从什么时候开始"不能被刷掉（不然"已等多久"永远归零）。"""

@@ -36,6 +36,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import threading
 import time
@@ -72,7 +73,7 @@ def progress_path() -> Path:
     return default_data_dir() / PROGRESS_NAME
 
 
-def report(text: str, active: bool = True) -> None:
+def report(text: str, active: bool = True, percent: int | None = None) -> None:
     """把"现在干到哪一步了"写下来给界面看。写不进去就算了，不能拖垮安装。"""
     path = progress_path()
     started = time.time()
@@ -82,7 +83,7 @@ def report(text: str, active: bool = True) -> None:
             started = float(old["started"])      # 保留"这一轮从什么时候开始的"
     except (OSError, ValueError):
         pass
-    payload = {"text": text, "active": active,
+    payload = {"text": text, "active": active, "percent": percent,
                "started": started, "at": time.time()}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -169,35 +170,79 @@ def extract(zip_path: Path, dest_dir: Path,
     return dest_dir
 
 
+def read_percent(line: str) -> int | None:
+    """从安装器那行输出里抠出百分比。抠不出来返回 None。
+
+    实测它打的是这种（中文按 GBK 输出，读串了就是乱码）：
+
+        下载 QQ 26% [<======>] (78MB/300MB)
+
+    所以两条路都试：先找 `26%`，没有就按 `78MB/300MB` 自己算。
+    """
+    text = str(line or "")
+    found = re.search(r"(\d{1,3})\s*%", text)
+    if found:
+        return max(0, min(100, int(found.group(1))))
+    size = re.search(r"(\d+(?:\.\d+)?)\s*MB\s*/\s*(\d+(?:\.\d+)?)\s*MB", text)
+    if size:
+        done, total = float(size.group(1)), float(size.group(2))
+        if total > 0:
+            return max(0, min(100, int(done * 100 / total)))
+    return None
+
+
+def decode_output(raw: bytes) -> str:
+    """把子进程吐的一行字节变成字。
+
+    为什么要自己判：这些第三方 exe 在中文 Windows 上按 **GBK** 输出，
+    我们按 UTF-8 读就会得到一屏"�"（用户拍过照片来报这个）。
+    先按 UTF-8 严格试，不行再按 GBK，都不行才用替换字符兜底。
+    """
+    for codec in ("utf-8", "gbk"):
+        try:
+            return raw.decode(codec)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", "replace")
+
+
 def run_installer(onekey_dir: Path,
-                  on_progress: Callable[[str], None] | None = None,
+                  on_progress: Callable[..., None] | None = None,
                   timeout: float = 1800.0) -> None:
     """跑官方安装器：它自己下 QQ + NapCat 并合并成一个目录。
 
     实测要几分钟（300 MB + 28 MB），超时给到 30 分钟。
     · 它在结束时等一个按键才退出，所以喂一个回车进去；
     · **窗口藏起来**（见 `no_window_flags`）—— 蹦黑框比慢更吓人；
-    · **它自己不给进度条**，所以每 30 秒报一句"已经等了 X 分 Y 秒"，
-      用户至少知道没卡死（有真进度可报的时候再报百分比，不糊弄）。
+    · **它其实报进度**（`26% [<====>] (78MB/300MB)`），只是中文按 GBK 输出、
+      不看清楚就漏过去了。所以这里既转它的话，也把百分比抠出来给界面画进度条；
+      抠不出来的阶段，每 30 秒报一句"已经等了 X 分 Y 秒"兜底。
     """
     installer = onekey_dir / "NapCatInstaller.exe"
     if not installer.is_file():
         raise RuntimeError(f"一键包里没有安装器：{installer}")
     if on_progress:
-        on_progress("运行官方安装器（它自己下 QQ 约 300 MB，这几分钟没有进度条，别关窗口）…")
+        on_progress("运行官方安装器（它自己下 QQ 约 300 MB，别关窗口）…")
     proc = subprocess.Popen(
         [str(installer)], cwd=str(onekey_dir),
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, encoding="utf-8", errors="replace",
+        # 读**字节**、自己判编码：第三方 exe 在中文系统上按 GBK 吐字，
+        # 交给 Popen 按 UTF-8 解就是一屏乱码（用户报过）。
+        text=False,
         creationflags=no_window_flags(),
     )
 
     def pump() -> None:
         """安装器自己吐出来的话转给调用方 —— 有就赚了，没有也不等它。"""
-        for line in proc.stdout or []:
-            line = line.strip()
-            if line and on_progress:
+        for raw in proc.stdout or []:
+            line = decode_output(raw).strip()
+            if not line or not on_progress:
+                continue
+            percent = read_percent(line)
+            if percent is None:
                 on_progress(f"  {line[:200]}")
+            else:
+                on_progress(f"  {line[:200]}", percent)
 
     threading.Thread(target=pump, daemon=True).start()
     try:
