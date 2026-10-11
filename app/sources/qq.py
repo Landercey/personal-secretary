@@ -41,6 +41,7 @@ import asyncio
 import hashlib
 import ipaddress
 import json
+import os
 import re
 import secrets
 import threading
@@ -61,7 +62,7 @@ from ..contracts.models import (
     TIME_FORMAT,
     Message,
 )
-from ..runtime.config import config, default_data_dir
+from ..runtime.config import attachments_dir, config, default_data_dir
 from .manual import build_attachment
 
 # 来源标识。QQ 一个源会产出两种消息：
@@ -81,8 +82,13 @@ KIND_PRIVATE = "private"
 # 换成不在沙盒里跑时，NapCat 给的路径本来就是真实路径，第一段就能命中，
 # 这两组映射用不上（所以留着也不碍事）。
 # ---------------------------------------------------------------------------
-SANDBOX_DRIVE_ROOTS = (Path(r"C:\Sandbox\user\QQNapCat\drive"),)
-SANDBOX_USER_ROOTS = (Path(r"C:\Sandbox\user\QQNapCat\user"),)
+# 沙箱根目录按**当前用户名**推出来（Sandboxie 的默认布局就是
+# `C:\Sandbox\<用户名>\<沙箱名>\...`）。以前这里把作者自己的路径写死了：
+# 别人机器上根本不存在，而且等于把作者的用户名写进了公开仓库。
+SANDBOX_BOX = "QQNapCat"
+_SANDBOX_HOME = Path(r"C:\Sandbox") / (os.environ.get("USERNAME") or "")
+SANDBOX_DRIVE_ROOTS = (_SANDBOX_HOME / SANDBOX_BOX / "drive",)
+SANDBOX_USER_ROOTS = (_SANDBOX_HOME / SANDBOX_BOX / "user",)
 
 # 认得出后缀的才留，避免把随机命名的临时文件当图片存下来
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
@@ -331,7 +337,7 @@ def file_refs(event: dict[str, Any]) -> list[dict[str, str]]:
 
 def attachment_dir() -> Path:
     """附件存哪儿。跟着数据目录走（绿色版就是程序旁边的 data/attachments）。"""
-    target = default_data_dir() / "attachments"
+    target = attachments_dir()
     target.mkdir(parents=True, exist_ok=True)
     return target
 

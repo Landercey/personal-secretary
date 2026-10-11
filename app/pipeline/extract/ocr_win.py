@@ -76,8 +76,15 @@ def clean(text: str) -> str:
     return "\n".join(out_lines)
 
 
-def recognize(image_path: str | Path, timeout: float = 180.0) -> ExtractResult:
+def recognize(image_path: str | Path, timeout: float | None = None) -> ExtractResult:
     """识别一张图片，返回清理后的文本。"""
+    # 超时从 config.toml 的 [extract] ocr_timeout_seconds 来。
+    # 以前这里写死 180 —— 用户改了那个开关是不生效的（而且项目自己的规矩
+    # 就是"业务代码里不许有裸数字"，这是漏掉的一处）。
+    if timeout is None:
+        from ...runtime.config import config
+
+        timeout = float(config.get("extract", "ocr_timeout_seconds", 180) or 180)
     path = Path(image_path)
     if not available():
         return ExtractResult(method="win_ocr", note="系统 OCR 不可用（缺 PowerShell 或脚本）")
@@ -122,7 +129,7 @@ def recognize(image_path: str | Path, timeout: float = 180.0) -> ExtractResult:
     )
 
 
-def recognize_pil(image, timeout: float = 180.0) -> ExtractResult:
+def recognize_pil(image, timeout: float | None = None) -> ExtractResult:
     """给 PDF 扫描件用：把内存里的图片临时落盘再识别。
 
     系统 OCR 只认文件路径，不认内存里的图片对象，所以要先存一次。

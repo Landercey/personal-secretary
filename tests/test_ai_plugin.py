@@ -267,6 +267,30 @@ class TestDegradation(Base):
         self.assertEqual(result, self.rules)
         self.assertIn("ai_error", self.message.raw)
 
+    def test_fallback_when_ai_is_down_and_rules_found_nothing(self):
+        """契约里的保底：AI 用不了、规则又一条都没读出来 → **不能什么都不给**。
+
+        一条长通知，规则没读懂、AI 又断线。以前的结果是"这条就这么没了"，
+        用户根本不知道发生过。现在至少摆一条出来让他看一眼原文。
+        """
+        self.turn_on(base_url="http://127.0.0.1:9/v1", timeout_seconds=2)
+
+        made = AI.AiEnricher().process(self.message, [])       # 规则 0 条
+
+        self.assertEqual(len(made), 1)
+        self.assertIn("AI 没连上", made[0].title)
+        self.assertEqual(made[0].detail, " ".join(LONG_TEXT.split())[:300])
+        self.assertEqual(made[0].confidence, 1.0, "这是原文照抄，不能标成 AI 整理的")
+        self.assertEqual(made[0].origin_msg_id, "qq_group:1")
+
+    def test_fallback_length_comes_from_config(self):
+        self.turn_on(base_url="http://127.0.0.1:9/v1", timeout_seconds=2)
+        self.config.set("push", "fallback_text_chars", 20)
+
+        made = AI.AiEnricher().process(self.message, [])
+
+        self.assertEqual(len(made[0].detail), 20)
+
     def test_usage_is_counted_so_the_budget_works(self):
         self.turn_on()
         FakeModel.answers = ["[]"]

@@ -121,10 +121,8 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "resource": {
         "mem_critical_percent": 88,
-        "mem_resume_percent": 75,
     },
     "risk": {
-        "require_secondary_account": True,
         "confirmed_secondary_account": False,
     },
     "wecom_bot": {
@@ -165,7 +163,6 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "only_mention": False,            # true = 群里只有 @我 的消息才收
         # ===== 安全阀 =====
         "max_text_chars": 3000,           # 单条消息最多留多少字，防超长轰炸
-        "keep_every_message": False,      # true = 连闲聊也存进库（排查用，平时关着）
     },
     # 课表插件的设置。插件在 plugins/timetable.py；不用它的话这一段留空就行。
     "timetable": {
@@ -292,10 +289,8 @@ KEY_COMMENTS: dict[str, str] = {
     "ai.token_budget_per_day": "每天最多用多少 token，0 = 不限制。超了这天就不再用 AI。",
     # [resource]
     "resource.mem_critical_percent": "内存占用超过这个百分比时，只记待办不分析不推送（别在打游戏时抢资源）。",
-    "resource.mem_resume_percent": "内存降到这个百分比以下，恢复正常工作。",
     # [risk]
-    "risk.require_secondary_account": "启动时必须确认「我用的是小号」。别关。",
-    "risk.confirmed_secondary_account": "你已经确认过了。程序自己写的，不用管。",
+    "risk.confirmed_secondary_account": "风控提示确认过没有。程序自己写的，不用管。",
     # [wecom_bot]
     "wecom_bot.enabled": "改成 true 才会真的推送。没配好时推送会打印在屏幕上，不会静默丢消息。",
     "wecom_bot.webhook": "企业微信群的 Webhook 地址，整条贴进来。\n"
@@ -325,7 +320,6 @@ KEY_COMMENTS: dict[str, str] = {
                     "#      因为那是你专门记给自己的，机器不该替你判断值不值得。",
     "qq.only_mention": "true = 群里只有 @我 的消息才收。群太吵可以打开。",
     "qq.max_text_chars": "单条消息最多保留多少字，防超长内容刷屏。",
-    "qq.keep_every_message": "true = 连判为闲聊的消息也存进库（排查「为什么没收下」时用）。",
     # [timetable] 课表插件
     "timetable.url": "课表订阅地址（iCal / .ics）。留空 = 不用这个。\n"
                      "#   手机课表 App（WakeUp / 小爱 / 超级课程表）里找「导出 / 分享」，\n"
@@ -382,7 +376,7 @@ SECTION_GROUPS: tuple[tuple[str, str, str, tuple[tuple[str, str, str], ...]], ..
 # 一般不用动的东西。界面上折进每段底部的「高级」里，默认收起 ——
 # 一屏塞 60 个框，用户不知道哪个能碰、哪个碰了会出事。
 ADVANCED_KEYS: frozenset[str] = frozenset({
-    "qq.max_text_chars", "qq.keep_every_message",
+    "qq.max_text_chars",
     "parse.merge_window_seconds", "parse.due_default_hour",
     "extract.ocr_engine", "extract.max_pages", "extract.render_scale",
     # AI 这两项一般不用动：短于多少字才问 AI、等多久算超时。
@@ -403,18 +397,6 @@ LOCKED_KEYS: dict[str, str] = {
     "qq.token": "程序自动生成，并写进 NapCat 的配置。在这儿改，"
                 "要重新装一次 NapCat 才能对上。",
 }
-
-# 功能**还没做**的配置段。界面上不显示任何输入框，只留一句实话。
-#
-# 为什么不干脆把这些字段删掉：用户会以为"这功能本来就没有"，
-# 而不是"还没做"。留一句说明，他知道以后会有。
-# 为什么不显示输入框：**填了不生效，比没有更伤信任** ——
-# 他会以为是自己的配置写错了，然后来问作者。
-#
-# 做完了就把对应的那行删掉，界面上的输入框会自己出现（清单是照 DEFAULTS 生成的）。
-PENDING_SECTIONS: dict[str, str] = {
-}
-
 
 def _kind(value: Any) -> str:
     """这个配置项在界面上用什么控件。
@@ -611,13 +593,6 @@ class Config:
         return groups
 
     def _section_entry(self, section: str, title: str, desc: str) -> dict[str, Any]:
-        # 还没做的段：一个输入框都不给，只带一句实话。
-        # 给框子的话用户会去填，填完什么都不会发生 —— 那比没有这个功能更糟。
-        pending = PENDING_SECTIONS.get(section, "")
-        if pending:
-            return {"name": section, "title": title, "desc": desc,
-                    "pending": pending, "keys": []}
-
         keys = []
         # **按 DEFAULTS 里的书写顺序**，不按字母排。那个顺序是照着"用户填的
         # 先后"手写出来的（总开关 → 地址 → 密钥 → 模型），字母序会把
@@ -634,8 +609,7 @@ class Config:
             })
         # 常用的排前面，高级的排后面 —— 界面上高级那几项要单独折叠起来
         keys.sort(key=lambda item: item["level"] == "advanced")
-        return {"name": section, "title": title, "desc": desc,
-                "pending": "", "keys": keys}
+        return {"name": section, "title": title, "desc": desc, "keys": keys}
 
     def set(self, section: str, key: str, value: Any) -> None:
         """改一项配置，并写回 config.toml。
@@ -750,6 +724,15 @@ def default_config_path() -> Path:
 
 def default_data_dir() -> Path:
     return default_root() / "data"
+
+
+def attachments_dir() -> Path:
+    """附件落在哪：`data/attachments/`。
+
+    以前这个路径在三处各写了一遍（QQ 来源、界面拖拽、存储清理）——
+    清理那次差点写成别的目录，那就是"该删的没删、不该删的删了"。
+    """
+    return default_data_dir() / "attachments"
 
 
 # 全局默认实例。业务代码 import 这个用，别自己 new。

@@ -251,7 +251,7 @@ class AiEnricher(DraftEnricher):
             why = f"{type(exc).__name__}: {exc}"
             message.raw.setdefault("ai_error", why)
             note_problem(f"AI 用不了，这次走了规则解析：{why}")
-            return drafts
+            return drafts or [self._fallback(message, text)]
 
         items = _json_array(answer)
         if not items:
@@ -283,6 +283,29 @@ class AiEnricher(DraftEnricher):
             ))
         note_problem("")
         return made or drafts
+
+    def _fallback(self, message, text: str) -> TaskDraft:
+        """AI 用不了、规则又一条都没产出时的**保底**。
+
+        契约里写着"不能让 AI 出错变成什么都没收到"：一条长通知既没被规则读懂、
+        AI 又没连上，那就把原文前 [push] fallback_text_chars 个字摆成一条，
+        用户至少知道"有这么一条没读成"，而不是彻底丢失。
+
+        故意**不**打【AI】标：这不是 AI 整理的，是原文照抄。
+        """
+        limit = int(config.get("push", "fallback_text_chars", 300) or 300)
+        body = " ".join(str(text or "").split())
+        quotes = int(config.get("push", "quote_max_chars", 80) or 80)
+        return TaskDraft(
+            title=f"看一眼这条（{len(body)} 字，AI 没连上）",
+            detail=body[:limit],
+            source_kind=message.source_kind,
+            source_name=message.source_name,
+            sender=message.sender,
+            origin_msg_id=message.msg_id,
+            attachments=list(message.attachments),
+            quoted=message.quote(quotes),
+        )
 
 
 def register(registry) -> None:

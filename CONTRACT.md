@@ -662,7 +662,7 @@ leave，只看布尔值提示会一闪一闪。
 
 ```
 快捷方式存在: True
-指向: C:\Users\user\Documents\Codex\2026-09-18\...\抗美援朝...最终.pptx
+指向: C:\Users\<用户名>\...\作业最终.pptx
 是个文件吗: True ｜ 大小: 753334
 解析: 成功 ｜ 方法: stdlib.pptx ｜ 说明: Python 标准库直接读取
 前 120 字: '军事理论课 / MILITARY THEORY 胜利之钥 … 1950 到 1953 …'

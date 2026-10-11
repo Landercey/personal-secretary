@@ -161,6 +161,7 @@ def ingest_message(store, pipeline, message) -> int:
             attached = store.attach_message_files(recent.task_id, prepared)
             print(f"  ↳ 合并到刚才那条「{recent.title}」（挂了 {attached} 个附件）")
             store.purge_old_dropped()
+            store.purge_old_attachments()
             return 0
 
     # 被闲聊过滤器挡下的
@@ -176,6 +177,9 @@ def ingest_message(store, pipeline, message) -> int:
         store.log_dropped_text(line, "碎片：摘掉时间后没内容",
                                prepared.source_kind, prepared.source_name, prepared.msg_id)
     store.purge_old_dropped()
+    # 顺手把过期附件（图片/文件）清掉：这个开关以前只写在文档里，
+    # 代码从来没读过，结果是"承诺 30 天清理，实际永远不清理"。
+    store.purge_old_attachments()
     return len(stored)
 
 
@@ -860,6 +864,7 @@ def main(argv: list[str] | None = None) -> int:
         account = args.account or int(config.get("qq", "account", 0) or 0)
         if not account:
             print("要装哪个号？加一个参数，例如：")
+            # 用一眼假号做例子：文档/帮助里的号码不该是作者自己的号
             print("    python run.py --deploy --account 123456789")
             print("    （或者在 config.toml 的 [qq] account 里填一次，以后不用再带参数）")
             return 1
@@ -963,8 +968,8 @@ def _selftest() -> int:
         # 打包脚本的验证步骤当场抓住了它。
         "ai": ["enabled", "allow_upload", "base_url", "api_key", "model",
                "mode", "min_chars", "timeout_seconds", "token_budget_per_day"],
-        "resource": ["mem_critical_percent", "mem_resume_percent"],
-        "risk": ["require_secondary_account"],
+        "resource": ["mem_critical_percent"],
+        "risk": ["confirmed_secondary_account"],
     }
     for section, keys in required.items():
         for key in keys:

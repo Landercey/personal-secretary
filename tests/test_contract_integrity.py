@@ -77,8 +77,8 @@ class TestConfig(unittest.TestCase):
         # 另加两道隐私闸（enabled + allow_upload）。
         "ai": ["enabled", "allow_upload", "base_url", "api_key", "model",
                "mode", "min_chars", "timeout_seconds", "token_budget_per_day"],
-        "resource": ["mem_critical_percent", "mem_resume_percent"],
-        "risk": ["require_secondary_account"],
+        "resource": ["mem_critical_percent"],
+        "risk": ["confirmed_secondary_account"],
         "wecom_bot": ["enabled", "webhook", "max_per_minute", "timeout"],
     }
 

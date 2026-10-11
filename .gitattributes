@@ -1,0 +1,21 @@
+# 统一换行符。不写这个的话，Windows 上每次提交都会看到一片
+# "LF will be replaced by CRLF"，diff 里全是噪音，评审时看不出真正的改动。
+* text=auto
+
+# 源码统一用 LF（跨平台工具链都认）。
+*.py   text eol=lf
+*.html text eol=lf
+*.js   text eol=lf
+*.css  text eol=lf
+*.md   text eol=lf
+*.toml text eol=lf
+*.sql  text eol=lf
+*.ps1  text eol=crlf
+
+# 二进制别去猜换行、也别尝试合并。
+*.ico  binary
+*.png  binary
+*.jpg  binary
+*.webp binary
+*.zip  binary
+*.exe  binary

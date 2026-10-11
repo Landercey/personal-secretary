@@ -42,7 +42,7 @@ from ..contracts.models import (
     Task,
     TaskDraft,
 )
-from ..runtime.config import config
+from ..runtime.config import attachments_dir, config
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
@@ -680,6 +680,52 @@ class SqliteStore(Store):
         with self.conn:
             cursor = self.conn.execute("DELETE FROM dropped_items WHERE dropped_at < ?", (cutoff,))
         return int(cursor.rowcount or 0)
+
+    @_synchronized
+    def purge_old_attachments(self) -> int:
+        """删掉过期附件的文件和记录。返回删了几个。
+
+        保留天数在 config.toml 的 [store] attachment_retention_days（默认 30 天，
+        0 = 永不删）。**这个开关以前只在文档里，代码根本没读** —— 结果是
+        "附件永远不会被清理"，用半年这个文件夹能长到几个 G。
+
+        三条安全线：
+          1. 只删**已经没有未完成待办指着**的（做完 / 归档 / 判成误判的才动）；
+          2. 只删**附件目录里面**的文件 —— 库里那串路径万一被人改过，
+             不能拿着它去删别处的文件；
+          3. 文件删了记录也删掉，界面上就不会留一个点不开的附件。
+        待办本身留着（标题、原文、推送记录都还在），只是图片/文件没了。
+        """
+        days = int(config.get("store", "attachment_retention_days", 30) or 0)
+        if days <= 0:
+            return 0
+        cutoff = (datetime.now() - timedelta(days=days)).strftime(TIME_FORMAT)
+        rows = self.conn.execute(
+            """
+            SELECT a.attachment_id, a.path FROM attachments a
+              JOIN tasks t ON t.task_id = a.task_id
+             WHERE t.created_at < ?
+               AND (t.status <> 'open' OR t.is_archived = 1)
+            """, (cutoff,)).fetchall()
+        if not rows:
+            return 0
+
+        root = attachments_dir().resolve()
+        removed = 0
+        with self.conn:
+            for row in rows:
+                raw = str(row["path"] or "")
+                if raw:
+                    try:
+                        target = Path(raw).resolve()
+                        if target.is_relative_to(root) and target.is_file():
+                            target.unlink()
+                    except OSError:
+                        pass          # 删不掉就留着记录，下次再说
+                self.conn.execute("DELETE FROM attachments WHERE attachment_id=?",
+                                  (int(row["attachment_id"]),))
+                removed += 1
+        return removed
 
     @_synchronized
     def stats(self) -> dict[str, int]:

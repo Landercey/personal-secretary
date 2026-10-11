@@ -7,10 +7,21 @@ data/
 *.db-wal
 *.db-shm
 
+# 收 QQ 消息时自动装的东西（约 1.5 GB，而且里面有登录状态）。
+# 不写这一行的话，哪天一个 `git add -A` 就能把自己那份 QQ 连着聊天数据
+# 一起提交上去 —— 仓库直接废掉（GitHub 单文件上限 100 MB，推都推不上去）。
+napcat/
+
 # 打包产物
 build/
 dist/
 *.spec
+
+# 日志和临时文件
+*.log
+*.tmp
+Thumbs.db
+desktop.ini
 
 # Python
 __pycache__/
@@ -21,7 +32,3 @@ venv/
 # 编辑器
 .vscode/
 .idea/
-
-# 系统
-Thumbs.db
-desktop.ini

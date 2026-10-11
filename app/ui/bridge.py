@@ -767,11 +767,11 @@ class Api:
         """
         import shutil
 
-        from ..runtime.config import default_data_dir
+        from ..runtime.config import attachments_dir
 
         staged = self._drop_path(token)
         path, _note = self._dropped_file(token)
-        archive = default_data_dir() / "attachments"
+        archive = attachments_dir()
         archive.mkdir(parents=True, exist_ok=True)
         # 文件名沿用暂存的那个"时间戳-指纹-原名"，重名也不会互相覆盖
         prefix = "-".join(staged.name.split("-", 2)[:2])
