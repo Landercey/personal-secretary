@@ -24,9 +24,12 @@
 · 单文件 exe 是"自解压"行为，杀软误报率明显更高。
 绿色文件夹"复制走就能用"，代价只是多一层 `_internal`。
 
-⚠️ **重新打包会删掉 `dist/私人秘书/` 整个文件夹**（PyInstaller 的行为）。
-里面有你自己的待办和附件 —— 要重新打包之前，先把 `dist/私人秘书` 复制到
-别处，或者只打包、别用它当日常在用的那一份。
+⚠️ **重新打包会删掉 `dist/私人秘书/` 整个文件夹**（PyInstaller 的行为），
+里面有你自己的待办、附件、填好的配置、下好的 NapCat（约 1.5 GB）——
+所以打完包会**自动把它们挪回来**（见 `stash_user_data`）。
+
+⚠️ 另外：打包时**不能开着这个程序**（它锁着 `data/secretary.db`，
+Windows 不让删，PyInstaller 会报"另一个程序正在使用此文件"而失败）。
 
 =====================================================================
 打包时容易踩的三个坑（都在下面处理了）
@@ -43,6 +46,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -52,6 +56,9 @@ ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = "私人秘书"
 DIST = ROOT / "dist" / APP_NAME
 EXE = DIST / f"{APP_NAME}.exe"
+
+# 用户自己的东西：重打包时会被 PyInstaller 连带删掉，所以要挪到一边再挪回来。
+KEEP_ACROSS_BUILD = ("config.toml", "data", "plugins", "napcat")
 
 # 不是 .py、但程序运行时要读的文件。左边是项目里的路径，右边是打包后 `_internal` 里的位置。
 DATA_FILES = [
@@ -212,6 +219,48 @@ README_TXT = """私人秘书 —— 用前必看
 """
 
 
+def stash_user_data(dist: Path | None = None) -> Path | None:
+    """把用户自己的东西挪到 `dist/.keep/`，返回那个目录（没有东西可挪就 None）。
+
+    PyInstaller 打包时会**删掉整个 `dist/私人秘书/`** —— 用户填好的 config.toml、
+    待办附件、还有下好的 NapCat（约 1.5 GB）全在里面。作者自己就踩过：
+    重打一次包，昨天刚装好的环境没了。
+
+    同一块盘内改名是秒级的，1.5 GB 也不会真的复制一份。
+    """
+    dist = dist or DIST
+    if not dist.is_dir():
+        return None
+    names = [name for name in KEEP_ACROSS_BUILD if (dist / name).exists()]
+    if not names:
+        return None
+    hold = dist.parent / f".keep-{APP_NAME}"
+    if hold.exists():
+        shutil.rmtree(hold, ignore_errors=True)         # 上一次失败留下的
+    hold.mkdir(parents=True)
+    for name in names:
+        shutil.move(str(dist / name), str(hold / name))
+    return hold
+
+
+def restore_user_data(hold: Path | None, dist: Path | None = None) -> None:
+    """把 `stash_user_data` 挪走的东西放回去。
+
+    **不覆盖**新打出来的同名文件：新包里有 plugins/ 这类目录时不至于把
+    用户那份盖掉（用户的数据永远优先）。
+    """
+    if hold is None or not hold.is_dir():
+        return
+    dist = dist or DIST
+    dist.mkdir(parents=True, exist_ok=True)
+    for item in hold.iterdir():
+        target = dist / item.name
+        if target.exists():
+            continue
+        shutil.move(str(item), str(target))
+    shutil.rmtree(hold, ignore_errors=True)
+
+
 def write_readme() -> None:
     """在 exe 边上放一张"用前必看"。用普通文本，双击就能看，不挑软件。"""
     target = DIST / "用前必看.txt"
@@ -249,11 +298,13 @@ def write_build_info() -> None:
 
 def main() -> int:
     check_inputs()
+    hold = stash_user_data()
     build()
     verify()
     make_shortcut()
     write_readme()
     write_build_info()
+    restore_user_data(hold)
     print()
     print("打包完成。软件就在这儿：")
     print(f"    {DIST}")
