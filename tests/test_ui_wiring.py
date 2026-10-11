@@ -69,6 +69,20 @@ class TestWiring(unittest.TestCase):
                        'id="riskMask"', 'id="guide"', 'id="dropHint"'):
             self.assertIn(anchor, self.html)
 
+    def test_settings_save_bar_is_at_the_bottom(self):
+        """保存按钮必须贴底、不许钉在标题旁边。
+
+        用户报的两条：钉在顶上会和关闭的 ✕ 挤在一起；而且改完下面几段
+        还得滚回顶上点它 —— 滚着滚着就忘了保存。所以：
+        按钮在 `.savebar` 里（sticky 贴底）、有"还没保存"的提醒、
+        叉掉窗口前会问一句。
+        """
+        for anchor in (".savebar", 'id="btnSave"', 'id="saveHint"',
+                       "settingsDirty", "markSettingsDirty", "window.confirm"):
+            self.assertIn(anchor, self.html)
+        # 保存按钮不能再出现在设置页的标题行里
+        self.assertNotIn('<h2>设置</h2><button', self.html)
+
     def test_drag_and_drop_is_wired(self):
         """拖文件进窗口 → 弹"怎么处理"的面板。
 

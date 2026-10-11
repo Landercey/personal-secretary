@@ -244,6 +244,20 @@ button:disabled { opacity: .5; cursor: default }
 /* ---------- 设置面板 ---------- */
 .panelhead { display: flex; align-items: center; gap: 10px; margin-bottom: 4px }
 .panelhead h2 { margin: 0; flex: 1 }
+/* 保存条贴在右栏**底部**。
+   以前那个「保存」钉在标题旁边：既和右上角的关闭 ✕ 挤在一起，
+   改完下面几段又得一路滚回顶上才点得到 —— 滚着滚着就忘了保存。 */
+.savebar {
+  position: sticky; bottom: 0; z-index: 3;
+  /* 底部不要再吃负边距：吃掉了它就会浮上来压住上面那条反馈链接（实测差 4px） */
+  margin: 18px -20px 0; padding: 12px 20px 14px;
+  background: var(--panel); border-top: 1px solid var(--line);
+  display: flex; align-items: center; gap: 10px;
+}
+.savebar button { flex: none; padding: 7px 16px; border-radius: 8px }
+.savebar .hint { flex: 1; margin: 0; font-size: 11px }
+.savebar button.dirty { box-shadow: 0 0 0 3px rgba(91, 91, 214, .18) }
+.savebar .dirtytext { color: var(--accent) }
 .savepath { font-size: 11px; color: var(--text-3); line-height: 1.6; margin: 0 0 14px; word-break: break-all }
 .note { font-size: 12px; color: var(--text-2); line-height: 1.8; margin: 0 0 14px }
 
@@ -450,6 +464,7 @@ let viewHint = '';          // 标题旁边那句小提示
 let qqTimer = null;         // 「QQ 接收」那一块的轮询（等二维码出来）
 let qrWaiting = 0;          // 点过「重新出码」之后：这段时间里说"正在等新码"，
                             // 不说"还没出二维码，点启动"（用户刚点完，会以为没生效）
+let settingsDirty = false;  // 设置页有没有没保存的改动（关掉窗口前要拦一下）
 
 const $ = (id) => document.getElementById(id);
 
@@ -586,6 +601,12 @@ function renderPanel(force) {
 }
 
 function closePanel() {
+  // 设置页有没保存的改动就先问一句 —— 直接叉掉等于白改，用户会以为程序吞了。
+  if (panel === 'settings' && settingsDirty
+      && !window.confirm('改动还没保存，关掉就丢了。\n确定关掉吗？')) {
+    return;
+  }
+  settingsDirty = false;
   selected = null;
   editing = false;
   setPanel(null);
@@ -1051,15 +1072,24 @@ function drawSettings() {
     </div>`).join('');
 
   $('detailInner').innerHTML = `
-    <div class="panelhead"><h2>设置</h2><button class="primary" id="btnSave">保存</button></div>
+    <div class="panelhead"><h2>设置</h2></div>
     <p class="savepath">改动写回：${esc(schema.path)}<br>
        保存后大多数设置立刻生效；带「要重启」的那几项按提示重启。</p>
     <div class="tabs">${tabs}</div>
-    ${panes}`;
+    ${panes}
+    <div class="savebar">
+      <span class="hint" id="saveHint">改完点右边保存</span>
+      <button class="primary" id="btnSave">保存</button>
+    </div>`;
 
   $('detailInner').querySelectorAll('.tab').forEach(b =>
     b.onclick = () => activateTab(b.dataset.g));
   $('btnSave').onclick = saveSettings;
+  // 有改动就提醒 —— 这句是给"滚下去改完、直接叉掉窗口"那种情况准备的。
+  // 用委托：设置项的输入框是动态生成的，一个个挂监听容易漏。
+  $('detailInner').addEventListener('input', markSettingsDirty);
+  $('detailInner').addEventListener('change', markSettingsDirty);
+  settingsDirty = false;
   wireUnlock();
 
   // 「推送到手机」那一页底部挂一条推送记录。
@@ -1115,8 +1145,10 @@ function drawSettings() {
     }
   }
 
-  // 设置面板最底下挂一个反馈入口 —— 用着不爽的时候第一反应就是来设置里找
-  $('detailInner').insertAdjacentHTML('beforeend',
+  // 设置面板最底下挂一个反馈入口 —— 用着不爽的时候第一反应就是来设置里找。
+  // ⚠️ 必须插在**保存条前面**：保存条是 sticky 的，插在它后面会被压在底下。
+  const savebar = $('detailInner').querySelector('.savebar');
+  (savebar || $('detailInner')).insertAdjacentHTML(savebar ? 'beforebegin' : 'beforeend',
     `<p class="hint" style="margin-top:18px;text-align:center">
        <a id="fbOpen" style="color:var(--accent);cursor:pointer">
          📮 用着哪里不对？点这里写反馈 ›</a></p>`);
@@ -1133,11 +1165,23 @@ async function saveSettings() {
   const res = await call('save_settings', updates);
   button.disabled = false;
   if (!res) return;
+  settingsDirty = false;
   toast('已保存');
   schema = null;                 // 重新读一遍，让界面显示真正写进去的值
   drawnPanel = null;
   renderPanel(true);
   refresh();
+}
+
+function markSettingsDirty() {
+  settingsDirty = true;
+  const hint = $('saveHint');
+  const button = $('btnSave');
+  if (hint && !hint.dataset.on) {
+    hint.dataset.on = '1';
+    hint.innerHTML = '<span class="dirtytext">有改动还没保存</span>';
+  }
+  if (button) button.classList.add('dirty');
 }
 
 function openSettings(section) {
