@@ -8,7 +8,7 @@
     python tools/make_icon.py                 # 用 assets/logo.png，没有就画兜底
     python tools/make_icon.py --source 某图.png   # 换个源图
 
-`assets/logo.png` 是**为本项目画的原创小鱼**（见 Work 里的 draw_logo.py），
+`assets/logo.png` 是**为本项目专门做的图**（2026-10-12 换成蓝色对话框 + 对勾），
 随 MIT 许可证一起授权，随便用。
 
 （历史提醒：更早的版本用过网上找的同人作品，2026-10-12 换掉了 —— 自己电脑上
@@ -36,7 +36,9 @@ EYE = (37, 34, 90, 255)          # 眼睛：深靛蓝，不用纯黑
 SIZES = (16, 24, 32, 48, 64, 128, 256)
 
 # 源图里水印占的那一条。裁掉它，不修图 ——
-# 那块背景是纯白，裁掉完全不碰人物（人物底部到 y=1131，水印从 y≈1165 开始）。
+# 那块背景是纯白，裁掉不碰图案。
+# ⚠️ 这个高度是**按某一张源图量出来的**：换源图时先看一眼水印从哪一行开始，
+# 数字对不上就把水印带进图标里了。
 WATERMARK_TOP = 1160
 
 
@@ -51,7 +53,8 @@ def cut_watermark(im: Image.Image) -> Image.Image:
     return im
 
 
-def drop_white_background(im: Image.Image, light_threshold: int = 235) -> Image.Image:
+def drop_white_background(im: Image.Image, light_threshold: int = 235,
+                          noise_floor: float = 12.0) -> Image.Image:
     """白底 → 透明，并且**不留白边**。
 
     =====================================================================
@@ -100,6 +103,11 @@ def drop_white_background(im: Image.Image, light_threshold: int = 235) -> Image.
     rgb, alpha = arr[:, :, :3], arr[:, :, 3]
     whiteness = rgb.min(axis=2) / 255.0            # 1=纯白
     new_alpha = np.where(background, (1.0 - whiteness) * 255.0, alpha)
+    # JPEG 的白底**不是纯白**：噪点算出来是一层 alpha 3~8 的雾。
+    # 不砍掉的话下一步 getbbox() 会以为整张画布都是内容、裁边白做 ——
+    # 表现是图标缩成"一整张白图中间一个小小的图案"。
+    # 5% 以下一律当没有；真边缘的半透明像素在 50 以上，砍不到。
+    new_alpha = np.where(background & (new_alpha < noise_floor), 0.0, new_alpha)
 
     safe = np.maximum(new_alpha, 1.0)[:, :, None] / 255.0
     matte = (1.0 - safe) * 255.0                   # 混进去的那层白

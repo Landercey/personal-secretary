@@ -115,7 +115,8 @@ EXCLUDES = [
 def check_inputs() -> None:
     icon = ROOT / "assets" / "app.ico"
     if not icon.is_file():
-        raise SystemExit(f"找不到图标：{icon}\n（图标就是打包进 exe 的那条小肥鱼）")
+        raise SystemExit(f"找不到图标：{icon}\n"
+                         "（图标由 tools/make_icon.py 生成，先跑那个）")
     missing = [src for src, _ in DATA_FILES if not (ROOT / src).exists()]
     if missing:
         raise SystemExit("这些要一起打包的文件不见了：" + "、".join(missing))
