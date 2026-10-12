@@ -1,0 +1,53 @@
+name: 报个 bug
+description: 有东西没按预期工作（打不开、收不到消息、推不出去…）
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        谢谢你来报。**先做一件事**：打开程序 → 左下角「📮 用着哪里不对？点这里写反馈」，
+        它会生成一段**已经脱敏过**的环境信息（密钥、群号、QQ 号都换掉了）。
+        把那段整个粘到第 1 栏，能省掉我好几个来回。
+  - type: textarea
+    id: feedback
+    attributes:
+      label: 程序生成的反馈信息
+      description: 就是左下角那段，整个粘进来。粘不全也没关系，有几行是几行。
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: what
+    attributes:
+      label: 你做了什么，结果是什么
+      description: 越具体越好，比如「我把一个 PPT 拖进窗口，它立刻显示里面没内容」
+    validations:
+      required: true
+  - type: textarea
+    id: expect
+    attributes:
+      label: 你本来期待它怎么做
+    validations:
+      required: false
+  - type: dropdown
+    id: channel
+    attributes:
+      label: 推送走的是哪个通道
+      options:
+        - 企业微信机器人
+        - 钉钉
+        - 飞书
+        - 微信（PushPlus）
+        - iPhone（Bark）
+        - 还没配 / 不知道
+        - 跟推送没关系
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: 还想补充的
+      description: 截图可以直接拖进来。要是有报错文字，原样贴，别翻译。
+    validations:
+      required: false

@@ -1,0 +1,4 @@
+# 这个文件让仓库页右上角长出一个「Sponsor」按钮，点进去就是爱发电。
+# GitHub 只认它自己那几家的平台名（github / patreon / ko_fi…），
+# 爱发电不在其中，所以走 custom —— 值必须是一条完整网址。
+custom: ["https://afdian.com/a/landercey"]

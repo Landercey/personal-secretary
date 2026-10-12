@@ -1,0 +1,36 @@
+name: 想要个功能
+description: 提一个具体的场景。我会每条都读，但不保证会做
+title: "[功能] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先说清楚：**我会读，但不保证会做** —— 这个项目是我一个人在做，我还要上课。
+        写得越像"具体场景"，我越容易判断要不要做、怎么做。
+  - type: textarea
+    id: scene
+    attributes:
+      label: 你的场景
+      description: 别写「希望功能更强大」。写你现在怎么用的、哪里卡住了。
+      placeholder: |
+        我们班群每周日发一张值日表图片。现在能读出来，但 7 行值日被拆成了 7 条待办，
+        我希望一张表只变成一条。
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: 你现在是怎么绕过去的
+      description: 这条很有用 —— 如果已经有能忍的绕法，这事可能没那么急。
+    validations:
+      required: false
+  - type: checkboxes
+    id: agree
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我知道这个功能不一定会被做
+          required: true
+        - label: 我搜过 Issues，没人提过一样的
+          required: true

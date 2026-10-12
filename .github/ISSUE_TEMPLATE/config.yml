@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 装不起来 / 不知道怎么用
+    url: https://github.com/Landercey/personal-secretary#readme
+    about: README 里的「下载」「第一次用？看这个」「不用企业微信也能收」三节，先照着走一遍
+  - name: 被杀毒软件拦了 / 双击没反应
+    url: https://github.com/Landercey/personal-secretary#readme
+    about: 程序没做代码签名，误报是常事 —— README 里有一节专门讲怎么处理
