@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -251,6 +252,54 @@ class TestPushRecords(unittest.TestCase):
         self.store.log_push("a", "fake", True, "1")
         self.store.log_push("b", "fake", True, "2")
         self.assertEqual(self.store.recent_pushes()[0]["batch"], "b")
+
+
+class TestDigestSaysWhatReceiverIsDoing(unittest.TestCase):
+    """推送里要写明"收消息那边现在什么状态"。
+
+    用户原话："我软件没登录，怎么一直有推送。" 推送本来就与登录无关
+    （推的是你的待办汇总），但不写清楚就会让人以为程序在瞎推。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old = os.environ.get("SECRETARY_HOME")
+        os.environ["SECRETARY_HOME"] = self.tmp.name
+        self.store = SqliteStore(open_database(Path(self.tmp.name) / "p.db"))
+        self.sink = FakeSink()
+
+    def tearDown(self):
+        self.store.close()
+        if self._old is None:
+            os.environ.pop("SECRETARY_HOME", None)
+        else:
+            os.environ["SECRETARY_HOME"] = self._old
+        self.tmp.cleanup()
+
+    def deliver(self):
+        job = sch.Scheduler(self.store, self.sink)
+        job._deliver(sch.Slot(when=at("2026-10-08 07:30"), label="07:30",
+                              batch="2026-10-08 07:30", title="今天要做的"))
+        return self.sink.sent[-1].body
+
+    def test_says_so_when_not_logged_in(self):
+        from app.runtime import heartbeat
+
+        heartbeat.beat(self.store, "等扫码登录", force=True)
+
+        body = self.deliver()
+        self.assertIn("等扫码登录", body)
+        # 还要说清"是哪一份在推" —— 装了两份的话，这是唯一能一眼分辨的线索，
+        # 而且用户名要打码（推送会落到群里）
+        self.assertIn("这份汇总来自", body)
+        self.assertNotIn(os.environ["USERNAME"], body)
+
+    def test_no_note_when_actually_connected(self):
+        from app.runtime import heartbeat
+
+        heartbeat.beat(self.store, "登录号 123456789｜收到 3", force=True)
+
+        self.assertNotIn("收消息那边现在的状态", self.deliver())
 
 
 if __name__ == "__main__":

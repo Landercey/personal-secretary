@@ -264,6 +264,9 @@ def run_qq(store, pipeline) -> int:
     """
     settings = QQSettings.from_config()
     heartbeat.clear_stop()      # 清掉上次留下的停止请求，不然一起来就退出
+    if not heartbeat.claim_single_instance():
+        print("⚠️ 已经有一个后台在跑了（同一个数据目录），这个就不重复起了。")
+        return 1
     if not settings.enabled:
         print("QQ 接入没有启用。")
         print("打开 config.toml，把 [qq] 下面的 enabled 改成 true，再运行一次。")
@@ -594,6 +597,11 @@ def run_serve(store, pipeline, sink, account: int | None = None) -> int:
     定时推送本来就跑在自己的线程里（`Scheduler.start()`），塞进来很自然。
     """
     background_prelude()
+    # 只允许一个后台：不然开机自启那份 + 手动点的那份会各推各的（用户报过）。
+    if not heartbeat.claim_single_instance():
+        print("⚠️ 已经有一个后台在跑了（同一个数据目录），这个就不重复起了。")
+        print("   它可能是开机自启拉起来的。要换成这个，先在界面上点「停止后台」。")
+        return 1
     scheduler = None
     if config.get("push", "enabled", True) and parse_times_or_empty():
         scheduler = Scheduler(store, sink, on_event=lambda text: print(f"  [推送] {text}"))

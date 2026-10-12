@@ -41,6 +41,7 @@ from ..contracts.models import TIME_FORMAT
 
 KEY = "receiver_beat"
 STOP_FILE = "stop.request"
+LOCK_FILE = "serve.lock"
 
 # 超过这么多秒没有心跳，就认为它没在跑。
 # 60 秒是"收消息的循环每 10 秒写一次"的 6 倍余量 —— 机器卡一下也不至于误报。
@@ -119,3 +120,55 @@ def clear_stop() -> None:
         (default_data_dir() / STOP_FILE).unlink()
     except OSError:
         pass
+
+
+# 同一个数据目录只允许一个后台进程 —— 独占锁的句柄留在这儿（活着就一直占着）。
+_lock_handle = None
+
+
+def claim_single_instance() -> bool:
+    """抢"这个数据目录的后台"这把椅子。抢到返回 True，别人已经在跑返回 False。
+
+    **为什么必须有**（用户报的"软件没登录却一直有推送"）：开机自启那份
+    `--serve` 和手动点「启动 QQ」那份可以同时在跑 —— 界面那个按钮只拦得住
+    它自己那条路，拦不住自启那条。两个后台各有一个定时器，同一批待办就可能
+    被推两遍；而且它们还会抢同一个 18080 端口，第二个其实是"半死"状态：
+    收不到消息、但推送照发。
+
+    做法：Windows 的文件独占锁（`msvcrt`）。锁跟着**进程**走 ——
+    进程一死（哪怕是崩的）系统自动放锁，不会留下"上次没退干净、
+    这次永远起不来"的死锁文件。
+    """
+    global _lock_handle
+    if _lock_handle is not None:
+        return True                     # 本进程已经拿过了
+    import msvcrt
+
+    from .config import default_data_dir
+
+    folder = default_data_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    handle = open(folder / LOCK_FILE, "a+b")
+    try:
+        handle.seek(0)
+        handle.write(b"1")              # 锁一个真实存在的字节，别锁到 EOF 外面
+        handle.flush()
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        handle.close()
+        return False
+    _lock_handle = handle
+    return True
+
+
+def release_single_instance() -> None:
+    """放掉那把椅子（给测试用；正常跑时进程一退系统就自动放了）。"""
+    global _lock_handle
+    if _lock_handle is None:
+        return
+    try:
+        _lock_handle.close()
+    except OSError:
+        pass
+    _lock_handle = None

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -150,7 +151,12 @@ class TestDocumentMerging(unittest.TestCase):
         drafts = parse(HOMEWORK_ONE, from_file=True)
         self.assertEqual(len(drafts), 1, "只有一项作业，不该切成三条")
         self.assertEqual(drafts[0].title, "提交实验报告")
-        self.assertTrue(drafts[0].due_at.startswith("2026-10-12"), drafts[0].due_at)
+        # 「下周一」按**今天**算 —— 写死日期的话，过一个周末这条就会红
+        # （2026-10-12 周一当天就红过一次）。
+        today = datetime.now().date()
+        next_monday = today + timedelta(days=(7 - today.weekday()) % 7 or 7)
+        self.assertTrue(drafts[0].due_at.startswith(next_monday.isoformat()),
+                        drafts[0].due_at)
 
     def test_two_homework_items_split(self):
         """真的有两项作业时要拆开 —— 别把整份合成一条。"""

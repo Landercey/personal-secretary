@@ -114,6 +114,51 @@ class FeedbackCarriesTheSmokingGun(Base):
         self.assertNotIn("构建日期：\n", text)
 
 
+class TestSingleBackground(unittest.TestCase):
+    """同一个数据目录只允许一个后台在跑。
+
+    用户报的："软件没登录却**一直有推送**"。推送跟登录没关系，它只跟
+    "有几个后台在跑"有关：开机自启那份 + 手动点的那份各有一个定时器，
+    同一批待办会被推两遍；而且第二个进程抢不到 18080 端口，属于
+    "收不到消息但推送照发"的半死状态，最难查。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old = os.environ.get("SECRETARY_HOME")
+        os.environ["SECRETARY_HOME"] = self.tmp.name
+
+    def tearDown(self):
+        heartbeat.release_single_instance()
+        if self._old is None:
+            os.environ.pop("SECRETARY_HOME", None)
+        else:
+            os.environ["SECRETARY_HOME"] = self._old
+        self.tmp.cleanup()
+
+    def test_first_claim_wins_and_the_lock_file_is_created(self):
+        self.assertTrue(heartbeat.claim_single_instance())
+        self.assertTrue((Path(self.tmp.name) / "data" / "serve.lock").is_file())
+
+    def test_a_second_handle_cannot_take_the_same_lock(self):
+        """真正的"另一个进程"就是这么抢的：另开一个句柄去锁同一个文件。"""
+        import msvcrt
+
+        self.assertTrue(heartbeat.claim_single_instance())
+        other = open(Path(self.tmp.name) / "data" / "serve.lock", "a+b")
+        try:
+            other.seek(0)
+            with self.assertRaises(OSError):
+                msvcrt.locking(other.fileno(), msvcrt.LK_NBLCK, 1)
+        finally:
+            other.close()
+
+    def test_releasing_frees_the_chair(self):
+        self.assertTrue(heartbeat.claim_single_instance())
+        heartbeat.release_single_instance()
+        self.assertTrue(heartbeat.claim_single_instance())
+
+
 class StopSignalIsClearedOnStart(unittest.TestCase):
     """后台启动时必须清掉上一次的停止请求。
 

@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import threading
 import time
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -192,6 +193,22 @@ class Scheduler:
         tasks = self.store.list_tasks("open", limit=50)
         payload = build_digest(tasks, title=slot.title)
         payload.channel = getattr(self.sink, "name", "console")
+
+        # 收消息那边没连上（没登录/后台没跑）时，在推送里说一句。
+        # 用户的原话是"我软件没登录，怎么一直有推送"—— 推送本来就跟登录无关
+        # （推的是你的待办汇总），但**不写清楚就会让人以为程序在瞎推**。
+        from .heartbeat import state as beat_state
+
+        detail = str(beat_state(self.store).get("detail") or "")
+        if detail and not detail.startswith("登录号"):
+            # 带上数据目录：用户要是装了两份（比如旧的没删、还开着机自启），
+            # 一眼就能看出这条汇总是**哪一份**在推 —— 用户报过
+            # "界面里一条待办都没有、手机上却一直收到老待办"，根因就是这个。
+            from .config import default_data_dir
+
+            where = re.sub(r"\\Users\\[^\\]+", r"\\Users\\…",
+                           str(default_data_dir()))
+            payload.body += f"\n\n（收消息那边现在的状态：{detail}；这份汇总来自：{where}）"
 
         # 内存吃紧时已经在 run_once 里挡过了，这里只做真正的发送
         try:
