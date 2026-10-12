@@ -64,6 +64,11 @@ EXE = DIST / f"{APP_NAME}.exe"
 # 用户自己的东西：重打包时会被 PyInstaller 连带删掉，所以要挪到一边再挪回来。
 KEEP_ACROSS_BUILD = ("config.toml", "data", "plugins", "napcat")
 
+# 版本号从代码里读（唯一来源是 app/version.py），不在这儿另写一份 ——
+# 两个地方各写一遍，迟早对不上，而版本对不上就会拿错的代码去查问题。
+sys.path.insert(0, str(ROOT))
+from app.version import VERSION                                     # noqa: E402
+
 # 不是 .py、但程序运行时要读的文件。左边是项目里的路径，右边是打包后 `_internal` 里的位置。
 DATA_FILES = [
     ("app/ui", "app/ui"),                                    # 界面（一个 html 全包）
@@ -298,8 +303,11 @@ def make_patch_zip(dist: Path | None = None) -> Path:
 
     dist = dist or DIST
     stamp = datetime.now().strftime("%Y%m%d-%H%M")
-    target = dist.parent / f"补丁包-{stamp}.zip"
-    items = [dist / f"{APP_NAME}.exe"]
+    # 文件名带版本号：用户手里两份包时一眼看出版本，我拿到"我的补丁包叫
+    # 补丁包-v0.1.0-…"也知道他升到哪儿了。build-info.txt 也塞进去 ——
+    # 不然升完版本号还是旧的（它挨着 exe，不在 _internal 里）。
+    target = dist.parent / f"补丁包-v{VERSION}-{stamp}.zip"
+    items = [dist / f"{APP_NAME}.exe", dist / "build-info.txt"]
     internal = dist / "_internal"
     if internal.is_dir():
         items += [p for p in internal.rglob("*") if p.is_file()]
@@ -333,7 +341,7 @@ def write_build_info() -> None:
             commit += "+未提交改动"
     except (OSError, subprocess.SubprocessError):
         commit = ""
-    text = f"{stamp}｜提交 {commit or '未知'}"
+    text = f"v{VERSION}｜{stamp}｜提交 {commit or '未知'}"
     (DIST / "build-info.txt").write_text(text, encoding="utf-8")
     print(f"已记下这一版：{text}")
 

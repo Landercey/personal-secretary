@@ -593,8 +593,12 @@ class Api:
         以后加了新配置，界面上自动就出现。
         """
         from ..runtime.config import config
+        from ..version import version_text
 
-        return {"groups": config.schema(), "path": str(config.path or "")}
+        return {"groups": config.schema(), "path": str(config.path or ""),
+                # 版本号摆在设置页顶上：用户报问题时第一句就是"我是哪一版"，
+                # 不然我得靠猜（以前真猜过）。
+                "version": version_text()}
 
     def save_settings(self, updates: dict) -> dict:
         """把界面上改动过的项写回 config.toml。写回是按行改，不动用户的注释。"""
@@ -903,6 +907,7 @@ class Api:
         from ..runtime.config import config, default_data_dir
         from ..runtime.heartbeat import state as beat_state
         from ..runtime.sysmon import memory_state, self_rss_mb
+        from ..version import version_text
 
         root = _plugin_root()
         receiver = beat_state(self.store)
@@ -935,6 +940,8 @@ class Api:
 
         lines = [
             "【私人秘书 · 反馈】",
+            # 版本号放最前面：用户报问题时我第一眼要看的就是"他是哪一版"
+            f"版本：{version_text(root)}",
             f"构建日期：{built}",
             f"系统：{platform.platform()}｜Python {platform.python_version()}",
             f"内存：系统 {system.get('percent', '?')}%｜本程序约 {round(own_mb)} MB",

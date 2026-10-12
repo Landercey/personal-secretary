@@ -779,8 +779,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sync", action="store_true",
                         help="拉一遍插件来源（课表订阅这类），存成待办")
     parser.add_argument("--selftest", action="store_true", help="检查契约与环境")
+    parser.add_argument("--version", action="store_true",
+                        help="看这是第几版（报问题时先跑这个）")
     parser.add_argument("--db", help="数据库路径（默认 data/secretary.db）")
     args = parser.parse_args(argv)
+
+    if args.version:
+        from app.version import version_text
+
+        print(version_text(ROOT))
+        return 0
 
     if args.selftest:
         return _selftest()
@@ -1037,6 +1045,9 @@ def _selftest() -> int:
         problems.append(f"有 {len(broken)} 个插件加载失败（见下面 ✕ 那几行）")
 
     print("私人秘书 · 自检")
+    from app.version import version_text
+
+    print(f"  版本：      {version_text(ROOT)}")
     print(f"  项目根目录：{config.path.parent if config.path else '?'}")
     print(f"  配置文件：  {config.path}")
     print(f"  数据目录：  {data_dir}")

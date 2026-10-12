@@ -1099,7 +1099,7 @@ function drawSettings() {
 
   $('detailInner').innerHTML = `
     <div class="panelhead"><h2>设置</h2></div>
-    <p class="savepath">改动写回：${esc(schema.path)}<br>
+    <p class="savepath">${esc(schema.version || '')}｜改动写回：${esc(schema.path)}<br>
        保存后大多数设置立刻生效；带「要重启」的那几项按提示重启。</p>
     <div class="tabs">${tabs}</div>
     ${panes}
