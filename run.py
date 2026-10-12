@@ -95,6 +95,38 @@ def ensure_bundled_files() -> int:
     return plugin_module.seed(ROOT, RESOURCE / "plugins")
 
 
+# 少了就彻底用不了的那几个文件（打包后在 _internal 里）。
+# 杀软误报最常见的下场就是其中一个被吃掉 —— 那时程序连界面都画不出来。
+CRITICAL_FILES = ("app/ui/index.html", "app/store/schema.sql",
+                  "app/pipeline/extract/win_ocr.ps1")
+
+
+def missing_app_files() -> list[str]:
+    """程序自己的关键文件缺了哪几个（缺就是被杀软删了，或者解压不完整）。"""
+    return [name for name in CRITICAL_FILES if not (RESOURCE / name).is_file()]
+
+
+def alert_missing_files(missing: list[str]) -> None:
+    """把"文件没了"这件事**弹到屏幕上**说清楚，别让它变成"双击没反应"。
+
+    用户报过的原话："测试时被 Windows 安全中心拉进隔离了"——
+    隔离之后双击 exe 什么都不发生，他只会以为软件坏了。
+    """
+    from app.runtime.desktop import alert
+
+    alert("私人秘书 · 文件不见了",
+          "程序自己的文件少了这几个：\n  " + "\n  ".join(missing) +
+          "\n\n最可能的原因：**被杀毒软件（Windows 安全中心）当成病毒隔离了**。\n"
+          "这个程序是打包出来的，杀软对这类没签名的程序经常误报。\n\n"
+          "怎么办：\n"
+          "1. 打开 Windows 安全中心 → 病毒和威胁防护 → 「保护历史记录」，\n"
+          "   里面能找到它删掉的东西，选「还原」；\n"
+          "2. 再把整个软件文件夹加进「排除项」（病毒和威胁防护 → 管理设置 →\n"
+          "   → 排除项 → 添加文件夹）；\n"
+          "3. 还不行的话，用最新的补丁包重新解压覆盖一遍（配置和待办不会丢）。\n\n"
+          f"程序目录：{ROOT}")
+
+
 def build(database: str | Path | None = None):
     """把零件装配起来。换数据库路径主要是为了测试。
 
@@ -792,6 +824,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.selftest:
         return _selftest()
+
+    # 关键文件缺了（多半被杀软吃了）：**弹框说清楚**，别让用户对着"双击没反应"发呆。
+    # 放在自检后面：`--selftest` 自己会把缺什么列出来，命令行用户不需要弹框。
+    missing = missing_app_files()
+    if missing:
+        alert_missing_files(missing)
+        return 1
 
     # 第一次运行（exe 第一次被双击）：把随包发的插件补到他的 plugins/ 里。
     ensure_bundled_files()

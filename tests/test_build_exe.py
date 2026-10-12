@@ -19,6 +19,45 @@ sys.path.insert(0, str(ROOT / "tools"))
 import build_exe                                                 # noqa: E402
 
 
+class TestMissingFilesAreSpokenOutLoud(unittest.TestCase):
+    """关键文件被杀软吃掉时，**要弹框说清楚**，不能只是"双击没反应"。
+
+    用户原话："测试时被 Windows 安全中心拉进隔离了。"
+    隔离之后双击 exe 什么都不发生，他只会以为软件坏了 —— 而打包版没有控制台，
+    `print()` 等于写进空气。所以这里查的是"缺了哪几个"这个纯逻辑。
+    """
+
+    def setUp(self):
+        import run as run_module
+
+        self.run = run_module
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old = run_module.RESOURCE
+        run_module.RESOURCE = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.run.RESOURCE = self._old
+        self.tmp.cleanup()
+
+    def test_lists_every_missing_critical_file(self):
+        missing = self.run.missing_app_files()
+
+        self.assertEqual(sorted(missing), sorted(self.run.CRITICAL_FILES))
+
+    def test_nothing_missing_when_the_files_are_there(self):
+        for name in self.run.CRITICAL_FILES:
+            target = Path(self.tmp.name) / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("x", encoding="utf-8")
+
+        self.assertEqual(self.run.missing_app_files(), [])
+
+    def test_the_real_project_has_them_all(self):
+        """这份仓库自己得是完整的 —— 不然打包出来的就是残的。"""
+        for name in self.run.CRITICAL_FILES:
+            self.assertTrue((Path(self.run.__file__).parent / name).is_file(), name)
+
+
 class TestKeepUserData(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

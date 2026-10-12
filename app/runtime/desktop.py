@@ -94,6 +94,24 @@ Write-Output $link
 """
 
 
+def alert(title: str, text: str) -> None:
+    """弹一个**系统消息框**，把话说给用户听。
+
+    为什么必须用这个而不是 print：打包版是 `--windowed`（没有控制台），
+    `print()` 写进空气里 —— 用户看到的就是"双击没反应"，那是所有坏法里
+    最难查的一种。**文件被杀软吃掉**正好会走到这一步。
+
+    兜底：消息框调不起来（非 Windows / 没权限）就退回打印，绝不往上抛。
+    """
+    try:
+        import ctypes
+
+        # MB_ICONWARNING(0x30) | MB_SETFOREGROUND(0x10000)
+        ctypes.windll.user32.MessageBoxW(0, str(text), str(title), 0x30 | 0x10000)
+    except Exception:
+        print(f"{title}\n{text}")
+
+
 def pythonw() -> Path | None:
     """找 pythonw.exe —— 用它启动才不弹黑窗口。"""
     import sys
