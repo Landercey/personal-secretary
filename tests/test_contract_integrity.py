@@ -80,6 +80,8 @@ class TestConfig(unittest.TestCase):
         "resource": ["mem_critical_percent"],
         "risk": ["confirmed_secondary_account"],
         "wecom_bot": ["enabled", "webhook", "max_per_minute", "timeout"],
+        # 通用推送地址：钉钉 / 飞书 / PushPlus / Bark 共用这一段
+        "push_webhook": ["enabled", "url", "timeout"],
     }
 
     def test_required_thresholds_declared(self):
@@ -94,14 +96,16 @@ class TestConfig(unittest.TestCase):
 
     def test_new_repo_has_no_real_secrets(self):
         """新仓库必须零真实信息：默认配置里不许出现真实密钥/群号。"""
-        for key in ("webhook",):
-            self.assertFalse(DEFAULTS["wecom_bot"][key], f"{key} 默认必须是空的")
+        # 两个推送通道的地址默认都必须是空的（地址里带着能往群里发消息的凭证）
+        for section, key in (("wecom_bot", "webhook"), ("push_webhook", "url")):
+            self.assertFalse(DEFAULTS[section][key], f"{section}.{key} 默认必须是空的")
         for key in ("api_key", "base_url", "model"):
             self.assertFalse(DEFAULTS["ai"][key], f"{key} 默认必须是空的")
         # 两道闸默认必须是关的：一装上就把用户的消息发出去是不可接受的
         self.assertFalse(DEFAULTS["ai"]["enabled"])
         self.assertFalse(DEFAULTS["ai"]["allow_upload"])
         self.assertFalse(DEFAULTS["wecom_bot"]["enabled"])
+        self.assertFalse(DEFAULTS["push_webhook"]["enabled"])
 
 
 class TestModuleBoundaries(unittest.TestCase):

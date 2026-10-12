@@ -137,6 +137,21 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         # 推送里要不要带附件（图片原图、文档原件）。手机上看截图靠它。
         "send_attachments": True,
     },
+    "push_webhook": {
+        # 通用推送地址：钉钉 / 飞书群机器人、PushPlus、Bark 都认这一个框。
+        # 不想注册企业微信的人走这条 —— 钉钉、飞书建个群就有机器人地址，
+        # PushPlus 微信扫个码就有 token，都不用任何"企业"身份。
+        #   钉钉：群设置 → 智能群助手 → 添加机器人 → 自定义
+        #         安全设置选「自定义关键词」，关键词填「待办」
+        #   飞书：群设置 → 群机器人 → 添加机器人 → 自定义机器人
+        #   PushPlus：pushplus.plus 微信扫码登录，地址形如
+        #         https://www.pushplus.plus/send?token=你的token
+        #   Bark（只有 iPhone）：App 里复制，地址形如 https://api.day.app/你的key
+        "enabled": False,              # 和企业微信一样：填了地址还得把这个开关打开
+        "url": "",                     # ← 唯一需要填的一项，整条粘进来
+        "retry_times": 2,              # 网络抖动重试几次
+        "timeout": 10,                 # 单次请求超时秒数
+    },
     "qq": {
         # ===== 接入地址 =====
         # NapCat 会主动连到下面这个地址（叫"反向 WebSocket"：由我们监听，
@@ -307,6 +322,12 @@ KEY_COMMENTS: dict[str, str] = {
     "wecom_bot.retry_times": "网络抖动时重试几次。",
     "wecom_bot.timeout": "单次请求等多久算超时（秒）。",
     "wecom_bot.send_attachments": "推送时要不要连图片/文件原件一起发到手机。嫌手机响得勤就改 false。",
+    # [push_webhook] —— 不用企业微信的人填这一段
+    "push_webhook.enabled": "改成 true 才会真的推送。两个通道都开着时走企业微信（它能发附件）。",
+    "push_webhook.url": "整条地址粘进来就行：钉钉 / 飞书群机器人、PushPlus、Bark 都认。\n"
+                        "怎么拿地址见 README 的「不用企业微信也能收」。",
+    "push_webhook.retry_times": "网络抖动时重试几次。",
+    "push_webhook.timeout": "单次请求等多久算超时（秒）。",
     # [qq]
     "qq.enabled": "改成 true 才开始收 QQ 消息。改完要重启程序。",
     "qq.account": "要登录哪个 QQ 号（填数字，不要引号）。\n"
@@ -364,7 +385,8 @@ KEY_COMMENTS: dict[str, str] = {
 # --------------------------------------------------------------------------
 SECTION_GROUPS: tuple[tuple[str, str, str, tuple[tuple[str, str, str], ...]], ...] = (
     ("group_push", "推送到手机", "待办怎么发到你手机上", (
-        ("wecom_bot", "企业微信机器人", "新用户第一件要填的就是这里"),
+        ("wecom_bot", "企业微信机器人", "不想注册企业微信？看下面「通用推送地址」"),
+        ("push_webhook", "通用推送地址", "钉钉 / 飞书 / PushPlus / Bark，填一个就行"),
         ("push", "什么时候推", "一天推几次、错过了补不补"),
     )),
     ("group_receive", "收消息", "消息从哪儿来、用哪个号挂着收", (

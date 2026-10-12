@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..contracts.models import STATUS_DONE, STATUS_DROPPED, STATUS_OPEN
+from ..sinks.router import channel_status, push_help_section, push_ready
 
 
 def _human_due(due_at: str | None) -> tuple[str, str]:
@@ -583,10 +584,12 @@ class Api:
             "background_mb": receiver.get("rss_mb"),
             "qq_groups": len(config.get("qq", "group_ids", []) or []),
             "push_times": config.get("push", "times", []),
-            # 企业微信真的能推出去吗（两项都要）。不为真时左下角要提醒一句 ——
-            # 不然用户填完地址以为配好了，手机上永远什么都没有。
-            "wecom_ready": (bool(str(config.get("wecom_bot", "webhook", "") or "").strip())
-                            and bool(config.get("wecom_bot", "enabled"))),
+            # 推送真的能推出去吗（企业微信或通用地址，填了哪个都算）。
+            # 不为真时左下角要提醒一句 —— 不然用户填完地址以为配好了，
+            # 手机上永远什么都没有。
+            "push_ready": push_ready(),
+            # 没配好时那一行点下去要跳到设置的哪一段（见 sinks/router.py）
+            "push_section": push_help_section(),
             # 界面拖文件时先在前端拦一道，免得白传一遍几十 MB
             "drop_max_mb": int(config.get("ui", "drop_max_mb", 12) or 12),
             # 有没有新版本（只读缓存，界面永远不等网络）
@@ -661,13 +664,14 @@ class Api:
         checks = [
             {"key": "risk", "section": "risk", "label": "看过风控提示（小号还是大号）",
              "ok": bool(config.get("risk", "confirmed_secondary_account"))},
-            {"key": "wecom", "section": "wecom_bot",
-             # ⚠️ 光是填了地址还不够：`wecom_bot.enabled` 默认是 **false**，
+            {"key": "push", "section": push_help_section(),
+             # ⚠️ 光是填了地址还不够：`enabled` 默认是 **false**，
              # 不打开的话推送会退回控制台 —— 界面上什么都看不出来，
              # 用户填完地址、清单打勾、然后手机上永远收不到。
              # 这两项必须一起查（真踩过这一类的静默失败）。
-             "label": "填了企业微信机器人，并且把推送打开（两项都要）",
-             "ok": has("wecom_bot", "webhook") and bool(config.get("wecom_bot", "enabled"))},
+             # 企业微信和通用地址都算：填了哪个走哪个。
+             "label": "填了推送地址，并且把推送打开（两项都要）",
+             "ok": push_ready()},
             # QQ 号必须**在启动之前**填好：没填的话 `run_serve` 会跳过整套
             # NapCat 部署直接去等连接，那个 NapCat 永远不启动，看着就是"卡住"。
             *([{"key": "qq_account", "section": "qq",
@@ -1001,9 +1005,9 @@ class Api:
             f"｜登录号 {'填了' if int(config.get(qq, 'account', 0) or 0) else '没填'}",
             "",
             "—— 推送 ——",
-            "企业微信：" + ("配好了" if (
-                str(config.get("wecom_bot", "webhook", "") or "").strip()
-                and config.get("wecom_bot", "enabled")) else "还没配好"),
+            "推送：" + ("配好了" if push_ready() else "还没配好"),
+            # 每个通道各自的现状（地址只报域名，不含 token —— 这份文字会被贴到公开场合）
+            *[f"  {line}" for line in channel_status()],
             f"时间点：{' / '.join(config.get('push', 'times') or []) or '（没设）'}",
         ]
         for row in self.store.recent_pushes(limit=3):

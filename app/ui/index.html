@@ -1718,10 +1718,12 @@ async function refresh() {
   }
   const status = statusLine;
 
-  // ② 企业微信没配好 —— **只在没配好时出现**（配好了不占地方）。
+  // ② 推送没配好 —— **只在没配好时出现**（配好了不占地方）。
   // 光填地址不开开关，推送会退回控制台：用户以为配好了，手机上永远没有。
-  if (!env.wecom_ready) {
-    lines.push({label: '企业微信还没配好', value: '点这里', go: 'wecom_bot'});
+  // 企业微信和「通用推送地址」都算；点它跳到还没弄完的那一段。
+  if (!env.push_ready) {
+    lines.push({label: '推送还没配好', value: '点这里',
+                go: env.push_section || 'wecom_bot'});
   }
 
   // ③ 内存：用户想看"这东西到底吃多少"（只显示，不跳）

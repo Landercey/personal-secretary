@@ -52,6 +52,12 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# Windows 控制台默认是 GBK：脚本最后打印自检结果时，里面的 ✓ 会让 print
+# 直接抛 UnicodeEncodeError —— 包已经打好了，却看着像失败了。
+# 只把"这个编码写不出来的字符"换成 ?，中文照常显示。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
+
 ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = "私人秘书"
 # 默认打进 dist/；临时想打到别处（比如用户正开着 dist 里那份、锁着数据库），

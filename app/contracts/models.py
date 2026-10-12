@@ -162,7 +162,7 @@ class Task:
 class PushPayload:
     """输出层内部的推送内容。"""
 
-    channel: str                                # 走哪个通道：wecom_bot / console
+    channel: str                                # 走哪个通道：wecom_bot / webhook / console
     kind: str = "text"                          # text 或 markdown
     title: str = ""
     body: str = ""

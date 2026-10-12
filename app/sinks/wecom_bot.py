@@ -45,7 +45,6 @@ from urllib.parse import parse_qs, urlsplit
 
 from ..contracts.interfaces import Sink, SinkResult
 from ..contracts.models import KIND_IMAGE, PushPayload
-from ..runtime.config import config
 
 # ---------------------------------------------------------------------------
 # 官方接口地址。腾讯改地址的话，只改这两行。
@@ -219,7 +218,14 @@ class WeComBotSink(Sink):
     # ------------------------------------------------------------------ 配置
     @classmethod
     def from_config(cls) -> "WeComBotSink":
-        """按 config.toml 里的 [wecom_bot] 建一个通道。"""
+        """按 config.toml 里的 [wecom_bot] 建一个通道。
+
+        ⚠️ `config` 要**在函数里**导入。写在文件顶上就会在 import 那一刻
+        绑死成当时那个对象，之后程序换了配置它还是看旧的 —— 表现是
+        "界面明明配好了，推送还是按老的来"。
+        """
+        from ..runtime.config import config
+
         return cls(
             webhook=str(config.get("wecom_bot", "webhook", "") or ""),
             max_per_minute=int(config.get("wecom_bot", "max_per_minute", 20) or 20),
@@ -299,6 +305,8 @@ class WeComBotSink(Sink):
         # 附件：图片走图片接口，其它走文件接口。
         # 附件发失败**不影响**正文已经发出去这件事，只记备注 ——
         # 推送是锦上添花，不能把主线带崩。
+        from ..runtime.config import config
+
         if not bool(config.get("wecom_bot", "send_attachments", True)):
             return result
         failures: list[str] = []
