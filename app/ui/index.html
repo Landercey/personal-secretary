@@ -1049,9 +1049,18 @@ function renderSection(sec, first) {
     ? `<details class="adv"><summary>高级（一般不用动）</summary>${
         advanced.map(f => renderField(sec.name, f)).join('')}</details>`
     : '';
+  // 推送那两段多一个「发一条测试推送」：刚填完地址的人没法知道通不通，
+  // 只能等下一次定时推送（最长 12 小时）。钉钉的「关键词没对上」、
+  // token 抄错一位，都是点这一下就看得出来的事。
+  const tester = (sec.name === 'wecom_bot' || sec.name === 'push_webhook')
+    ? `<div class="acts" style="margin-top:10px">
+         <button class="block" data-testpush="${sec.name}">发一条测试推送（看手机响不响）</button>
+         <p class="hint" data-testresult>读的是<b>已经保存</b>的地址 —— 刚改完先点下面的「保存」再点这里。</p>
+       </div>`
+    : '';
   return `<details class="sec" data-section="${sec.name}"${open ? ' open' : ''}>
       <summary>${esc(sec.title)}<i>${esc(sec.desc)}</i></summary>${
-      common.map(f => renderField(sec.name, f)).join('')}${tail}</details>`;
+      common.map(f => renderField(sec.name, f)).join('')}${tester}${tail}</details>`;
 }
 
 function activateTab(name) {
@@ -1119,6 +1128,27 @@ function drawSettings() {
   $('detailInner').querySelectorAll('.tab').forEach(b =>
     b.onclick = () => activateTab(b.dataset.g));
   $('btnSave').onclick = saveSettings;
+  // 测试推送：结果**写在这段里面**，不能只用 toast ——
+  // 失败时对方会回一串错误码（errcode 310000 这种），toast 两秒就没了，
+  // 用户想照着搜都来不及。
+  $('detailInner').querySelectorAll('[data-testpush]').forEach(b => {
+    b.onclick = async () => {
+      const box = b.parentElement.querySelector('[data-testresult]');
+      b.disabled = true;
+      b.textContent = '正在发…';
+      const res = await call('test_push');
+      b.disabled = false;
+      b.textContent = '发一条测试推送（看手机响不响）';
+      const ok = res && res.ok;
+      if (box) {
+        box.innerHTML = `${ok ? '✅' : '⚠️'} ${esc((res && res.message) || '没反应，看看后台日志')}`;
+        box.className = 'hint';
+        // 失败时标红（--overdue 是列表里"逾期"用的那个红，不另起一套颜色）
+        box.style.color = ok ? '' : 'var(--overdue)';
+      }
+      toast(ok ? '发出去了，看看手机' : '没发成功，看下面那行说明');
+    };
+  });
   // 一键重启后台：QQ 那段配置改完必须重启才读得到。
   // 复用「重新出码」那套（停 → 等它真退下去 → 起动），不另写一套。
   const restartNow = $('btnRestartNow');

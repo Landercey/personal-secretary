@@ -644,6 +644,41 @@ class Api:
         self._revision += 1
         return {"ok": True, "changed": changed, "path": str(config.path or "")}
 
+    def test_push(self) -> dict:
+        """发一条测试推送，看看地址到底通不通。
+
+        为什么要有这个：刚填完地址的人没法知道对不对，只能等下一次定时推送
+        （最长 12 小时）。钉钉的「关键词没对上」（errcode 310000）、
+        PushPlus 的 token 抄错一位，都是点这一下就看得出来的事。
+
+        ⚠️ 读的是**已经保存的**配置。刚改完地址还没点保存的话，
+        这里当然还是旧的 —— 所以下面那句话里特地点了「保存」。
+        """
+        from ..contracts.models import PushPayload
+        from ..sinks import build_sink
+
+        sink = build_sink()
+        channel = getattr(sink, "name", "console")
+        if channel == "console":
+            return {"ok": False, "channel": channel,
+                    "message": "还没配推送地址（或者刚改完没点「保存」）——"
+                               "先填地址、点保存，再点这个按钮。"}
+
+        payload = PushPayload(channel=channel, kind="text",
+                              title="私人秘书 · 测试推送",
+                              body="看到这条就说明通道通了。\n"
+                                   "以后每天的汇总会按你设的时间发过来。")
+        try:
+            result = sink.deliver(payload)
+        except Exception as exc:
+            return {"ok": False, "channel": channel,
+                    "message": f"{type(exc).__name__}: {exc}"}
+
+        explain = getattr(sink, "explain", None)
+        message = (explain(result) if (explain and not result.ok) else result.message)
+        return {"ok": bool(result.ok), "channel": channel,
+                "message": message or ("发出去了" if result.ok else "发送失败")}
+
     # ------------------------------------------------------------------ 新手引导
     def setup_state(self) -> dict:
         """还差哪几件事没做。界面拿它决定"新手引导"留不留。"""

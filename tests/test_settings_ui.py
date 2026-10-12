@@ -341,6 +341,17 @@ class TestBridge(unittest.TestCase):
         self.assertFalse(summary["push_ready"])
         self.assertEqual(summary["push_section"], "wecom_bot")
 
+    def test_test_push_never_pretends_to_work(self):
+        """没配地址时点「测试推送」**不能说成功** —— 那是骗人。
+
+        这段配置里一个推送通道都没开，它只能说"还没配"。
+        而且必须提醒"刚改完要先保存"，不然用户会以为是程序坏了。
+        """
+        result = self.api.test_push()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["channel"], "console")
+        self.assertIn("保存", result["message"])
+
     def test_last_step_is_start_qq_and_it_opens_the_panel(self):
         """**这一步以前没有**：配置填完 ≠ 能收到消息，还得起后台、扫码。
 

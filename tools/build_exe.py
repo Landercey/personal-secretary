@@ -247,6 +247,27 @@ README_TXT = """私人秘书 —— 用前必看
 """
 
 
+def app_is_running() -> bool:
+    """程序还开着吗。
+
+    为什么要专门查这个（2026-10-12 真踩过）：打包会先把用户自己的东西
+    （config.toml / data / plugins / napcat）挪到一边，打完再挪回来。
+    程序开着的时候数据库被锁住，`shutil.move` 会退化成"先复制、再删原件"，
+    删到被锁的 secretary.db 就报错退出 —— 结果是**用户的数据被半路删掉一半**。
+    与其赌运气，不如一开始就不让跑。
+    """
+    if os.name != "nt":
+        return False
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {APP_NAME}.exe", "/NH"],
+            capture_output=True, text=True, timeout=20,
+            encoding="utf-8", errors="replace").stdout
+    except (OSError, subprocess.SubprocessError):
+        return False                     # 查不动就不拦，别把打包本身卡死
+    return APP_NAME in out
+
+
 def stash_user_data(dist: Path | None = None) -> Path | None:
     """把用户自己的东西挪到 `dist/.keep/`，返回那个目录（没有东西可挪就 None）。
 
@@ -265,6 +286,12 @@ def stash_user_data(dist: Path | None = None) -> Path | None:
     hold = dist.parent / f".keep-{APP_NAME}"
     if hold.exists():
         shutil.rmtree(hold, ignore_errors=True)         # 上一次失败留下的
+    if hold.exists():
+        # 清不掉 = 还有东西占着里面的文件。硬来会把用户的数据删掉一半，
+        # 不如直接停在这儿让他去关程序。
+        raise SystemExit(
+            f"清不掉上次留下的暂存目录：{hold}\n"
+            "多半是还有程序占着里面的文件。把私人秘书（和后台）全部关掉再跑一次。")
     hold.mkdir(parents=True)
     for name in names:
         shutil.move(str(dist / name), str(hold / name))
@@ -365,6 +392,10 @@ def write_build_info() -> None:
 
 
 def main() -> int:
+    if app_is_running():
+        raise SystemExit(
+            f"{APP_NAME} 还开着。先把它关掉（界面右上角那个关闭按钮）再打包。\n"
+            "开着的时候数据库被锁着，打包会把你自己的待办连带附件删掉一半 —— 真发生过。")
     check_inputs()
     hold = stash_user_data()
     build()

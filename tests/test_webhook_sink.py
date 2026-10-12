@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 import threading
 import unittest
@@ -21,6 +22,11 @@ from app.contracts.models import Attachment, PushPayload          # noqa: E402
 from app.sinks.webhook import (                                   # noqa: E402
     DINGTALK_KEYWORD, WebhookSink, _verdict, vendor_of,
 )
+from app.runtime.config import Config                             # noqa: E402
+from app.ui.bridge import Api                                     # noqa: E402
+
+# 必须按模块路径取：app/runtime/__init__.py 里 `config` 那个名字被全局实例占了
+config_module = importlib.import_module("app.runtime.config")
 
 # 故意用假的。测试里永远不许用真 token —— 源码要开源。
 FAKE = "00000000-1111-2222-3333-444444444444"
@@ -199,3 +205,21 @@ class TestSink(Base):
         self.assertIn("附件没发", result.message)
         self.assertIn("作业.docx", result.message)
         self.assertEqual(len(RECORDED), 1)               # 附件没走网络
+
+    def test_test_push_button_goes_through_the_real_chain(self):
+        """界面上的「发一条测试推送」走的是和定时推送**同一条路**。
+
+        直接用假的目标服务当通道：点一下应该真的发出去一条、
+        而且内容里看得出是测试。跑不通的话这个按钮就是摆设。
+        """
+        original = config_module.config
+        config_module.config = Config({
+            "push_webhook": {"enabled": True, "url": self.url, "retry_times": 0},
+        })
+        self.addCleanup(setattr, config_module, "config", original)
+
+        result = Api(None).test_push()
+        self.assertTrue(result["ok"], result["message"])
+        self.assertEqual(result["channel"], "webhook")
+        self.assertEqual(len(RECORDED), 1)
+        self.assertIn("测试推送", RECORDED[0]["body"])
