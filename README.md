@@ -34,7 +34,7 @@
 
 ## 下载
 
-去 [Releases](https://github.com/Landercey01/personal-secretary/releases/latest) 拿：
+去 [Releases](https://github.com/Landercey/personal-secretary/releases/latest) 拿：
 
 - **第一次用** —— `personal-secretary-v<版本>-full.zip`（完整版）：解压到任意文件夹，
   双击里面的 `私人秘书.exe`。**不用装 Python，不用装别的东西**，Windows 10/11 就行；

@@ -205,7 +205,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         # 失败就安静地算了；不想要就把上面那个开关关掉。
         "update_check": True,
         # 从哪个仓库问。你自己 fork 了就把这里改成你的。
-        "update_source": "Landercey01/personal-secretary",
+        "update_source": "Landercey/personal-secretary",
         # 多久最多问一次（小时）。0 = 每次启动都问。
         "update_hours": 24,
     },
