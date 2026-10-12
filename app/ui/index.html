@@ -1752,6 +1752,15 @@ async function refresh() {
     titles.push(...list.map(p => `${p.title}：正常`));
   }
 
+  // 有新版本就摆一行（点它跳到下载页）。**只在真有新版时出现** ——
+  // 平时不占地方，也不会天天唠叨。
+  const upd = env.update || {};
+  if (upd.has_new) {
+    lines.push({label: `🆕 有新版本 v${upd.latest}`, value: '点这里下载',
+                go: 'update', warn: true});
+    titles.push(`你现在是 v${upd.current}，新版是 v${upd.latest}`);
+  }
+
   $('foot').title = titles.join('\n');
   const row = (line) => `<span class="label">${esc(line.label)}</span>${
     line.value === undefined ? '' : `<b class="value">${esc(line.value)}</b>`}`;
@@ -1767,10 +1776,18 @@ async function refresh() {
     node.onclick = () => {
       const go = node.dataset.go;
       // "panel:xxx" = 打开右栏那个独立面板（QQ / 插件）；
+      // "update" = 有新版本那一行，去浏览器打开下载页；
       // 其余都当设置里的一段名，跳过去并展开。
       if (go.startsWith('panel:')) {
         setPanel(go.slice('panel:'.length));
         renderPanel(true);
+        return;
+      }
+      if (go === 'update') {
+        const url = ((env.update || {}).url) || '';
+        call('open_url', url).then(res => {
+          if (res && res.ok) toast('已经在浏览器里打开了下载页');
+        });
         return;
       }
       openSettings(go);

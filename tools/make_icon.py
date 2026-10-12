@@ -8,9 +8,11 @@
     python tools/make_icon.py                 # 用 assets/logo.png，没有就画兜底
     python tools/make_icon.py --source 某图.png   # 换个源图
 
-⚠️ **版权**：`assets/logo.png` 目前用的是网上找的同人作品（原作者抖音号
-67538921249，水印已裁掉）。自己电脑上用没问题；
-**正式开源发布前必须换成自制或已授权的图**，否则是侵权。
+`assets/logo.png` 是**为本项目画的原创小鱼**（见 Work 里的 draw_logo.py），
+随 MIT 许可证一起授权，随便用。
+
+（历史提醒：更早的版本用过网上找的同人作品，2026-10-12 换掉了 —— 自己电脑上
+用没事，公开分发是侵权。所以这个文件的默认源图**必须**是自制或已授权的。）
 
 生成完要重跑一次 `python run.py --shortcut`，快捷方式的图标才会更新
 （Windows 会缓存图标）。

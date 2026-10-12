@@ -186,6 +186,13 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         # 不给网页真实路径），几十 MB 会把窗口卡住。更大的文件走
         # `python run.py --file 路径`。
         "drop_max_mb": 12,
+        # 有没有新版本。**默认开**：只发一个 GET（不传任何数据），
+        # 失败就安静地算了；不想要就把上面那个开关关掉。
+        "update_check": True,
+        # 从哪个仓库问。你自己 fork 了就把这里改成你的。
+        "update_source": "Landercey01/personal-secretary",
+        # 多久最多问一次（小时）。0 = 每次启动都问。
+        "update_hours": 24,
     },
 }
 
@@ -336,6 +343,11 @@ KEY_COMMENTS: dict[str, str] = {
     "ui.drop_max_mb": "拖进窗口的文件最大多少 MB，默认 12。\n"
                       "#   拖进来的文件是「摊成文本」传给后端的（网页拿不到真实路径），\n"
                       "#   太大（几十 MB）会把窗口卡住。更大的文件用 --file 命令。",
+    "ui.update_check": "启动时问一下 GitHub 有没有新版本。\n"
+                       "#   只是发一个 GET，**不传任何你的数据**；问不到就当没有，不影响使用。\n"
+                       "#   有新版会在左下角出现一行，点一下就跳到下载页。",
+    "ui.update_source": "从哪个仓库问新版本（用户名/仓库名）。你 fork 一份改成你自己的。",
+    "ui.update_hours": "多久最多问一次（小时），默认 24。填 0 = 每次启动都问。",
 }
 
 
@@ -368,7 +380,7 @@ SECTION_GROUPS: tuple[tuple[str, str, str, tuple[tuple[str, str, str], ...]], ..
     ("group_data", "数据与资源", "存在哪、留多久、别跟你抢资源", (
         ("store", "数据保留", "附件和废件箱留多久"),
         ("resource", "资源占用", "打游戏时别抢资源"),
-        ("ui", "界面与拖拽", "从窗口拖文件进来的限制"),
+        ("ui", "界面与更新", "拖文件的限制、有没有新版本"),
         ("title", "标题规则", "很少需要动"),
     )),
 )

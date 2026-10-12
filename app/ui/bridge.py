@@ -144,6 +144,30 @@ class Api:
         self._actions = dict(actions or {})
         # 网页轮询用：每次返回一个自增号，界面上"数据变了没"靠它判断
         self._revision = 0
+        self._start_update_check()
+
+    def _start_update_check(self) -> None:
+        """后台问一次"有没有新版本"。
+
+        为什么开线程：这是网络请求，放在界面线程里会把窗口卡住几秒 ——
+        用户的第一印象就毁了。界面那边只读缓存文件，**永远不等待网络**。
+        默认 24 小时最多问一次（[ui] update_hours），关掉是 [ui] update_check。
+        """
+        import threading
+
+        from ..runtime import update
+        from ..runtime.config import config
+
+        if not config.get("ui", "update_check", True):
+            return
+        hours = float(config.get("ui", "update_hours", 24) or 0)
+        if not update.need_check(hours):
+            return
+        repo = str(config.get("ui", "update_source", "") or "").strip()
+        if not repo:
+            return
+        threading.Thread(target=update.check_now, args=(repo,), daemon=True,
+                         name="update-check").start()
 
     def _act(self, name: str, *args):
         handler = self._actions.get(name)
@@ -542,6 +566,7 @@ class Api:
     # ------------------------------------------------------------------ 环境
     def config_summary(self) -> dict:
         """界面上显示"现在什么状态"用。"""
+        from ..runtime import update
         from ..runtime.config import config, default_data_dir
         from ..runtime.heartbeat import state as beat_state
         from ..runtime.sysmon import describe as mem_describe
@@ -564,6 +589,8 @@ class Api:
                             and bool(config.get("wecom_bot", "enabled"))),
             # 界面拖文件时先在前端拦一道，免得白传一遍几十 MB
             "drop_max_mb": int(config.get("ui", "drop_max_mb", 12) or 12),
+            # 有没有新版本（只读缓存，界面永远不等网络）
+            "update": update.summary(),
             # ⚠️ 这是**状态**，不是配置：收消息的进程还在不在。
             # 上面那个 qq_groups 只是"你配了几个群"，跟进程活没活着没关系。
             "receiver": receiver,
@@ -889,6 +916,21 @@ class Api:
         folder.mkdir(parents=True, exist_ok=True)
         os.startfile(str(folder))
         return {"ok": True, "path": str(folder)}
+
+    def open_url(self, url: str) -> dict:
+        """用系统浏览器打开一个链接（目前只给「有新版本」那一行用）。
+
+        为什么限定域名：这个接口是**网页那边调过来的**，虽然说到底是本地窗口、
+        网页也是我们自己的，但"网页让程序开什么就开什么"不是个好习惯 ——
+        白名单一行，省掉以后有人往里塞怪东西的麻烦。
+        """
+        import webbrowser
+
+        target = str(url or "").strip()
+        if not target.startswith("https://github.com/"):
+            return {"ok": False, "message": "只允许打开 GitHub 上的页面"}
+        webbrowser.open(target)
+        return {"ok": True, "url": target}
 
     # ------------------------------------------------------------------ 意见反馈
     def feedback_report(self, note: str = "", include_junk: bool = False) -> dict:
