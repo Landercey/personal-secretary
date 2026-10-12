@@ -18,6 +18,7 @@ import tempfile
 from pathlib import Path
 
 from .types import ExtractResult
+from ...runtime.deploy import decode_output, no_window_flags
 
 # 用绝对路径找 PowerShell：不依赖 PATH，也不受"用户在某个目录放了同名 exe"影响。
 POWERSHELL = Path(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
@@ -99,7 +100,9 @@ def recognize(image_path: str | Path, timeout: float | None = None) -> ExtractRe
                  "-File", str(OCR_SCRIPT),
                  "-ImagePath", str(path), "-OutJson", str(out_json)],
                 capture_output=True, timeout=timeout,
-                encoding="utf-8", errors="replace",
+                # 同理：拖一张图进来识别时，别弹黑框（识别要跑一秒多，
+                # 那个黑框会一直挂在那儿，比闪一下更像出事了）。
+                creationflags=no_window_flags(),
             )
         except subprocess.TimeoutExpired:
             return ExtractResult(method="win_ocr", note=f"识别超时（超过 {int(timeout)} 秒）")
@@ -107,7 +110,9 @@ def recognize(image_path: str | Path, timeout: float | None = None) -> ExtractRe
             return ExtractResult(method="win_ocr", note=f"调用失败：{type(exc).__name__}")
 
         if not out_json.exists():
-            detail = ((proc.stderr or "") + (proc.stdout or "")).strip()[:160]
+            # 藏了窗口就没控制台，PowerShell 按系统码页吐字节 —— 交给现成的解码器判
+            detail = (decode_output(proc.stderr or b"")
+                      + decode_output(proc.stdout or b"")).strip()[:160]
             return ExtractResult(method="win_ocr", note=f"OCR 未产出结果：{detail}")
         try:
             payload = json.loads(out_json.read_text(encoding="utf-8-sig"))

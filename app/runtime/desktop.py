@@ -30,6 +30,7 @@ import sys
 from pathlib import Path
 
 from .config import default_root
+from .deploy import decode_output, no_window_flags
 
 SHORTCUT_NAME = "私人秘书.lnk"
 AUTOSTART_NAME = "私人秘书(开机自启).lnk"
@@ -127,11 +128,18 @@ def _run_powershell(script: str) -> tuple[bool, str]:
         proc = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive",
              "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
-            capture_output=True, timeout=60, encoding="utf-8", errors="replace",
+            capture_output=True, timeout=60,
+            # ⚠️ 少了这一行，界面启动那一刻会**先闪一个黑框**再出窗口 ——
+            # 打包版每次打开都会走到这儿（补桌面快捷方式），用户看到黑框
+            # 一闪会以为中了病毒（真被这么问过）。
+            creationflags=no_window_flags(),
         )
     except Exception as exc:
         return False, f"{type(exc).__name__}: {exc}"
-    output = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    # ⚠️ 上面藏了窗口 = 子进程没有控制台，PowerShell 就按**系统码页**（中文机上是 GBK）
+    # 往 stdout 吐字节。这时还按 UTF-8 读，中文路径会变成一串问号 ——
+    # 表现是"快捷方式指向的不是文件"（测试当场抓到）。交给现成的解码器判定。
+    output = (decode_output(proc.stdout or b"") + decode_output(proc.stderr or b"")).strip()
     return proc.returncode == 0, output
 
 
