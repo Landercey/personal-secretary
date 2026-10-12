@@ -9,7 +9,7 @@
   真数据（含群名、QQ 号）不进仓库，只放在 Work 目录，见 CONTRACT.md 第十节。
 
 用法：
-    python tools/baseline_scan.py --legacy "E:\\CodexStorage\\Work\\...\\legacy_tasks.json"
+    python tools/baseline_scan.py --legacy "旧的待办标题.json" --db "D:\\私人秘书\\data\\secretary.db"
     python tools/baseline_scan.py --db data/secretary.db
 """
 

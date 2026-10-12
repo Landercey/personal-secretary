@@ -15,7 +15,7 @@
 =====================================================================
 用法
 =====================================================================
-    python tools/replay_legacy.py --old-db "…\\本地待办助手\\data\\todo.db"
+    python tools/replay_legacy.py --old-db "D:\\旧的待办助手\\data\\todo.db"
     python tools/replay_legacy.py --old-db "…" --show 20
 
 旧库里的群名、QQ 号都是真实信息，所以这个工具**只读**，不往外写文件。
