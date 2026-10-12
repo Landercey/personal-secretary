@@ -26,6 +26,21 @@
 
 ---
 
+## 下载
+
+去 [Releases](https://github.com/Landercey01/personal-secretary/releases/latest) 拿：
+
+- **第一次用** —— `personal-secretary-v<版本>-full.zip`（完整版）：解压到任意文件夹，
+  双击里面的 `私人秘书.exe`。**不用装 Python，不用装别的东西**，Windows 10/11 就行；
+- **升级** —— `personal-secretary-v<版本>-patch.zip`（补丁包）：关掉程序，解压覆盖到
+  软件文件夹里，再打开。配置、待办、已经下好的 QQ 一个都不动。
+
+程序自己会看有没有新版本（**24 小时最多问一次**，只发一个 GET、不传任何数据），
+有新版就在左下角出一行「🆕 有新版本」，点一下跳到上面那个下载页。
+不想让它问：设置 → **界面与更新** → 关掉「启动时问一下有没有新版本」。
+
+---
+
 ## 现在做到哪一步了
 
 项目按**契约先行**的方式推进：先把设计钉死，再一块一块填肉，每块都有自动检查兜底。
@@ -429,8 +444,10 @@ app/runtime/     配置中心（所有阈值集中在这里，代码里不写裸
    `napcat` 都不在补丁包里，所以配置、待办、下好的 QQ 一个都不动）；
 3. 再打开 —— 设置页顶上那行版本号就变了。
 
-**发新版时作者要做的事只有两件**：改 `app/version.py` 的 `VERSION`，
-在 [CHANGELOG.md](CHANGELOG.md) 顶上加一段，然后跑 `python tools/build_exe.py`。
+**发新版时作者要做的事**：改 `app/version.py` 的 `VERSION` → 在
+[CHANGELOG.md](CHANGELOG.md) 顶上加一段 → 跑 `python tools/build_exe.py`
+→ 打 tag、发 Release（**不放开草稿，用户就收不到"有新版本"**）。
+完整步骤和两个坑写在 [CONTRACT.md](CONTRACT.md) 的「发版流程」。
 
 ---
 

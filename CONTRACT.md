@@ -1755,6 +1755,8 @@ Node 程序往里写会直接报错退出，现象是"点启动，几秒后 QQ �
    自己用没事，公开分发严格说是侵权的，建议换成自己画的或明确许可的图。
    （`tools/make_icon.py` 里已经写了这个提醒。）
 
+> → **2026-10-12 两件都做完了**，仓库也转成了公开。见下面「开源这三件」一节。
+
 ### 保存按钮挪到底部（2026-10-11，用户报的）
 
 用户原话：**"保存不要固定，不仅会和 ✕ 重合，还要来回上面，很容易忘。"**
@@ -1863,6 +1865,59 @@ QQ 面板（真浏览器）：装着中 → 进度块 + 按钮灰掉；装完 �
 
 **没验的**：换一台**没装过 Python**的电脑（这才是真正的"零门槛"验收，
 第 12 步的验收断言就是它）；以及打包版里完整走一遍"启动 QQ → 扫码 → 收消息"。
+
+## 开源这三件（MIT 许可证 / 原创图标 / 自动检查更新）：2026-10-12
+
+作者原话：**"你自己全弄了。"** 三件都做完，另外把仓库从私有转成公开。
+
+| 事 | 落地 |
+|---|---|
+| 许可证 | `LICENSE` = MIT（版权人 Landercey01）；README 的「许可」一节改写 |
+| 图标 | `assets/logo.png` 换成 `draw_logo.py` 用 PIL 画的小蓝鱼（版权干净）。网图二创先备份到 Work 再移出仓库，`assets/logo-full.png` 删掉 |
+| 自动检查更新 | `app/runtime/update.py` + 后台线程 + 左下角一行「🆕 有新版本」；开关全在 `[ui]` 的 `update_check` / `update_source` / `update_hours` |
+
+自动更新问两条路，先正式后兜底：
+
+1. `api.github.com/repos/<repo>/releases/latest` 的 `tag_name` —— **发了 Release 才提示**，更准；
+2. 读不到就退回 `raw.githubusercontent.com/<repo>/main/app/version.py` 里的 `VERSION`。
+
+两条都失败（断网、GitHub 抽风）就当"没有新版本"，并写一笔缓存免得每次重试。
+**界面只读缓存文件、自己从不发网络请求** —— 所以断网也绝不会卡界面。
+
+### 发版流程（下次照着做）
+
+1. 改 `app/version.py` 的 `VERSION`，并在 `CHANGELOG.md` **顶上**补一段
+   （测试会断言 CHANGELOG 里出现当前版本号）；
+2. **关掉正在跑的程序**，跑 `tools/build_exe.py` → `dist\` 出 `私人秘书\`、
+   `完整版-<版本>.zip`、`补丁包-<版本>-<时间>.zip`；
+3. `git tag -a v<版本> -m "..."` 并 push；
+4. 建 Release（tag 选刚推的那个），把两个 zip 传上去；
+5. 最后放开草稿：`PATCH /repos/<repo>/releases/<id>`，body `{"draft": false}`。
+   **不点这步，用户什么都看不到。**
+
+**两个坑（2026-10-12 各踩一次）**：
+
+· **网页上传 38 MB × 2 会静默失败** —— 页面显示"2 files selected… Uploading your
+  file now…"，看着像在传，其实 Release 还是草稿、`assets` 数是 0（用 API 查一下就知道）。
+  改用 API 传：`POST <upload_url>?name=<名字>`，头 `Content-Type: application/zip`，
+  十几秒两个都好；
+· **GitHub 会把附件名里的中文抹掉** —— 本地 `补丁包-v0.2.0-20261012-1152.zip` 传上去
+  变成 `-v0.2.0-20261012-1152.zip`。所以 Release 上的附件统一用 ASCII 名：
+  `personal-secretary-v<版本>-full.zip` / `-patch.zip`（**本地文件名保持不变**，
+  谁都不靠它读；下载地址只认 Release 页）。
+
+> PowerShell 踩的坑：`"$up?name=x"` 会把 `$up?name` 整个当变量名，拼出来是 `=x`，
+> 报"Invalid URI: The hostname could not be parsed"。要写成 `($up + "?name=" + $x)`。
+
+### 转公开前扫一遍（每次都要）
+
+`git grep -e <真实企微 key> -e <QQ 号> -e <用户名> $(git rev-list --all)`
+
+要查**全部历史**，不能只查当前代码 —— 删掉的文件还躺在旧提交里。这次结果是干净的
+（本机 QQ 号、用户名、路径在早先那次 `filter-repo` 里洗过了）。
+
+公开之后当场验：**不带 token** 请求 Releases API 和 `raw.githubusercontent.com`
+都要能读到 `v0.2.0`，那才算用户真能用上自动更新。
 
 ## 六、降级映射表（每条都要有可量化的验证方法）
 
