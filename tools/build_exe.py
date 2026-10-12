@@ -296,7 +296,7 @@ def write_readme() -> None:
     print(f"已放好：{target.name}")
 
 
-def make_patch_zip(dist: Path | None = None) -> Path:
+def make_patch_zip(dist: Path | None = None, full: bool = False) -> Path:
     """打一个**只含程序文件**的补丁包（exe + `_internal/`），放在 dist 外面。
 
     为什么要有这个（用户的诉求）：
@@ -308,6 +308,10 @@ def make_patch_zip(dist: Path | None = None) -> Path:
     用户那边的升级动作就变成：**关掉程序 → 把补丁包解压到软件文件夹（覆盖）
     → 再打开**。`config.toml`、`data/`、`plugins/`、`napcat/` 都不在包里，
     所以配置、待办、下好的 QQ 一个都不会动。
+
+    `full=True` 是给**第一次用的人**的整包：多放一份「用前必看.txt」。
+    两个包的内容都不含 config/data/plugins/napcat —— 作者自己那份配置和待办
+    就在 dist 目录里，绝不能跟着发出去。
     """
     import zipfile
 
@@ -316,8 +320,12 @@ def make_patch_zip(dist: Path | None = None) -> Path:
     # 文件名带版本号：用户手里两份包时一眼看出版本，我拿到"我的补丁包叫
     # 补丁包-v0.1.0-…"也知道他升到哪儿了。build-info.txt 也塞进去 ——
     # 不然升完版本号还是旧的（它挨着 exe，不在 _internal 里）。
-    target = dist.parent / f"补丁包-v{VERSION}-{stamp}.zip"
+    # 补丁包带时间（同一天可能打两次），完整版带版本号就够
+    name = f"完整版-v{VERSION}.zip" if full else f"补丁包-v{VERSION}-{stamp}.zip"
+    target = dist.parent / name
     items = [dist / f"{APP_NAME}.exe", dist / "build-info.txt"]
+    if full:
+        items.append(dist / "用前必看.txt")
     internal = dist / "_internal"
     if internal.is_dir():
         items += [p for p in internal.rglob("*") if p.is_file()]
@@ -366,12 +374,15 @@ def main() -> int:
     write_build_info()
     restore_user_data(hold)
     patch = make_patch_zip()
+    full = make_patch_zip(full=True)
     print()
     print("打包完成。软件就在这儿：")
     print(f"    {DIST}")
     print(f"（双击 {APP_NAME}.exe 就能用，桌面快捷方式已经建好了）")
     print(f"升级用的小包（~{patch.stat().st_size / 1048576:.0f} MB）：{patch.name}")
     print("    别人升级：把补丁包解压到软件文件夹里覆盖，配置和待办都不动。")
+    print(f"第一次用的整包（~{full.stat().st_size / 1048576:.0f} MB）：{full.name}")
+    print("    新用户下载这个。两个包都不含你的配置、待办和下好的 QQ。")
     return 0
 
 
