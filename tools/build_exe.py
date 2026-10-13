@@ -161,7 +161,12 @@ def verify() -> None:
 
     # ⓪ 体积闸门。程序本体应该在 100 MB 上下；一旦有几百 MB，
     # 说明 EXCLUDES 那份名单里有东西又被拖进来了（表现是"安装包莫名其妙很大"）。
-    size_mb = sum(p.stat().st_size for p in DIST.rglob("*") if p.is_file()) / 1024 / 1024
+    # ⚠️ 只量**程序自己的文件**（exe + _internal）：自检排在"还原用户数据"之后，
+    # 那时候 dist 里还躺着用户的 napcat（1.5 GB）—— 连它一起量，
+    # 这道闸门会把正常构建误判成"有东西被拖进来了"（2026-10-13 真挡住了一次）。
+    size_mb = sum(p.stat().st_size for p in (DIST / "_internal").rglob("*")
+                  if p.is_file()) / 1024 / 1024
+    size_mb += EXE.stat().st_size / 1024 / 1024
     if size_mb > 400:
         raise SystemExit(f"打包出来 {size_mb:.0f} MB —— 有东西被拖进来了，"
                          "去检查 tools/build_exe.py 的 EXCLUDES")
