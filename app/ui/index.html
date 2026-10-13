@@ -1505,6 +1505,10 @@ async function drawQqPanel() {
     <p class="hint" style="margin-top:10px">
       要登录的 QQ 号在「⚙ 设置 → 收消息 → QQ 接入」里填。${
         data.account ? `现在是 <b>${data.account}</b>。` : '⚠️ 现在还没填，启动前先填上。'}<br>
+      ${(!connected && data.account)
+        ? '⚠️ <b>这个号必须先从电脑上那个 QQ 里退出登录</b> —— 同一个号不能同时登两个电脑端，' +
+          '不退的话扫码会被拒（手机上的登录不算冲突，可以继续登着）。<br>'
+        : ''}
       现在在收：<b>${esc(scope.text || '（读不到）')}</b>${scope.empty
         ? ' —— <b>空的，什么都收不到</b>' : ''}</p>`;
   $('detailInner').insertAdjacentHTML('beforeend',

@@ -755,7 +755,8 @@ class Api:
             # QQ 号必须**在启动之前**填好：没填的话 `run_serve` 会跳过整套
             # NapCat 部署直接去等连接，那个 NapCat 永远不启动，看着就是"卡住"。
             *([{"key": "qq_account", "section": "qq",
-                "label": "填了要登录的 QQ 号（不填的话「启动 QQ」会卡住）",
+                "label": "填了要登录的 QQ 号（不填「启动 QQ」会卡住；"
+                         "这个号要先用电脑上的 QQ 退出登录）",
                 "ok": bool(int(config.get("qq", "account", 0) or 0))}]
               if qq_in_use() else []),
             {"key": "qq", "section": "qq", "label": "选了要收的群或私聊",
