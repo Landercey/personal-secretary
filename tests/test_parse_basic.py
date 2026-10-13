@@ -252,6 +252,26 @@ class TestProseDetection(unittest.TestCase):
         drafts = quick_parse.parse_text("买牛奶\n拿快递\n写作业", strict=False)
         self.assertEqual(len(drafts), 3)
 
+    def test_titled_numbered_block_becomes_one_draft(self):
+        """「标题 + 编号子项」是**一份东西**，不是三件事。
+
+        用户原话："它识别到的那个标题明显是错误的"。实测这段切出来是
+        「交到」「字数不少于 2000 字」两条，谁看都不是待办。
+        """
+        drafts = quick_parse.parse_text(
+            "实验报告要求\n1. 下周一前提交实验报告\n2. 字数不少于 2000 字\n"
+            "3. 交到实验楼302", strict=False)
+
+        self.assertEqual([draft.title for draft in drafts], ["提交实验报告"])
+        self.assertEqual(drafts[0].location, "实验楼302")     # 地点别丢
+        self.assertIsNotNone(drafts[0].due_at)                 # 时间也别丢
+
+    def test_numbered_list_without_a_title_stays_split(self):
+        """真清单第一行自己就带编号 —— 没有标题行，照旧一行一条。"""
+        drafts = quick_parse.parse_text("1. 交作业\n2. 买牛奶", strict=False)
+
+        self.assertEqual(len(drafts), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

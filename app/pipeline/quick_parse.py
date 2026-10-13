@@ -578,6 +578,8 @@ def should_merge(lines: list[str], from_file: bool) -> bool:
         # 人名的"长度"和"拿快递"一样，`solid_lines` 分不出来（实测被拆成
         # 「张三」「李四」两条待办）。关键词是这里唯一可靠的信号。
         return True
+    if _looks_like_document(lines):
+        return True
     if len(lines) >= PROSE_MIN_LINES and len(solid) * 3 < len(lines):
         return True
     return is_schedule_block(lines) and len(solid) < 2
@@ -586,6 +588,25 @@ def should_merge(lines: list[str], from_file: bool) -> bool:
 def is_prose_block(lines: list[str]) -> bool:
     """兼容旧叫法：行数够多、且大半的行自己立不住 → 是一整段话。"""
     return should_merge(lines, from_file=False)
+
+
+def _looks_like_document(lines: list[str]) -> bool:
+    """「标题行 + 编号子项」= **一份东西的正文**，不是一串并列待办。
+
+    实测（2026-10-13，用户原话"它识别到的那个标题明显是错误的"）：
+    这样一段
+        实验报告要求
+        1. 下周一前提交实验报告
+        2. 字数不少于 2000 字
+        3. 交到实验楼302
+    按行切会切出「交到」「字数不少于 2000 字」两条标题 —— 谁看都不是待办。
+    整段合成一条才对：标题「提交实验报告」，时间和地点都还在。
+
+    但**真清单不能并**：用户一行一件事地敲时，第一行自己就带编号
+    （"1. 交作业 / 2. 买牛奶"）—— 没有标题行，照样一行一条。
+    """
+    marked = [index for index, line in enumerate(lines) if _BULLET.match(line)]
+    return len(marked) >= 2 and marked[0] > 0
 
 
 def parse_text(text: str, strict: bool = False,
