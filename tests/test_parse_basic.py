@@ -109,6 +109,26 @@ class TestFieldLabels(unittest.TestCase):
 
 
 class TestTimeParsing(unittest.TestCase):
+    def test_spaces_inside_a_date_are_tolerated(self):
+        """数字和「月/日/号」之间带空格也要认（用户真发过这么一条）。
+
+        2026-10-13：作者发「10 月 14 号教学楼 612 下午 1 点半领交表」，
+        日期没认出来 → **退回今天** → 提醒时间错了一整天。
+        比不认更糟：用户以为程序算得准。手机输入法和微信复制粘贴很容易带空格。
+        """
+        for text in ("10 月 14 号下午 1 点半领交表",
+                     "10月14号下午1点半领交表"):
+            with self.subTest(text=text):
+                draft = quick_parse.parse_line(text)
+                self.assertIsNotNone(draft)
+                self.assertTrue(draft.due_at.endswith("13:30:00"), draft.due_at)
+        # 带不带空格必须解析成**同一天**（这条不依赖今天是几号）。
+        # resolve_date 返回 (时刻, 命中的原文)，所以只比时刻那半边。
+        spaced = quick_parse.resolve_date("10 月 14 号")
+        tight = quick_parse.resolve_date("10月14号")
+        self.assertIsNotNone(spaced)
+        self.assertEqual(spaced[0], tight[0])
+
     def test_relative_day_and_clock(self):
         draft = quick_parse.parse_line("明天下午三点交作业")
         self.assertIsNotNone(draft)

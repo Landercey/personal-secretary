@@ -445,6 +445,12 @@ RESTART_KEYS: frozenset[str] = frozenset({
     # 端口/地址在接收端启动时就绑好了，改完不重启等于没改。
     "qq.enabled", "qq.bind_host", "qq.bind_port", "qq.token", "qq.path",
     "qq.account",
+    # ⚠️ 下面这几个也必须重启（2026-10-13 真踩过）：收哪些会话是后台**启动时**
+    # 读一次存进 `QQSettings` 的，之后改配置文件它不会重读。
+    # 以前它们不在这个名单里 → 界面上不提醒 → 用户打开"收所有私聊"、
+    # 保存、然后发现发消息过去毫无反应（消息其实到了，全被按老设置拦掉了）。
+    "qq.group_ids", "qq.private_ids", "qq.inbox_ids",
+    "qq.receive_all", "qq.receive_private_all", "qq.only_mention",
 })
 
 def _kind(value: Any) -> str:
