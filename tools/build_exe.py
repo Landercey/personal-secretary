@@ -274,6 +274,27 @@ def app_is_running() -> bool:
     return APP_NAME in out
 
 
+def napcat_is_running() -> bool:
+    """NapCat 还在跑吗。
+
+    2026-10-13 真踩过：这里原来只查 `私人秘书.exe`，没查 NapCat ——
+    它是后台进程的子进程，后台停了它**可能还活着**，而且锁着 `napcat/` 里的文件。
+    于是打包挪不动那份 1.5 GB 的目录：`shutil.move` 退化成"先复制、再删原件"，
+    删到被锁的文件就报错退出，**用户下好的 QQ 被删掉了一半**
+    （那次靠 `.keep` 里的完整副本还原回来了）。
+    """
+    if os.name != "nt":
+        return False
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq NapCatWinBootMain.exe", "/NH"],
+            capture_output=True, text=True, timeout=20,
+            encoding="utf-8", errors="replace").stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "NapCatWinBootMain" in out
+
+
 def stash_user_data(dist: Path | None = None) -> Path | None:
     """把用户自己的东西挪到 `dist/.keep/`，返回那个目录（没有东西可挪就 None）。
 
@@ -414,6 +435,12 @@ def main() -> int:
         raise SystemExit(
             f"{APP_NAME} 还开着。先把它关掉（界面右上角那个关闭按钮）再打包。\n"
             "开着的时候数据库被锁着，打包会把你自己的待办连带附件删掉一半 —— 真发生过。")
+    if _OUT_ROOT == ROOT / "dist" and napcat_is_running():
+        raise SystemExit(
+            "NapCat 还在跑（后台停了它可能还活着），它锁着 napcat/ 里的文件。\n"
+            "先把它收掉：打开程序 → 点「停止后台」；不行就任务管理器里结束\n"
+            "NapCatWinBootMain.exe 和它那几个 QQ.exe。\n"
+            "⚠️ 不关的话，打包挪那份 1.5 GB 的目录会失败，并且**会把你下好的 QQ 删掉一半**。")
     check_inputs()
     hold = stash_user_data()
     build()
