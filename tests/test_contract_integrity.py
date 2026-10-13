@@ -107,6 +107,45 @@ class TestConfig(unittest.TestCase):
         self.assertFalse(DEFAULTS["wecom_bot"]["enabled"])
         self.assertFalse(DEFAULTS["push_webhook"]["enabled"])
 
+    # 举例时约定用这几个假号（文档和代码注释里都靠它们）
+    FAKE_NUMBERS = {"123456789", "987654321", "444444444444",
+                    "1770000000", "1770000001", "111222333",
+                    # 暂存文件名里的时间戳，也是编的
+                    "1700000000",
+                    # 数字表本身：那是"哪些字符算数字"，不是号码
+                    "0123456789"}
+
+    def test_docs_and_comments_do_not_leak_real_looking_numbers(self):
+        """文档和代码注释里不许出现"像真的"长号码。
+
+        2026-10-13 **真出过事**：作者（我）把用户真实的推送汇总当例子写进了
+        CHANGELOG 和 CONTRACT —— 里面有他的登录号、收件箱号、群号，推上 GitHub
+        等于公开了。用户的反应是"你更新把我QQ号发出去了"。
+
+        规矩：举例一律用编的号。这条自检只放行上面那几个约定好的假号，
+        以后谁再顺手粘一段真实日志进来，测试当场就红。
+        """
+        import re
+
+        pattern = re.compile(r"\d{9,}")
+        offenders: list[str] = []
+        targets = [ROOT / "README.md", ROOT / "CHANGELOG.md", ROOT / "CONTRACT.md",
+                   ROOT / "CONTRIBUTING.md"]
+        targets += sorted((ROOT / "app").rglob("*.py"))
+        for path in targets:
+            if not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            for found in set(pattern.findall(text)):
+                if found not in self.FAKE_NUMBERS:
+                    offenders.append(f"{path.relative_to(ROOT)}: {found}")
+        self.assertEqual(offenders, [],
+                         "这些地方出现了像真号码的长数字，换个编的：\n"
+                         + "\n".join(offenders))
+
 
 class TestModuleBoundaries(unittest.TestCase):
     """四段流水线之间不许互相 import 内部实现（CONTRACT.md 第二节铁律 2）。"""
