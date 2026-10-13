@@ -28,6 +28,10 @@ class Base(unittest.TestCase):
         os.environ["SECRETARY_HOME"] = self.tmp.name
         self.addCleanup(self._restore_home)
         uilog._current.clear()          # 每个用例干净开始
+        # 看门狗是"只起一次"的（生产上就该这样）。全量跑的时候它可能已经被
+        # 别的用例用默认参数起过了，那样我这条的 threshold 就不生效 ——
+        # 所以这里把它清掉，让本用例重新起一个自己的。
+        uilog._watchdog = None
 
     def _restore_home(self) -> None:
         if self._home is None:
