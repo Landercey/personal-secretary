@@ -31,8 +31,6 @@ import subprocess
 import urllib.request
 from pathlib import Path
 
-# 补丁包的附件名长这样：personal-secretary-v0.3.3-patch.zip
-ASSET_SUFFIX = "-patch.zip"
 ZIP_NAME = "update.zip"
 LOG_NAME = "update.log"
 SCRIPT_NAME = "update.cmd"
@@ -41,14 +39,20 @@ SCRIPT_NAME = "update.cmd"
 MAX_BYTES = 200 * 1024 * 1024
 
 
-def pick_patch(release: dict, suffix: str = ASSET_SUFFIX) -> str:
-    """从 Release 的附件里挑出补丁包的下载地址。挑不到返回空串。"""
-    for asset in (release or {}).get("assets") or []:
-        name = str(asset.get("name") or "")
-        url = str(asset.get("browser_download_url") or "")
-        if name.endswith(suffix) and url:
-            return url
-    return ""
+# GitHub 的 Release 下载地址是有规律的：知道版本号就能拼出来。
+#
+# 为什么**不用 API 拿附件地址**（2026-10-13 真踩过）：GitHub 的接口对未登录请求
+# **每小时只给 60 次**。作者点「检查更新」时正好撞上限流（HTTP 403），
+# 界面却报"连不上网"，让人以为是自己断网 —— 其实是我发版那天查得太频。
+# 版本号走 raw 文件那条路（不受限流），地址按规律拼，整条链路就不碰 API 了。
+PATCH_URL = ("https://github.com/{repo}/releases/download/v{version}/"
+             "personal-secretary-v{version}-patch.zip")
+
+
+def patch_url(repo: str, version: str) -> str:
+    """按版本号拼出补丁包的下载地址（不请求任何接口）。"""
+    clean = str(version or "").strip().lstrip("vV")
+    return PATCH_URL.format(repo=repo, version=clean)
 
 
 def download(url: str, dest: Path, timeout: float = 300.0) -> Path:

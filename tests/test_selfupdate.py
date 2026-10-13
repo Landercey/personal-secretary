@@ -21,24 +21,22 @@ sys.path.insert(0, str(ROOT))
 from app.runtime import selfupdate                                 # noqa: E402
 
 
-def release(*names: str) -> dict:
-    return {"tag_name": "v9.9.9", "assets": [
-        {"name": name, "browser_download_url": f"https://example.invalid/{name}"}
-        for name in names]}
+class TestPatchUrl(unittest.TestCase):
+    """下载地址按版本号拼，**不问接口**。
 
+    为什么：GitHub 的接口对未登录请求每小时只给 60 次，撞上限流时
+    「检查更新」会报"连不上网"，让人以为是自己断网（2026-10-13 真发生）。
+    """
 
-class TestPickPatch(unittest.TestCase):
-    def test_picks_the_patch_not_the_full(self):
-        url = selfupdate.pick_patch(release(
-            "personal-secretary-v9.9.9-full.zip",
-            "personal-secretary-v9.9.9-patch.zip"))
-        self.assertTrue(url.endswith("-patch.zip"), url)
+    def test_builds_the_release_download_url(self):
+        url = selfupdate.patch_url("owner/repo", "0.3.4")
+        self.assertEqual(
+            url,
+            "https://github.com/owner/repo/releases/download/v0.3.4/"
+            "personal-secretary-v0.3.4-patch.zip")
 
-    def test_no_patch_means_empty(self):
-        self.assertEqual(selfupdate.pick_patch(release(
-            "personal-secretary-v9.9.9-full.zip")), "")
-        self.assertEqual(selfupdate.pick_patch({}), "")
-        self.assertEqual(selfupdate.pick_patch(None), "")          # type: ignore[arg-type]
+    def test_tolerates_a_leading_v(self):
+        self.assertIn("/v0.9.9/", selfupdate.patch_url("o/r", "v0.9.9"))
 
 
 class TestUpdaterScript(unittest.TestCase):

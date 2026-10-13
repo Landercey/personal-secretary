@@ -302,8 +302,10 @@ def stash_user_data(dist: Path | None = None) -> Path | None:
 def restore_user_data(hold: Path | None, dist: Path | None = None) -> None:
     """把 `stash_user_data` 挪走的东西放回去。
 
-    **不覆盖**新打出来的同名文件：新包里有 plugins/ 这类目录时不至于把
-    用户那份盖掉（用户的数据永远优先）。
+    ⚠️ **同名时以用户那份为准**（2026-10-13 改）：
+    以前这里是"目标已存在就跳过"，然后 `rmtree` 把用户那份一起删了 ——
+    真丢过一次配置（自检那步在新目录里生成了一份默认 config.toml，
+    于是用户那份被跳过并被删掉）。现在改成：把新的挪开，放回用户的。
     """
     if hold is None or not hold.is_dir():
         return
@@ -312,7 +314,15 @@ def restore_user_data(hold: Path | None, dist: Path | None = None) -> None:
     for item in hold.iterdir():
         target = dist / item.name
         if target.exists():
-            continue
+            # 新打出来的那份是可再生的（默认配置 / 空库 / 自带插件），
+            # 直接丢掉；用户的那份才是要留的。
+            if item.is_dir():
+                shutil.rmtree(target, ignore_errors=True)
+            else:
+                try:
+                    target.unlink()
+                except OSError:
+                    continue          # 删不掉（被占用）就别动，宁可留新的
         shutil.move(str(item), str(target))
     shutil.rmtree(hold, ignore_errors=True)
 
@@ -402,11 +412,16 @@ def main() -> int:
     check_inputs()
     hold = stash_user_data()
     build()
+    # ⚠️ 顺序很重要：**先把你自己的东西放回去，再跑自检**。
+    # 这里写错了会真丢数据（2026-10-13 丢过一次配置）：
+    # 自检是拿新 exe 跑一遍程序，它一看旁边没有 config.toml，
+    # 就按"新用户"生成一份默认的 —— 然后还原那一步发现同名文件已存在，
+    # 跳过并把**你那份**删掉了。
+    restore_user_data(hold)
     verify()
     make_shortcut()
     write_readme()
     write_build_info()
-    restore_user_data(hold)
     patch = make_patch_zip()
     full = make_patch_zip(full=True)
     print()

@@ -73,19 +73,6 @@ def fetch_latest(repo: str, timeout: float = 6.0) -> str:
         return ""
 
 
-def fetch_release(repo: str, timeout: float = 8.0) -> dict:
-    """拿最新那个 Release 的完整信息（**附件地址在里面**）。问不到返回空字典。
-
-    `fetch_latest` 只要一个版本号（左下角那行用它）；这个要的是附件 ——
-    一键更新得知道补丁包放在哪个地址。
-    """
-    try:
-        data = json.loads(_get(_RELEASES.format(repo=repo), timeout))
-    except Exception:
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def cache_path() -> Path:
     from .config import default_data_dir
 

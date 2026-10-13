@@ -742,17 +742,20 @@ class Api:
         repo = self._update_repo()
         if not repo:
             return {"ok": False, "message": "没配更新源（设置 → 界面与更新）"}
-        release = update.fetch_release(repo)
-        if not release:
-            return {"ok": False, "message": "问不到 GitHub（断网或者连不上）。"
-                                            "过会儿再试，不影响你现在用。"}
-        latest = str(release.get("tag_name") or "").strip().lstrip("vV")
+        from ..runtime import selfupdate
+
+        # 只问版本号（走 raw 文件那条路，不受接口限流影响 —— 见 selfupdate.patch_url）
+        latest = update.fetch_latest(repo)
         if not latest:
-            return {"ok": False, "message": "GitHub 那边没给出版本号"}
+            return {"ok": False,
+                    "message": "问不到 GitHub。可能是断网，也可能是 GitHub 临时限流"
+                               "（未登录的接口每小时只给 60 次）—— 过一会儿再试，"
+                               "不影响你现在用。"}
         update.write_cache(latest)
         has_new = update.is_newer(latest, VERSION)
         return {"ok": True, "current": VERSION, "latest": latest, "has_new": has_new,
-                "page": str(release.get("html_url") or ""),
+                "page": f"https://github.com/{repo}/releases",
+                "patch": selfupdate.patch_url(repo, latest),
                 "message": (f"有新版本 v{latest}（你现在 v{VERSION}）" if has_new
                             else f"已经是最新的（v{VERSION}）")}
 
@@ -771,12 +774,11 @@ class Api:
         repo = self._update_repo()
         if not repo:
             return {"ok": False, "message": "没配更新源（设置 → 界面与更新）"}
-        release = update.fetch_release(repo)
-        url = selfupdate.pick_patch(release)
-        if not url:
-            return {"ok": False,
-                    "message": "这一版没放补丁包（只有完整版）。去下载页手动覆盖一次，"
-                               "以后的版本就有一键更新了。"}
+        latest = update.fetch_latest(repo)
+        if not latest:
+            return {"ok": False, "message": "问不到 GitHub（断网或临时限流），过会儿再试"}
+        # 地址按版本号拼，不问接口 —— 见 selfupdate.patch_url 的注释
+        url = selfupdate.patch_url(repo, latest)
 
         app_dir = default_root()
         try:
