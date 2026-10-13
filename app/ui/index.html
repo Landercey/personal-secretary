@@ -1022,6 +1022,14 @@ function renderField(sectionName, f) {
     input = `<input type="text" id="${id}" data-path="${path}" value="${esc(f.value)}"
                placeholder="留空 = 不用"${off}>`;
   }
+  // 记下"后端给的原始值"，保存时拿它比 —— 只提交**真改过**的字段。
+  // 为什么（2026-10-13 真丢过设置）：保存以前是把界面上**所有**字段打包写回去，
+  // 于是任何外部改动（另一个进程写进配置文件的、热读到的）都会被界面里那份旧值冲掉。
+  const was = f.kind === 'bool' ? String(!!f.value)
+    : f.kind === 'list' ? (f.value || []).join(', ')
+      : String(f.value ?? '');
+  input = input.replace(`data-path="${path}"`,
+                        `data-path="${path}" data-was="${esc(was)}"`);
 
   // 锁住的项：说明换成"为什么锁"，并给一个明确的解锁入口。
   // 只禁用不解释的话，用户只会觉得"这软件有 bug，改不了"。
@@ -1381,6 +1389,10 @@ function drawSettings() {
 async function saveSettings() {
   const updates = {};
   $('detailInner').querySelectorAll('[data-path]').forEach(el => {
+    // 只送**真改过**的。全量写回会把外面刚改的（比如另一个进程写进配置文件的）
+    // 一起冲掉 —— 2026-10-13 真丢过一次设置。
+    const now = el.type === 'checkbox' ? String(el.checked) : String(el.value);
+    if (now.toLowerCase() === String(el.dataset.was || '').toLowerCase()) return;
     updates[el.dataset.path] = el.type === 'checkbox' ? el.checked : el.value;
   });
   // 比一下"要重启才生效"的那几项有没有真被改动 —— 改了就等会儿竖提醒。
