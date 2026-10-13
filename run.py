@@ -344,6 +344,9 @@ def run_qq(store, pipeline) -> int:
     if not heartbeat.claim_single_instance():
         print("⚠️ 已经有一个后台在跑了（同一个数据目录），这个就不重复起了。")
         return 1
+    # 记下"我是什么时候起来的、当时要重启那几项是什么值" ——
+    # 界面靠它判断"改了设置到底要不要重启"（见 heartbeat.restart_needed）。
+    heartbeat.mark_start(store)
     if not settings.enabled:
         print("QQ 接入没有启用。")
         print("打开 config.toml，把 [qq] 下面的 enabled 改成 true，再运行一次。")
@@ -709,6 +712,8 @@ def run_serve(store, pipeline, sink, account: int | None = None) -> int:
         print("⚠️ 已经有一个后台在跑了（同一个数据目录），这个就不重复起了。")
         print("   它可能是开机自启拉起来的。要换成这个，先在界面上点「停止后台」。")
         return 1
+    # 同上：界面拿这份记录判断"设置改完要不要重启"
+    heartbeat.mark_start(store)
     scheduler = None
     if config.get("push", "enabled", True) and parse_times_or_empty():
         scheduler = Scheduler(store, sink, on_event=lambda text: print(f"  [推送] {text}"))

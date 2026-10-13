@@ -772,12 +772,20 @@ class Api:
         以后加了新配置，界面上自动就出现。
         """
         from ..runtime.config import config
+        from ..runtime import heartbeat
         from ..version import version_text
 
         return {"groups": config.schema(), "path": str(config.path or ""),
                 # 版本号摆在设置页顶上：用户报问题时第一句就是"我是哪一版"，
                 # 不然我得靠猜（以前真猜过）。
-                "version": version_text()}
+                "version": version_text(),
+                # 后台跑着的配置跟文件里的**已经不一样了**吗（只比要重启那几项）。
+                # 以前界面是在保存那一刻记一个内存标记，于是：
+                #   · 用别的方式重启（重新出码）之后它不会消；
+                #   · 顶部那句"带「要重启」的那几项按提示重启"是**死文案**，
+                #     永远挂在那儿 —— 用户看到的是"每次打开他还在"。
+                # 现在这句提示由这里说了算，重启完自然就没了。
+                "restart_needed": heartbeat.restart_needed(self.store)}
 
     @tracked
     def save_settings(self, updates: dict) -> dict:

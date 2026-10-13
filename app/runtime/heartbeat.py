@@ -40,6 +40,7 @@ from datetime import datetime
 from ..contracts.models import TIME_FORMAT
 
 KEY = "receiver_beat"
+START_KEY = "receiver_start"
 STOP_FILE = "stop.request"
 LOCK_FILE = "serve.lock"
 
@@ -103,6 +104,44 @@ def state(store) -> dict:
     return {"alive": age < STALE_SECONDS, "age_seconds": round(age),
             "detail": str(payload.get("detail") or ""), "at": at,
             "rss_mb": payload.get("rss_mb"), "groups": groups}
+
+
+def mark_start(store) -> None:
+    """后台**刚起来**时记一笔：什么时候起的、"要重启才生效那几项"当时是什么值。
+
+    界面靠它回答"我刚改的设置，到底要不要重启" —— 见 restart_needed()。
+    """
+    from .config import config
+
+    if store is None:
+        return
+    try:
+        store.set_meta(START_KEY, json.dumps(
+            {"at": datetime.now().strftime(TIME_FORMAT),
+             "fingerprint": config.restart_fingerprint()}, ensure_ascii=False))
+    except Exception:
+        pass                    # 记不上不该把收消息搞崩
+
+
+def restart_needed(store) -> bool:
+    """后台**现在跑着的**配置，跟配置文件里的是不是已经不一样了。
+
+    只比"要重启才生效"那几项（端口、令牌、收哪些群…）。
+    后台没在跑时一律 False —— 那时候没有"重启"这回事，
+    下次起来自然读的是新配置。
+    """
+    from .config import config
+
+    if store is None or not state(store)["alive"]:
+        return False
+    try:
+        payload = json.loads(store.get_meta(START_KEY, "") or "{}")
+    except (ValueError, TypeError):
+        payload = {}
+    was = str(payload.get("fingerprint") or "")
+    if not was:
+        return False            # 老版本的后台没记过这份，别乱喊要重启
+    return was != config.restart_fingerprint()
 
 
 def request_stop() -> None:

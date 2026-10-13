@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app.runtime import deploy, desktop, heartbeat              # noqa: E402
+from app.runtime.config import config                           # noqa: E402
 from app.store.repository import SqliteStore, open_database     # noqa: E402
 from app.ui.bridge import Api                                   # noqa: E402
 
@@ -267,6 +268,63 @@ class Autostart(unittest.TestCase):
     def test_temp_and_normal_paths_are_told_apart(self):
         self.assertTrue(desktop._volatile(Path(tempfile.gettempdir()) / "x" / "run.py"))
         self.assertFalse(desktop._volatile(Path(r"C:\私人秘书\私人秘书.exe")))
+
+
+class TestRestartNotice(unittest.TestCase):
+    """"设置改完到底要不要重启"由后端说了算。
+
+    用户原话："他说重启生效，但每次重启完下次再打开他还在"。以前界面顶部那句
+    "带「要重启」的那几项按提示重启"是**死文案**，永远挂着；
+    保存后那个提醒又只在内存里，用别的方式（重新出码）重启不会消。
+    现在改成比"后台启动时那份配置"和"现在这份"的指纹，两边都对得上号。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = SqliteStore(open_database(Path(self.tmp.name) / "t.db"))
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def start(self) -> None:
+        """假装后台刚起来（有心跳 + 记下了当时的配置指纹）。"""
+        heartbeat.beat(self.store, "登录号 1｜收到 0", force=True)
+        heartbeat.mark_start(self.store)
+
+    def test_just_started_nothing_to_restart(self):
+        self.start()
+        self.assertFalse(heartbeat.restart_needed(self.store))
+
+    def test_changing_a_restart_key_asks_for_a_restart(self):
+        self.start()
+        original = config.get("qq", "bind_port", 18080)
+        try:
+            config["qq"]["bind_port"] = int(original) + 1
+            self.assertTrue(heartbeat.restart_needed(self.store))
+        finally:
+            config["qq"]["bind_port"] = original
+        self.assertFalse(heartbeat.restart_needed(self.store))    # 改回去就没事了
+
+    def test_normal_settings_never_ask_for_a_restart(self):
+        """推送时间、过滤强度这些是立刻生效的 —— 拿它们喊"要重启"等于骗人。"""
+        self.start()
+        original = list(config.get("push", "times", []))
+        try:
+            config["push"]["times"] = ["08:00", "20:00"]
+            self.assertFalse(heartbeat.restart_needed(self.store))
+        finally:
+            config["push"]["times"] = original
+
+    def test_no_receiver_no_restart_talk(self):
+        """后台没在跑：没有"重启"这回事（下次起来自然读的是新配置）。"""
+        heartbeat.mark_start(self.store)
+        original = config.get("qq", "bind_port", 18080)
+        try:
+            config["qq"]["bind_port"] = int(original) + 1
+            self.assertFalse(heartbeat.restart_needed(self.store))
+        finally:
+            config["qq"]["bind_port"] = original
 
 
 class QqPanel(Base):

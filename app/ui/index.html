@@ -1249,15 +1249,21 @@ function drawSettings() {
       ${g.sections.map((sec, i) => renderSection(sec, i === 0)).join('')}
     </div>`).join('');
 
+  // "要重启才生效"这件事由**后端**说了算（比后台启动时记下的那份配置）：
+  //   · 保存那一刻的提醒（pendingRestart）刚存完就显示，带具体是哪几项；
+  //   · 之后不管用户用哪种方式重启的后台，这句都会自己消失 ——
+  //     以前顶部那句是死文案，永远挂着，用户看到的是"每次重启完他还在"。
+  const restartText = pendingRestart
+    || (schema.restart_needed ? '后台还在用上次启动时读的配置（你改过「要重启」的那几项）' : '');
   $('detailInner').innerHTML = `
     <div class="panelhead"><h2>设置</h2></div>
     <p class="savepath">${esc(schema.version || '')}｜改动写回：${esc(schema.path)}<br>
-       保存后大多数设置立刻生效；带「要重启」的那几项按提示重启。</p>
+       保存后马上生效；极少数要重启后台的项，会单独提醒你。</p>
     <div class="tabs">${tabs}</div>
     ${panes}
-    ${pendingRestart ? `<div class="guide warn" id="restartWarn" style="margin-top:14px">
-         <p><b>⚠️ 还没生效</b>：${esc(pendingRestart)}</p>
-         <p class="hint">QQ 那段（端口/令牌/登录号）是在后台启动时读的，
+    ${restartText ? `<div class="guide warn" id="restartWarn" style="margin-top:14px">
+         <p><b>⚠️ 还没生效</b>：${esc(restartText)}</p>
+         <p class="hint">QQ 那段（端口/令牌/收哪些群）是在后台启动时读的，
            NapCat 也不热读配置 —— 所以要重启一次后台。</p>
          <div class="acts" style="margin-top:8px">
            <button class="block" id="btnRestartNow">现在重启后台（几秒钟）</button>

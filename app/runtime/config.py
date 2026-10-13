@@ -625,6 +625,27 @@ class Config:
     def as_dict(self) -> dict[str, Any]:
         return {k: dict(v) for k, v in self._values.items()}
 
+    def restart_fingerprint(self) -> str:
+        """把"要重启才生效"的那几项的值算成一个指纹。
+
+        后台启动时记一份（见 heartbeat.mark_start），界面拿现在这份比 ——
+        不一样就说明**确实**要重启一次。
+
+        ⚠️ 为什么不用配置文件的时间戳当判据（2026-10-13 用户报"他说重启生效，
+        但每次重启完下次再打开他还在"）：改推送时间、改过滤强度也会动那个时间戳，
+        而那些项是立刻生效的。拿时间戳当判据 = 界面天天喊"要重启"，
+        喊到用户不信为止。只比**真的需要重启**的那几项才对得上号。
+        """
+        import hashlib
+        import json
+
+        values = {}
+        for full in sorted(RESTART_KEYS):
+            section, _, key = full.partition(".")
+            values[full] = self.get(section, key)
+        blob = json.dumps(values, sort_keys=True, ensure_ascii=False, default=str)
+        return hashlib.sha1(blob.encode("utf-8")).hexdigest()
+
     # ------------------------------------------------------------------ 界面
     def schema(self) -> list[dict[str, Any]]:
         """给设置界面用的清单：分组 → 段 → 项。
