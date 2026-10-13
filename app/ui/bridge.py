@@ -402,6 +402,10 @@ class Api:
             "account": int(config.get("qq", "account", 0) or 0),
             "qq_enabled": bool(config.get("qq", "enabled")),
             "receiver": receiver,
+            # ⚠️ 这个和 receiver["alive"] **不是一回事**：那个是"60 秒内有没有心跳"，
+            # 进程退了它还能 True 一分钟；这个直接问那把独占锁，是精确的。
+            # 界面判断"后台到底还在不在"必须用这个（重启流程踩过坑）。
+            "running": heartbeat.proc_alive(),
             "qr": qr_info,
             "autostart": desktop.autostart_enabled(),
             "blockers": self._qq_blockers(),
@@ -483,7 +487,10 @@ class Api:
         # （装的过程会持续报心跳，一般轮不到这里；这是最后一道闸。）
         if deploy.read_progress().get("active"):
             return {"ok": False, "message": "正在装 NapCat，等它装完再点（QQ 那一页有进度）"}
-        if heartbeat.state(self.store)["alive"]:
+        # ⚠️ 用 proc_alive 而不是心跳的 alive：后者有 60 秒宽限，
+        # 刚点过「重新出码」的话它还是 True，于是这里会拒绝启动 ——
+        # 而旧进程其实已经退了，结果就是"后台没在跑"（真踩过）。
+        if heartbeat.proc_alive():
             return {"ok": False, "message": "后台已经在跑了"}
 
         # 旧二维码先删掉（见 deploy.clear_qr 的注释）。
@@ -541,6 +548,11 @@ class Api:
         """
         from ..runtime import heartbeat
 
+        if not heartbeat.proc_alive():
+            # 本来就没在跑：顺手把上次留下的停止请求清掉。不清的话，
+            # 下次启动后台会被那个旧文件一上来就劝退（这个坑记过两次了）。
+            heartbeat.clear_stop()
+            return {"ok": True, "stopped": True, "message": "后台本来就没在跑"}
         heartbeat.request_stop()
         return {"ok": True, "message": "已经让它收工，几秒钟后停"}
 
@@ -569,6 +581,7 @@ class Api:
         """界面上显示"现在什么状态"用。"""
         from ..runtime import update
         from ..runtime.config import config, default_data_dir
+        from ..runtime import heartbeat
         from ..runtime.heartbeat import state as beat_state
         from ..runtime.sysmon import describe as mem_describe
         from ..runtime.sysmon import memory_state, self_rss_mb
@@ -597,6 +610,10 @@ class Api:
             # ⚠️ 这是**状态**，不是配置：收消息的进程还在不在。
             # 上面那个 qq_groups 只是"你配了几个群"，跟进程活没活着没关系。
             "receiver": receiver,
+            # 进程**真的**还在吗（问那把独占锁，不是"心跳新不新鲜"）。
+            # 两个都要：进程没了要立刻说"没在跑"，进程还在但不报心跳
+            # 说明它卡住了 —— 那是另一句话。
+            "running": heartbeat.proc_alive(),
             "qq_enabled": bool(config.get("qq", "enabled")),
             "db": str(getattr(self.store, "conn", "")),
         }
@@ -699,7 +716,9 @@ class Api:
         except (TypeError, ValueError):
             selected = []
         return {"groups": groups, "selected": selected,
-                "alive": bool(beat.get("alive")), "at": str(beat.get("at") or "")}
+                # 用精确的那个判断：进程真没了就说"没在跑"，
+                # 而不是拿 60 秒宽限里的"还活着"糊弄过去
+                "alive": heartbeat.proc_alive(), "at": str(beat.get("at") or "")}
 
     # ------------------------------------------------------------------ 新手引导
     def setup_state(self) -> dict:

@@ -1228,10 +1228,12 @@ function drawSettings() {
     restartNow.disabled = true;
     toast('正在重启后台，几秒钟…');
     await call('stop_background');
-    for (let i = 0; i < 12; i += 1) {
-      await new Promise(r => setTimeout(r, 1500));
+    for (let i = 0; i < 40; i += 1) {
+      await new Promise(r => setTimeout(r, 500));
       const now = await call('qq_panel');
-      if (now && !(now.receiver || {}).alive) break;
+      // 等它**真的**退下去：问那把独占锁（running），别用心跳 ——
+      // 心跳有 60 秒宽限，等它等不到，后面 start_qq 还会因此拒绝启动。
+      if (now && now.running === false) break;
     }
     const res = await call('start_qq');
     pendingRestart = '';
@@ -1379,8 +1381,13 @@ async function drawQqPanel() {
 
   const receiver = data.receiver || {};
   const qr = data.qr || {};
-  // 新码出来了（或者等了太久）就结束"正在等新码"的状态
-  if (qr.image || Date.now() - qrWaiting > 300000) qrWaiting = 0;
+  // 点过「重新出码」之后**旧码一律不显示** —— 用户报过"点了重新出码，
+  // 之前的码没消失，也不知道啥时候刷新的"。判据是"这张码比点击那一刻还新"。
+  const sinceClick = Date.now() - qrWaiting;
+  const qrIsFresh = !!qr.image && qr.age_seconds != null
+    && qr.age_seconds * 1000 < sinceClick;
+  if (qrWaiting && (qrIsFresh || sinceClick > 300000)) qrWaiting = 0;
+  const showQr = !!qr.image && !qrWaiting;
   // 第一次会先下 NapCat、再下 QQ（约 300 MB，好几分钟）。
   // **这几分钟界面上必须动** —— 什么都不动的话用户会以为卡死，然后反复点。
   const progress = data.progress || {};
@@ -1391,7 +1398,11 @@ async function drawQqPanel() {
   // 心跳里的 detail 是"登录号 xxx｜收到 N"就说明真连上了；
   // 是"等扫码登录"就说明进程在跑、但还没登上。
   const connected = String(receiver.detail || '').startsWith('登录号');
-  const status = receiver.alive
+  // running 是"那个进程真的还在吗"（后端直接去问那把独占锁）。
+  // 比心跳的 alive 精确：心跳有 60 秒宽限，进程退了它还能 True 一分钟 ——
+  // 重启流程就栽在这上面（旧码不消失 / 显示后台没在跑）。
+  const running = data.running !== false;
+  const status = running
     ? (connected
         ? `<span class="ok">✅ 正在收消息（${esc(receiver.detail)}）</span>`
         : (progress.active
@@ -1399,24 +1410,27 @@ async function drawQqPanel() {
             : '<span class="ok">✅ 后台在跑</span>，但还没登录 —— 扫下面的二维码'))
     : '<span class="bad">⚠️ 后台没在跑 —— 现在收不到任何消息</span>';
 
-  const qrBlock = qr.image
+  const qrBlock = showQr
     ? `<img class="qr" src="${qr.image}" alt="登录二维码">
        <p class="hint">用手机 QQ 扫它。约 2 分钟过期，过期了点下面的「重新出码」。</p>`
+    : (qrWaiting
+        ? `<p class="hint">⏳ 正在等新的二维码……已经把你点之前那张撤下来了。
+              NapCat 起来之后十几秒才写出图，这一页会自己刷新。</p>`
     : (qr.ready
         ? `<p class="hint">二维码已经 ${Math.max(1, Math.round((qr.age_seconds || 0) / 60))} 分钟了，
              多半过期了。点「重新出码」拿一张新的。</p>`
         : (progress.active
             ? `<p class="hint">装完它才会出二维码 —— 上面那块进度走完就有了，
                  那时候这一页会自己刷新。</p>`
-            : (receiver.alive || qrWaiting
+            : (running
             ? `<p class="hint">⏳ 正在等新的二维码……NapCat 起来之后十几秒才写出图，
                  这一页会自己刷新（旧码在重启时已经删掉了，不会拿一张过期的糊弄你）。</p>`
-            : '<p class="hint">还没出二维码。点下面「启动 QQ」—— 第一次会先自动下载安装 NapCat（约几分钟）。</p>')));
+            : '<p class="hint">还没出二维码。点下面「启动 QQ」—— 第一次会先自动下载安装 NapCat（约几分钟）。</p>'))));
 
   // 登上了却一条消息都不来 —— 十有八九是"一个群都没勾"。
   // 这时候最该说的不是"正在收消息"，而是"你现在什么都收不到，去勾群"。
   const scope = data.scope || {};
-  const scopeBlock = (scope.empty && receiver.alive && connected)
+  const scopeBlock = (scope.empty && running && connected)
     ? `<div class="guide warn" style="margin:0 0 12px">
          <p><b>⚠️ 已经登录上了，但一个群、一个私聊、一个收件箱都没勾</b> ——
            所以现在任何消息都不会进来（左下角会显示"收到 0"）。</p>
@@ -1465,11 +1479,11 @@ async function drawQqPanel() {
     ${qrBlock}
     <div class="acts">
       <button class="primary block" id="btnQQStart"${
-        receiver.alive || blockers.length || progress.active ? ' disabled' : ''}>
+        running || blockers.length || progress.active ? ' disabled' : ''}>
         启动 QQ（后台常驻，收消息 + 定时推送）</button>
-      ${receiver.alive && !connected
+      ${running && !connected
         ? '<button class="block" id="btnQQRestart">重新出码（重启一次后台）</button>' : ''}
-      <button class="block" id="btnQQStop"${receiver.alive ? '' : ' disabled'}>
+      <button class="block" id="btnQQStop"${running ? '' : ' disabled'}>
         停止后台</button>
     </div>
     <p class="hint" style="margin-top:14px">
@@ -1512,11 +1526,12 @@ async function drawQqPanel() {
   if (restart) restart.onclick = async () => {
     toast('正在重启后台，几秒钟…');
     qrWaiting = Date.now();       // 从现在起显示"正在等新码"，别再说"点启动"
+    await drawQqPanel();          // 立刻重画：让用户马上看到旧码被撤掉
     await call('stop_background');
-    for (let i = 0; i < 12; i += 1) {          // 等它真的退下去
-      await new Promise(r => setTimeout(r, 1500));
+    for (let i = 0; i < 40; i += 1) {          // 等它真的退下去（问锁，最多 20 秒）
+      await new Promise(r => setTimeout(r, 500));
       const now = await call('qq_panel');
-      if (now && !(now.receiver || {}).alive) break;
+      if (now && now.running === false) break;
     }
     await call('start_qq');
     toast('重启了。NapCat 会写一张新码，等十几秒');
@@ -1809,14 +1824,20 @@ async function refresh() {
   if (!env.qq_enabled) {
     // "还没开"是配置问题 → 去设置；下面"没在跑"是操作问题 → 去 QQ 那栏
     statusLine = {label: 'QQ 还没开，点这里去设置', dot: '', go: 'qq'};
+  } else if (env.running === false) {
+    // 进程真的没了 —— 这个判据来自后端那把独占锁，比心跳快整整一分钟
+    receiverBad = true;
+    statusLine = {label: '后台没在跑，点这里启动', dot: 'bad', go: 'panel:qq'};
   } else if (receiver.alive) {
     statusLine = {label: receiver.detail || 'QQ 接收中', dot: 'ok', go: 'panel:qq'};
   } else {
+    // 走到这儿 = 进程还在（running 没说是 false），但心跳断了。
+    // 那不是"没在跑"，是**卡住了** —— 两句话不一样，别混。
     receiverBad = true;
     const waited = Math.max(1, Math.round((receiver.age_seconds || 0) / 60));
     statusLine = {label: receiver.age_seconds == null
-      ? '后台没在跑，点这里启动'
-      : `后台已经 ${waited} 分钟没动静了`, dot: 'bad', go: 'panel:qq'};
+      ? '后台刚起来，还没报状态'
+      : `后台在跑，但已经 ${waited} 分钟没动静了`, dot: 'bad', go: 'panel:qq'};
   }
   const status = statusLine;
 

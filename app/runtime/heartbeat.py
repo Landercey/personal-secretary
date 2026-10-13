@@ -184,3 +184,44 @@ def release_single_instance() -> None:
     except OSError:
         pass
     _lock_handle = None
+
+
+def proc_alive() -> bool:
+    """后台进程**现在**还在吗 —— 注意这和 `state()["alive"]` 不是一回事。
+
+    `state()["alive"]` 看的是"最近 60 秒内有没有心跳"，进程已经退出了它还能
+    True 一分钟。这一分钟正好是致命的：界面等不到"它退了"，就去调「启动 QQ」，
+    而启动那一步又因为同一个 60 秒而拒绝启动（"后台已经在跑了"）——
+    最后变成"点了重新出码、旧码没消失、过一会显示后台没在跑"
+    （2026-10-13 用户报的，三个症状一个原因）。
+
+    这里用那把独占锁直接问：锁跟着**进程**走，进程一死系统立刻放锁。
+    所以"拿得到锁"= 它真的没了。拿到之后**马上放回去** —— 界面只是问一句，
+    不能真占着（占住了真后台就起不来了）。
+    """
+    from .config import default_data_dir
+
+    folder = default_data_dir()
+    if not (folder / LOCK_FILE).exists():
+        return False                      # 从来没起过
+    import msvcrt
+
+    try:
+        handle = open(folder / LOCK_FILE, "a+b")
+    except OSError:
+        return False
+    try:
+        handle.seek(0)
+        handle.write(b"1")                # 和 claim_single_instance 锁同一个字节
+        handle.flush()
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        return False                      # 拿得到 = 没人在跑
+    except OSError:
+        return True                       # 拿不到 = 有人在跑
+    finally:
+        try:
+            handle.close()
+        except OSError:
+            pass

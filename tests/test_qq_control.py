@@ -42,7 +42,11 @@ def write_qr(shell: Path, *, age_seconds: float = 0) -> Path:
 
 class Base(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        # ignore_cleanup_errors：`Api` 构造时会起一个后台线程去查有没有新版本，
+        # 它可能在测试跑完之后才往 data/ 里写一个缓存文件 —— 于是收尾时
+        # "目录不是空的"（Windows 上偶发，2026-10-13 在别的用例上也见过）。
+        # 这是测试自己的收尾问题，不该让一条用例红。
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self._old = os.environ.get("SECRETARY_HOME")
         os.environ["SECRETARY_HOME"] = self.tmp.name
         self.store = SqliteStore(open_database(Path(self.tmp.name) / "t.db"))
@@ -80,8 +84,28 @@ class StopSignal(Base):
         self.assertFalse(heartbeat.stop_requested())
 
     def test_bridge_stop_writes_the_signal(self):
+        """后台在跑的时候，点「停止后台」要写下那个信号（它自己看到就退）。"""
+        original = heartbeat.proc_alive
+        heartbeat.proc_alive = lambda: True            # 假装后台正跑着
+        self.addCleanup(setattr, heartbeat, "proc_alive", original)
+
         Api(self.store).stop_background()
         self.assertTrue(heartbeat.stop_requested())
+
+    def test_bridge_stop_leaves_no_signal_when_nothing_runs(self):
+        """后台本来就没在跑：**别留停止请求**。
+
+        留了的话，下次启动后台一睁眼就看见它、立刻退出 —— 这个坑记过两次了
+        （"点启动、登录上了、然后突然退了"就是这么来的）。
+        """
+        original = heartbeat.proc_alive
+        heartbeat.proc_alive = lambda: False           # 假装没在跑
+        self.addCleanup(setattr, heartbeat, "proc_alive", original)
+        heartbeat.request_stop()                       # 故意留一个"上一次的"
+
+        result = Api(self.store).stop_background()
+        self.assertFalse(heartbeat.stop_requested())
+        self.assertTrue(result["stopped"])
 
 
 class FeedbackCarriesTheSmokingGun(Base):

@@ -11,8 +11,11 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -21,6 +24,7 @@ sys.path.insert(0, str(ROOT))
 
 from app.contracts.models import TIME_FORMAT                     # noqa: E402
 from app.runtime import heartbeat                                # noqa: E402
+from app.runtime.config import Config                            # noqa: E402
 from app.sources.qq import QQSettings, QQSource, group_entries    # noqa: E402
 from app.ui.bridge import Api                                    # noqa: E402
 
@@ -167,3 +171,57 @@ class TestBridge(unittest.TestCase):
         self.addCleanup(setattr, module, "config", original)
 
         self.assertEqual(Api(None).qq_groups()["selected"], [123, 456])
+
+
+class TestPreciseLiveness(unittest.TestCase):
+    """判断"后台进程还在不在"必须用另一把尺子。
+
+    心跳的 `alive` = "最近 60 秒内有没有心跳"，进程退了它还能 True 一分钟。
+    「重新出码」的流程正好踩在那一分钟上（用户 2026-10-13 报的三个症状同一原因）：
+    界面等不到"它退了"→ 启动那步又因为同一分钟而拒绝 → 变成"后台没在跑"，
+    顺手把"删旧码"那步也跳过了 → 旧码不消失、手机上确认了也没人接。
+
+    精确的判据是那把独占锁：锁跟着进程走，进程一死系统立刻放锁。
+    测试用 SECRETARY_HOME 指到临时目录，**不碰真的那把锁**。
+    """
+
+    def setUp(self):
+        # 见 test_qq_control.Base 里的说明：Api 的后台线程可能晚一步往
+        # 临时目录里写缓存，收尾时报"目录不是空的"。
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self.tmp.cleanup)
+        self._home = os.environ.get("SECRETARY_HOME")
+        os.environ["SECRETARY_HOME"] = self.tmp.name
+        self.addCleanup(self._restore_home)
+        heartbeat.release_single_instance()
+        self.addCleanup(heartbeat.release_single_instance)
+
+    def _restore_home(self) -> None:
+        if self._home is None:
+            os.environ.pop("SECRETARY_HOME", None)
+        else:
+            os.environ["SECRETARY_HOME"] = self._home
+
+    def test_nobody_has_ever_run(self):
+        self.assertFalse(heartbeat.proc_alive())
+
+    def test_holder_counts_as_running(self):
+        self.assertTrue(heartbeat.claim_single_instance())
+        self.assertTrue(heartbeat.proc_alive(), "锁被占着就该说在跑")
+
+    def test_released_means_gone(self):
+        heartbeat.claim_single_instance()
+        heartbeat.release_single_instance()
+        self.assertFalse(heartbeat.proc_alive(), "锁放掉了就该说没在跑")
+
+    def test_start_qq_refuses_with_the_precise_judgement(self):
+        module = importlib.import_module("app.runtime.config")
+        original = module.config
+        module.config = Config({"qq": {"enabled": True, "account": 10001,
+                                       "group_ids": [1]}})
+        self.addCleanup(setattr, module, "config", original)
+
+        heartbeat.claim_single_instance()          # 假装后台正跑着
+        result = Api(None).start_qq()
+        self.assertFalse(result["ok"])
+        self.assertIn("已经在跑", result["message"])
