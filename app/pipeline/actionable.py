@@ -31,7 +31,8 @@
 
 from __future__ import annotations
 
-from .quick_parse import has_time_hint, text_without_time
+from ..runtime.config import config
+from .quick_parse import has_concrete_time, has_time_hint, text_without_time
 
 # 明显是闲聊：出现这些词直接不收
 IGNORE_WORDS = ("哈哈哈", "哈哈", "笑死", "收到", "好的", "在吗", "早安", "晚安",
@@ -116,7 +117,10 @@ def is_actionable(text: str) -> tuple[bool, str]:
     if len(plain) < MIN_TEXT_CHARS:
         return False, "只有图片或表情，没有文字"
 
-    strong = any(word in plain for word in STRONG_NOTICE)
+    # ⚠️ 强通知标记要在**原文**上找：strip_placeholders 会把 "@全体" 去掉，
+    # 而在去完的那份上判就永远判不到 —— 于是"@全体 明天没有晚自习"这种
+    # 正经通知，反而因为"没说要做什么"被丢掉（2026-10-13 重放旧库时抓到的）。
+    strong = any(word in str(text or "") for word in STRONG_NOTICE)
     if not strong:
         if any(word in plain for word in EMOTION_WORDS):
             return False, "像在吐槽，不是通知"
@@ -127,8 +131,16 @@ def is_actionable(text: str) -> tuple[bool, str]:
         if len(text_without_time(plain)) < 2:
             return False, "只有时间，没有具体事情"
 
-    if not (has_time_hint(plain)
-            or any(word in plain for word in ACTION_WORDS)
-            or strong):
-        return False, "既没有时间也没有行动词，判定为聊天"
-    return True, ""
+    if any(word in plain for word in ACTION_WORDS) or strong:
+        return True, ""
+    if has_concrete_time(plain):
+        return True, ""                      # "10月30号 18:30 交作业" 这种，没动词也是正事
+    if has_time_hint(plain):
+        # 只有"今天/明天"这类模糊天、又没有行动词 → 是聊天。
+        # 实测（用户 8 条待办里 4 条）："明天要下雨，哦耶耶耶"、
+        # "今天我拍了同学一张照片…"、"导致明天下雨"都栽在这一条上。
+        # 想连这种也收（宁可收错也别漏事）→ 设置里把过滤强度改成 loose。
+        if str(config.get("parse", "filter_strength", "strict")) != "loose":
+            return False, "只说了今天明天，没说要做什么"
+        return True, ""
+    return False, "既没有时间也没有行动词，判定为聊天"

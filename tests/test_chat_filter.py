@@ -126,6 +126,50 @@ class TestChatNoiseEnricher(unittest.TestCase):
         finally:
             config["parse"]["filter_strength"] = original
 
+    def test_fuzzy_day_alone_is_chat(self):
+        """只说了"今天/明天"、没说要做什么 → 是聊天。
+
+        2026-10-13 用户的待办列表里 8 条有 4 条是这么进来的：
+        "明天要下雨，哦耶耶耶"、"今天我拍了同学一张照片…"、"导致明天下雨"、
+        "快下令让明天天晴"。光凭一个"明天"就收，列表会被聊天刷满。
+        """
+        for text in ("明天要下雨，哦耶耶耶",
+                     "今天我拍了同学一张照片，结果不知道为什么突然没有了",
+                     "导致明天下雨",
+                     "[回复]@某人 将军！ 快下令让明天天晴"):
+            with self.subTest(text=text):
+                ok, why = is_actionable(text)
+                self.assertFalse(ok, f"这是聊天，不该收：{text}（{why}）")
+
+    def test_concrete_time_alone_is_still_a_todo(self):
+        """"10月30号 18:30 交作业"没动词，但那明显是正事 —— 这条不能一起收紧掉。"""
+        for text in ("10月30号 18:30 交作业",
+                     "10 月 14 号教学楼 302 下午 1 点半交表，带身份证",
+                     "周三下午 14:00 在 6C205 上大英课"):
+            with self.subTest(text=text):
+                ok, why = is_actionable(text)
+                self.assertTrue(ok, f"有具体时间的就是正事：{text}（{why}）")
+
+    def test_at_all_is_not_stripped_before_the_strong_check(self):
+        """@全体 是"这是一条通知"的信号，不能因为去占位符把它一起去掉。
+
+        真踩过：strip_placeholders 会把 "@全体" 去掉，然后在去完的那份上判
+        "有没有强通知标记" —— 永远判不到，于是"@全体 明天没有晚自习"被丢掉。
+        """
+        ok, why = is_actionable("@全体 明天没有晚自习")
+        self.assertTrue(ok, why)
+
+    def test_loose_keeps_the_fuzzy_day_chats(self):
+        """嫌丢太多就把过滤强度改成 loose —— 那句承诺得真的管用。"""
+        from app.runtime.config import config
+
+        original = config["parse"]["filter_strength"]
+        try:
+            config["parse"]["filter_strength"] = "loose"
+            self.assertTrue(is_actionable("明天要下雨，哦耶耶耶")[0])
+        finally:
+            config["parse"]["filter_strength"] = original
+
 
 class TestVetoStopsTheChain(unittest.TestCase):
     """回归：过滤器判"闲聊"之后，后面的零件不许再处理这条消息。

@@ -371,6 +371,21 @@ def has_time_hint(text: str) -> bool:
     return resolve_date(normalized)[0] is not None or resolve_time(normalized) is not None
 
 
+def has_concrete_time(text: str) -> bool:
+    """有没有**具体**的时间：几点、几月几号、周几。
+
+    和 has_time_hint 的差别：只说了"今天/明天/后天"这类模糊天不算。
+    为什么要分这么细（2026-10-13 用户待办里那 4 条误收）：群里天天有人说
+    "明天要下雨""今天我拍了个照片" —— 光凭一个"明天"就收，待办列表会被
+    聊天刷满，而且它们本来什么事都没有。
+    """
+    normalized = cn_time_to_digits(text)
+    if resolve_time(normalized) is not None:
+        return True
+    return any(pattern.search(normalized) for pattern in
+               (_DATE_YMD, _DATE_MD, _DATE_THIS_MONTH, _DATE_NEXT_MONTH, _DATE_WEEK))
+
+
 def text_without_time(text: str) -> str:
     """去掉时间片段后剩下的内容（只留汉字）。
 
