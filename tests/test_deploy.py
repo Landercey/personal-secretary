@@ -129,6 +129,30 @@ class TestLaunch(unittest.TestCase):
         self.assertEqual(deploy.qr_path(shell).parent.name, "cache")
 
 
+class TestFastLoginFallback(unittest.TestCase):
+    """"频繁登录太麻烦"那个根因：带了号还是没登进去时，要能认出来、退回扫码。"""
+
+    class Proc:
+        def __init__(self, alive: bool) -> None:
+            self.alive = alive
+
+        def poll(self):
+            return None if self.alive else 0
+
+    def test_alive_process_is_nothing_to_do(self):
+        """成功时那个启动器一直活着，不能当成失败。"""
+        self.assertFalse(deploy.fast_login_failed(self.Proc(alive=True), False))
+
+    def test_connected_is_never_a_failure(self):
+        self.assertFalse(deploy.fast_login_failed(self.Proc(alive=False), True))
+
+    def test_dead_and_not_connected_means_fall_back(self):
+        self.assertTrue(deploy.fast_login_failed(self.Proc(alive=False), False))
+
+    def test_no_process_at_all_is_not_a_failure(self):
+        self.assertFalse(deploy.fast_login_failed(None, False))
+
+
 class TestDownloadFallback(unittest.TestCase):
     def test_tries_every_mirror_before_giving_up(self):
         """直连下不动要换镜像 —— 实测 GitHub 在国内很慢。"""

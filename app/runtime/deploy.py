@@ -411,11 +411,28 @@ def default_dir() -> Path:
 def launch_command(shell_dir: Path, qq: int | None = None) -> list[str]:
     """启动 NapCat 的命令行。
 
-    带 QQ 号 = 尝试快速登录（实测首次仍要扫码，QQ 会要"手Q验证"）；
-    不带 = 直接出二维码。
+    带 QQ 号 = **快速登录**：NapCat 用本机存着的那次登录态直接登进去，
+    **不用再扫码**（它的日志里写着"正在快速登录 123456789"）。
+    不带 = 直接出二维码，每次都等用户扫 —— 2026-10-13 用户报
+    "频繁登录太麻烦"，根因就是这个参数没传（见 run.py 的 run_deploy）：
+    重启后台、关机再开、更新完，都白白让他重扫一次。
+
+    首次登录仍然要扫码（本机还没有登录态）；快速登录失败（比如那个号
+    正登在他自己电脑的 QQ 上）时 NapCat 会直接退出，由
+    `fast_login_failed()` 认出来并退回扫码。
     """
     exe = shell_dir / "NapCatWinBootMain.exe"
     return [str(exe), str(qq)] if qq else [str(exe)]
+
+
+def fast_login_failed(proc, connected: bool) -> bool:
+    """这次快速登录没成吗：**进程已经退了、而且还没连上**。
+
+    为什么能这么判：成功时那个启动器进程会一直活着（真实进程树里
+    NapCatWinBootMain → node → 一堆 QQ.exe），失败时它印完
+    "已登录,无法重复登录" 就自己退出。
+    """
+    return not connected and proc is not None and proc.poll() is not None
 
 
 def start_shell(shell_dir: Path, qq: int | None = None,

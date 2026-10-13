@@ -241,6 +241,28 @@ def autostart_enabled() -> bool:
     return autostart_entry().is_file()
 
 
+def _volatile(path: Path) -> bool:
+    """这个路径明天还在吗 —— 临时文件夹里的都不算数。
+
+    真踩过（2026-10-13 用户报"挂不了后台"）：开机自启那条快捷方式指向的是
+    一次临时目录里跑出来的 `…\\Temp\\tmpXXXX\\run.py`，临时目录早被清了。
+    开机时 Windows 跑了个不存在的程序，而界面上还写着"已开启"。
+    """
+    import tempfile
+
+    for base in (os.environ.get("TEMP"), tempfile.gettempdir()):
+        if not base:
+            continue
+        try:
+            root = Path(base).resolve()
+            target = Path(path).resolve()
+        except OSError:
+            continue
+        if target == root or root in target.parents:
+            return True
+    return False
+
+
 def set_autostart(enabled: bool, root: Path | None = None) -> tuple[bool, str]:
     """开/关开机自启。返回 (成功?, 说明)。
 
@@ -267,6 +289,15 @@ def set_autostart(enabled: bool, root: Path | None = None) -> tuple[bool, str]:
     # exe：`私人秘书.exe --serve`；源码：`pythonw.exe run.py --serve`
     arguments = ("--serve" if frozen_exe()
                  else f'"{project / "run.py"}" --serve')
+    # 指向临时目录的自启 = 假的：那个目录迟早被系统清掉，开机时什么都不发生，
+    # 而界面上还写着"已开启"。宁可当场说清楚，让用户把它挪到固定的地方。
+    for what, candidate in (("程序目录", project), ("要启动的程序", target)):
+        if _volatile(candidate):
+            return False, (
+                f"{what}在临时文件夹里：{candidate}\n"
+                "开机自启指不了这儿 —— 那个目录会被系统清掉，"
+                "开机时什么都不会发生。\n"
+                "把整个软件文件夹挪到一个固定的地方（比如 D 盘），再开一次。")
     try:
         entry.parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:

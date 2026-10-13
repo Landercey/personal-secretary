@@ -611,20 +611,25 @@ def run_deploy(store, pipeline, account: int) -> int:
     #    窗口藏起来：不藏的话用户点一下「启动 QQ」就蹦出两个终端，
     #    十有八九会以为是病毒弹的（二维码我们自己在界面里显示，不需要它那个窗）。
     #    它的输出照样留着（写 napcat.log）—— 窗口藏起来之后空句柄会让它报错退出。
-    napcat = deploy.start_shell(shell)
+    #    **带上登录号** = 让 NapCat 快速登录：本机存着的那次登录态直接用，
+    #    不用再扫码。以前没带这个参数，于是每次重启后台/关机再开/更新完
+    #    都要用户重扫一遍（2026-10-13 报的"频繁登录太麻烦"就是这个）。
+    napcat = deploy.start_shell(shell, account)
     print(f"  NapCat 已启动（PID {napcat.pid}），它的输出在 "
           f"{deploy.default_dir() / 'napcat.log'}")
     deploy.report("NapCat 已启动，等扫码登录", active=False)
 
     print()
     print("=" * 62)
-    print("  即将弹出登录二维码，用手机 QQ 扫它")
-    print(f"  二维码图片：{deploy.qr_path(shell)}")
-    print("  ⚠️ 二维码约 2 分钟过期，过期了 Ctrl+C 重跑一次就好")
+    print(f"  先按登录号 {account} 自动登录（上一次扫过码就不用再扫了）")
+    print("  自动登录没成的话会自动退回扫码，二维码在这里：")
+    print(f"      {deploy.qr_path(shell)}")
+    print("  ⚠️ 二维码约 2 分钟过期，过期了点界面上的「重新出码」")
     print("=" * 62)
 
     last_line = ""
     repaired = 0
+    qr_fallback = False
     try:
         while True:
             time.sleep(2)
@@ -653,8 +658,20 @@ def run_deploy(store, pipeline, account: int) -> int:
                 deploy.report("NapCat 重建了配置，已自动补好并重启一次", active=False)
                 if napcat.poll() is None:
                     deploy.stop_shell(napcat)          # 连子进程一起收（否则每修一次漏一窝 QQ）
-                napcat = deploy.start_shell(shell)
+                napcat = deploy.start_shell(shell, account)
                 time.sleep(3)                  # 让它先起来，别立刻又判一次
+                continue
+
+            # ④ 快速登录没成（那个号正登在电脑上的 QQ 里之类的）→ 退回扫码。
+            #    不退的话用户对着一个死掉的进程干等，界面上什么都不说。
+            if (not qr_fallback and deploy.fast_login_failed(napcat, state.get("connected"))):
+                qr_fallback = True
+                why = deploy.napcat_error_hint() or "自动登录没成"
+                print(f"  ⚠️ {why}\n     改用扫码登录，二维码：{deploy.qr_path(shell)}")
+                deploy.report(f"自动登录没成（{why[:40]}），改用扫码", active=False)
+                deploy.stop_shell(napcat)
+                napcat = deploy.start_shell(shell)      # 不带号 = 出二维码
+                time.sleep(3)
                 continue
 
             if state.get("connected"):

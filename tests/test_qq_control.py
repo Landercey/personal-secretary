@@ -244,6 +244,30 @@ class Autostart(unittest.TestCase):
         ok, message = desktop.set_autostart(False)
         self.assertTrue(ok, message)
 
+    def test_autostart_refuses_a_temp_folder(self):
+        """从临时目录里跑的程序，开不了自启 —— 那等于骗人。
+
+        用户原话："现在好像挂不了后台"。查出来他那条自启快捷方式指的是
+        一次临时目录里跑出来的 run.py（`…\\Temp\\tmpXXXX\\run.py`），
+        临时目录早被清了：开机时 Windows 跑了个不存在的程序，
+        而界面上还写着"已开启"。
+        """
+        tmp = Path(tempfile.mkdtemp())
+        before = desktop.autostart_entry().is_file()
+
+        ok, message = desktop.set_autostart(True, root=tmp)
+
+        # 拒绝就要拒绝干净：启动文件夹里的东西一个字都不能动
+        self.assertEqual(desktop.autostart_entry().is_file(), before)
+        if desktop.launcher(tmp)[0] is None:
+            self.skipTest("这台机器上没有 pythonw.exe")
+        self.assertFalse(ok)
+        self.assertIn("临时", message)
+
+    def test_temp_and_normal_paths_are_told_apart(self):
+        self.assertTrue(desktop._volatile(Path(tempfile.gettempdir()) / "x" / "run.py"))
+        self.assertFalse(desktop._volatile(Path(r"C:\私人秘书\私人秘书.exe")))
+
 
 class QqPanel(Base):
     """「收消息」那一页要的状态。什么都还没装时也得能正常回话。"""
