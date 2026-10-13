@@ -450,6 +450,14 @@ def background_prelude() -> None:
     （原来只有命令行那条路 `--qq` 清了，界面按钮走的 `--serve` 没清。）
     """
     heartbeat.clear_stop()
+    # 输出被重定向到文件时，Python 默认是**块缓冲** —— 后台明明在跑，
+    # 界面里那块「上次启动的输出」却一直是空的（2026-10-13 用户登不上，
+    # 那份日志 0 字节，最后只能去翻 NapCat 自己的日志）。
+    # 改成按行刷：出问题时至少有东西看。
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:
+        pass            # 冻结成 exe 且没有 stdout 时就这样，不是致命问题
 
 
 def run_setup(onekey_dir: Path, account: int, token: str, port: int,

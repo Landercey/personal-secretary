@@ -1439,6 +1439,16 @@ async function drawQqPanel() {
        </div>`
     : '';
 
+  // 登录失败的原因**必须摆出来**。NapCat 只把它写在自己日志里，
+  // 不给用户看的话，他看到的就是"扫了码、点了确认、然后什么都没有"。
+  const napcatError = String(data.napcat_error || '');
+  const napcatBlock = (!connected && napcatError)
+    ? `<div class="guide warn" style="margin:0 0 12px">
+         <p><b>⚠️ QQ 那边登录没成</b></p>
+         <p>${esc(napcatError)}</p>
+       </div>`
+    : '';
+
   // 启动之前必须满足的条件。**不提前说的话，用户点完只会看到"卡住"** ——
   // 没有登录号时程序会跳过整套 NapCat 部署、直接去等一个永远不来的连接。
   const blockers = data.blockers || [];
@@ -1476,6 +1486,7 @@ async function drawQqPanel() {
     ${blockerBlock}
     ${progressBlock}
     ${scopeBlock}
+    ${napcatBlock}
     ${qrBlock}
     <div class="acts">
       <button class="primary block" id="btnQQStart"${

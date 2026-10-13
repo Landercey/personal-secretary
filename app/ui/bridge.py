@@ -406,6 +406,10 @@ class Api:
             # 进程退了它还能 True 一分钟；这个直接问那把独占锁，是精确的。
             # 界面判断"后台到底还在不在"必须用这个（重启流程踩过坑）。
             "running": heartbeat.proc_alive(),
+            # NapCat 自己的日志里最后一条报错，翻成人话 ——
+            # 登录失败时它只写在自己日志里，不给用户看的话就是
+            # "扫了码、点了确认、然后什么都没有"（2026-10-13 报的）。
+            "napcat_error": deploy.napcat_error_hint(),
             "qr": qr_info,
             "autostart": desktop.autostart_enabled(),
             "blockers": self._qq_blockers(),

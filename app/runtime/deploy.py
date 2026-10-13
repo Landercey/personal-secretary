@@ -206,6 +206,45 @@ def decode_output(raw: bytes) -> str:
     return raw.decode("utf-8", "replace")
 
 
+# NapCat 的报错 → 人话。它自己说得很简略（"已登录,无法重复登录"），
+# 用户看完不知道"已经在哪登录了、我该干什么"。
+NAPCAT_ERROR_HINTS = (
+    ("已登录",
+     "这个 QQ 号已经在别处登着了 —— 多半是你自己电脑上那个 QQ 正登着它。"
+     "同一个号不能同时登两个电脑端：要么在那边退出登录，要么换一个号给这个工具用"
+     "（手机上的那个不算冲突，可以继续登着）。"),
+    ("二维码", "二维码过期了，点「重新出码」换一张。"),
+)
+
+# NapCat 的日志给级别套了**颜色转义码**：`[<ESC>[31merror<ESC>[39m]`。
+# 不先剥掉的话按 "[error]" 找一行都找不到 —— 真踩过：单测按"我以为的格式"
+# 写是绿的，拿真日志一跑什么都读不出来。
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def napcat_error_hint(onekey_dir: Path | None = None) -> str:
+    """从 NapCat 自己的日志里捞最后一条报错，翻成人话（认不出来就原样给）。
+
+    为什么要读它的日志：登录失败时 NapCat 只在自己日志里写一句，
+    **界面上一点都看不出来** —— 用户看到的就是"扫了码、点了确认、然后什么都没有"
+    （2026-10-13 报的，实际原因是那个号正登在他自己电脑上的 QQ 里）。
+    """
+    path = (onekey_dir or default_dir()) / "napcat.log"
+    try:
+        blob = path.read_bytes()[-8000:]        # 只读尾巴：日志会一直长
+    except OSError:
+        return ""
+    text = _ANSI.sub("", decode_output(blob))
+    lines = [ln.strip() for ln in text.splitlines() if "[error]" in ln]
+    if not lines:
+        return ""
+    last = lines[-1].split("[error]", 1)[-1].strip()
+    for needle, hint in NAPCAT_ERROR_HINTS:
+        if needle in last:
+            return hint
+    return last[:120]                            # 认不出来也给原话，用户至少能搜
+
+
 def run_installer(onekey_dir: Path,
                   on_progress: Callable[..., None] | None = None,
                   timeout: float = 1800.0) -> None:

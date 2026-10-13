@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT))
 
 from app.contracts.models import TIME_FORMAT                     # noqa: E402
 from app.runtime import heartbeat                                # noqa: E402
+from app.runtime import deploy                                   # noqa: E402
 from app.runtime.config import Config                            # noqa: E402
 from app.sources.qq import QQSettings, QQSource, group_entries    # noqa: E402
 from app.ui.bridge import Api                                    # noqa: E402
@@ -225,3 +226,42 @@ class TestPreciseLiveness(unittest.TestCase):
         result = Api(None).start_qq()
         self.assertFalse(result["ok"])
         self.assertIn("已经在跑", result["message"])
+
+
+class TestNapcatLoginErrorIsVisible(unittest.TestCase):
+    """登录失败的原因必须能从界面看出来。
+
+    真事（2026-10-13）：用户"还是登不上"，界面上一声不吭。实际原因在 NapCat
+    自己的日志里 —— `当前账号(123456789)已登录,无法重复登录`：他配的那个号
+    正登在自己电脑的普通 QQ 上，同一个号不能同时登两个电脑端。
+
+    所以读它的日志尾巴、翻成人话摆到面板上。认不出来的错误码也把原话给出去
+    （用户至少能拿去搜）——**什么都不说**是最坏的一种。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+
+    def write_log(self, text: str) -> None:
+        (self.dir / "napcat.log").write_text(text, encoding="utf-8")
+
+    def test_says_what_already_logged_in_means(self):
+        # 注意带上颜色转义码 —— 这是 NapCat 真实写出来的格式
+        # （没有它的话这条测试是我按"我以为的格式"写的，一拿真日志就废）
+        self.write_log(
+            "10-13 12:53:36 [info] 请扫描下面的二维码，然后在手Q上授权登录：\n"
+            "10-13 12:53:44 [\x1b[31merror\x1b[39m] 当前账号(123456789)已登录,无法重复登录\n")
+        hint = deploy.napcat_error_hint(self.dir)
+        self.assertIn("电脑上那个 QQ", hint)
+        self.assertIn("换一个号", hint)
+
+    def test_unknown_error_gives_the_raw_line(self):
+        self.write_log("10-13 12:00:00 [error] 某个没见过的问题\n")
+        self.assertIn("某个没见过的问题", deploy.napcat_error_hint(self.dir))
+
+    def test_no_error_no_noise(self):
+        self.write_log("10-13 12:00:00 [info] 一切正常\n")
+        self.assertEqual(deploy.napcat_error_hint(self.dir), "")
+        self.assertEqual(deploy.napcat_error_hint(self.dir / "没有这个目录"), "")
