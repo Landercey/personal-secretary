@@ -63,6 +63,10 @@ _DATE_MD = re.compile(r"(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]")
 _DATE_THIS_MONTH = re.compile(r"本月\s*(\d{1,2})\s*[日号]")
 _DATE_NEXT_MONTH = re.compile(r"下月\s*(\d{1,2})\s*[日号]")
 _DATE_REL = re.compile(r"(大后天|后天|今天|今晚|今早|明天|明晚|明早)")
+
+# ---- 表格类整块：标题里写了这些字，就当"这是一张表" ----
+# 见 should_merge 里的说明：这种表摘掉时间只剩一个人名，光看每行立不立得住分不出来。
+_TABLE_WORD = re.compile(r"(值班|排班|班次|课表|时间表|日程|轮值)")
 _DATE_WEEK = re.compile(r"(下周|本周|这周|周|星期)([一二三四五六日天1-7])")
 
 # ---- 时刻 ----
@@ -534,7 +538,7 @@ def solid_lines(lines: list[str]) -> list[tuple[str, TaskDraft]]:
 def is_schedule_block(lines: list[str]) -> bool:
     """整块是不是一张表（值班表 / 排班表 / 时间表）。
 
-    判据：行数 ≥3，且**每一行都带时间线索**。
+    判据：**每一行都带时间线索**（第一行若是标题——"下周值班表"这种——不算）。
 
     为什么这条能区分"表"和"带时间的清单"：
       · 清单（"明天交作业""后天开会"）—— 每行摘掉时间后还剩整件事，
@@ -544,10 +548,19 @@ def is_schedule_block(lines: list[str]) -> bool:
 
     实测：旧库里 5 行值班表被逐行判成碎片，**一条都没留下** ——
     用户看到的也是"我发的那张表没反应"。
+
+    ⚠️ 2026-10-13 补：真的值班表**常常第一行是标题**（"下周值班表"），
+    那一行没有时间 —— 原来要求"每一行都有时间"，于是整张表不成立，
+    被拆成「张三」「李四」两条待办（离线模拟里真复现了）。
+    现在允许把标题行摘掉再判；门槛也降到 2 行（真正拦住它的是
+    `should_merge` 里那句"每行自己都立不住"，跟行数无关）。
     """
-    if len(lines) < 3:
+    rows = [line for line in lines if line.strip()]
+    if rows and not has_time_hint(rows[0]):
+        rows = rows[1:]                      # 第一行是标题，不算内容行
+    if len(rows) < 2:
         return False
-    return all(has_time_hint(line) for line in lines)
+    return all(has_time_hint(line) for line in rows)
 
 
 def should_merge(lines: list[str], from_file: bool) -> bool:
@@ -559,6 +572,12 @@ def should_merge(lines: list[str], from_file: bool) -> bool:
         # 实测：一份《实验报告要求.docx》4 行，按行切会切出
         # "字数不少于 2000 字""交到"这种垃圾。
         return len(solid) < 2
+    if is_schedule_block(lines) and _TABLE_WORD.search("\n".join(lines)):
+        # 标题里明写了"值班表/排班表/课表"——**这就是一张表**，别管每行能不能
+        # 独立成立：那种表长这样"张三 周一 8:00-12:00"，摘掉时间只剩一个人名，
+        # 人名的"长度"和"拿快递"一样，`solid_lines` 分不出来（实测被拆成
+        # 「张三」「李四」两条待办）。关键词是这里唯一可靠的信号。
+        return True
     if len(lines) >= PROSE_MIN_LINES and len(solid) * 3 < len(lines):
         return True
     return is_schedule_block(lines) and len(solid) < 2

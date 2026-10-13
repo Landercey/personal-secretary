@@ -109,6 +109,34 @@ class TestFieldLabels(unittest.TestCase):
 
 
 class TestTimeParsing(unittest.TestCase):
+    def test_roster_with_a_header_line_is_one_todo(self):
+        """值班表第一行是标题时，整张表要合成**一条**，不能拆成人名。
+
+        2026-10-13 离线模拟里真复现了：那张表长这样 ——
+
+            下周值班表
+            张三 周一 8:00-12:00
+            李四 周二 8:00-12:00
+
+        原来要求"每一行都带时间"，标题那行没有 → 整条规则不成立 →
+        被拆成「张三」「李四」两条待办。而"张三"这种两字人名和
+        "拿快递"一样长，光看长度分不出是不是待办，所以只能靠
+        **标题里的"值班表/排班表"这类词**来判（见 should_merge）。
+        """
+        block = "下周值班表\n张三 周一 8:00-12:00\n李四 周二 8:00-12:00"
+        draft = quick_parse.parse_line(block)
+        self.assertIsNotNone(draft)
+        self.assertIn("值班表", draft.title)
+        self.assertNotEqual(draft.title.strip(), "张三")
+
+    def test_a_list_of_real_todos_still_splits(self):
+        """反面：两行各自都是真待办时**不许**当成表合起来（别被上一条规则误伤）。"""
+        self.assertFalse(quick_parse.should_merge(["明天交作业", "后天开会"],
+                                                  from_file=False))
+        self.assertTrue(quick_parse.should_merge(
+            ["下周值班表", "张三 周一 8:00-12:00", "李四 周二 8:00-12:00"],
+            from_file=False))
+
     def test_spaces_inside_a_date_are_tolerated(self):
         """数字和「月/日/号」之间带空格也要认（用户真发过这么一条）。
 
