@@ -82,18 +82,41 @@ class TestRemindStrengthPerTask(Base):
         result = self.api.set_remind(task_id, 60)
 
         self.assertEqual(result["ok"], True)
-        self.assertEqual(result["text"], "提前 1 小时提醒一次")
+        self.assertEqual(result["text"], "提前 1 小时各提醒一次")
         task = self.store.get_task(task_id)
-        self.assertEqual(task.remind_level, 60)
+        self.assertEqual(task.remind_leads, "60")
         self.assertEqual(self.api._task_dict(task)["remind_text"],
-                         "提前 1 小时提醒一次")
+                         "提前 1 小时各提醒一次")
 
-    def test_the_dropdown_offers_default_plus_the_configured_ones(self):
+    def test_several_leads_at_once(self):
+        """用户原话："要能实现多次提醒，不是只能选一个"。"""
+        task_id = self.add("三点开会", due=stamp(1, 15))
+
+        result = self.api.set_remind(task_id, [60, 10])
+
+        self.assertEqual(result["remind"], [60, 10])
+        task = self.store.get_task(task_id)
+        self.assertEqual(task.remind_leads, "60,10")
+        self.assertEqual(self.api._task_dict(task)["remind"], [60, 10])
+        self.assertIn("提前 1 小时", self.api._task_dict(task)["remind_text"])
+        self.assertIn("提前 10 分钟", self.api._task_dict(task)["remind_text"])
+
+    def test_clearing_every_lead_goes_back_to_default(self):
+        task_id = self.add("拿快递")
+        self.api.set_remind(task_id, [60, 10])
+
+        self.api.set_remind(task_id, [])
+
+        task = self.store.get_task(task_id)
+        self.assertEqual(task.remind_leads, "")
+        self.assertEqual(self.api._task_dict(task)["remind_text"],
+                         "默认：只在每日汇总里出现")
+
+    def test_the_options_are_the_configured_leads(self):
         task_id = self.add("拿快递")
         options = self.api._task_dict(self.store.get_task(task_id))["remind_options"]
 
-        self.assertEqual([o["minutes"] for o in options], [0, 3, 10, 30, 60])
-        self.assertEqual(options[0]["label"], "默认：只在每日汇总里出现")
+        self.assertEqual([o["minutes"] for o in options], [3, 10, 30, 60])
         self.assertEqual(options[-1]["label"], "提前 1 小时提醒一次")
 
     def test_negative_is_refused(self):
@@ -150,6 +173,40 @@ class TestOldRemindLevelsAreNormalized(unittest.TestCase):
         try:
             levels = sorted(t.remind_level for t in store.list_tasks("open"))
             self.assertEqual(levels, [0, 30])
+        finally:
+            store.close()
+
+    def test_old_single_value_moves_into_the_new_column(self):
+        """v0.3.6 那种"只设了一个提前量"的库，加列时那个值要搬过去、不能丢。
+
+        （用户 2026-10-13 要"一条提醒多次"时加的 `remind_leads`；老库里
+         提前量存在 `remind_level` 上。）
+        """
+        import sqlite3
+
+        conn = sqlite3.connect(self.path)
+        with conn:
+            conn.execute("DROP TABLE tasks")
+            conn.execute(
+                """CREATE TABLE tasks (
+                     task_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT,
+                     detail TEXT DEFAULT '', due_at TEXT, location TEXT,
+                     remind_level INTEGER NOT NULL DEFAULT 0, priority INTEGER DEFAULT 2,
+                     source_kind TEXT DEFAULT 'manual', source_name TEXT DEFAULT '',
+                     sender TEXT DEFAULT '', origin_msg_id TEXT DEFAULT '',
+                     confidence REAL DEFAULT 1, quoted TEXT DEFAULT '',
+                     status TEXT DEFAULT 'open', is_archived INTEGER DEFAULT 0,
+                     dedup_key TEXT DEFAULT '', created_at TEXT DEFAULT '',
+                     updated_at TEXT DEFAULT '', completed_at TEXT DEFAULT '',
+                     archive_reason TEXT DEFAULT '', drop_reason TEXT DEFAULT '')""")
+            conn.execute("INSERT INTO tasks (title, remind_level, dedup_key) "
+                         "VALUES ('交表', 60, 'k1')")
+        conn.close()
+
+        store = self.reopen()
+        try:
+            task = store.list_tasks("open")[0]
+            self.assertEqual(task.remind_leads, "60")     # 值搬过来了
         finally:
             store.close()
 

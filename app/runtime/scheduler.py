@@ -97,15 +97,45 @@ def remind_options() -> list[int]:
 
 
 def describe_remind(minutes: int) -> str:
-    """这条待办的提醒力度用一句话怎么说 —— 待办详情里直接显示。
-
-    为什么不用"强提醒/极重要"这种词：用户要的是"提前 60 分钟"这种能对上表的时间，
-    光写"强提醒"三个字，他没法知道它到底提前多久。
-    """
+    """**单个**提前量用一句话怎么说（下拉的选项文案、以及老数据的兜底显示）。"""
     minutes = int(minutes or 0)
     if minutes <= 0:
         return "默认：只在每日汇总里出现"
     return f"提前 {human_minutes(minutes)}提醒一次"
+
+
+def describe_leads(leads: list[int]) -> str:
+    """一条待办的提醒力度（可能好几个）用一句话怎么说 —— 待办详情里显示这句。
+
+    用户原话："要能实现多次提醒，不是只能选一个" —— 那就得能一眼看出
+    这条会在哪几个时间点提醒：**提前 1 小时、提前 10 分钟各提醒一次**。
+    """
+    clean = sorted({int(item) for item in leads if int(item) > 0}, reverse=True)
+    if not clean:
+        return "默认：只在每日汇总里出现"
+    when = "、".join(f"提前 {human_minutes(minutes)}" for minutes in clean)
+    return f"{when}各提醒一次"
+
+
+def task_leads(task) -> list[int]:
+    """这条待办要在截止前多少分钟各提醒一次（去掉重复、按从早到晚）。
+
+    优先看 `remind_leads`（可以好几个）；老数据只有 `remind_level` 一个值。
+    """
+    raw = str(getattr(task, "remind_leads", "") or "")
+    found: set[int] = set()
+    for piece in raw.replace("，", ",").split(","):
+        try:
+            minutes = int(piece.strip())
+        except ValueError:
+            continue
+        if minutes > 0:
+            found.add(minutes)
+    if not found:
+        single = int(getattr(task, "remind_level", 0) or 0)
+        if single > 0:
+            found.add(single)
+    return sorted(found, reverse=True)
 
 
 @dataclass(slots=True)
@@ -219,8 +249,9 @@ def due_reminders(store, now: datetime | None = None,
     判据三样都得占：有截止时间、还没完成、而且**正好走进它的提前量窗口**
     （到点后 REMIND_WINDOW_MINUTES 分钟内都算）。
     没有截止时间的只在汇总里出现 —— 没有"截止前"可言。
-    提前量就是这条待办自己的 `remind_level`（0 = 只在汇总里出现，跳过），
-    值由用户在详情里选（那排选项来自 config 的 [remind] options）。
+    提前量是这条待办自己的（`task_leads`）—— **可以有多个**：设了"提前一小时、
+    提前十分钟"，那两个时间点各提醒一次（用户要的就是"多次提醒"）。
+    没设的只在汇总里出现，跳过。
 
     limit 兜住一次推太多：一口气 50 条提醒比不提醒还烦。
     返回按提前量从小到大排（越急的越靠前）。
@@ -228,16 +259,17 @@ def due_reminders(store, now: datetime | None = None,
     moment = now or datetime.now()
     found: list[tuple[object, int]] = []
     for task in store.list_tasks("open", limit=200):
-        minutes = int(getattr(task, "remind_level", 0) or 0)
-        if minutes <= 0 or not task.due_at:
+        leads = task_leads(task)
+        if not leads or not task.due_at:
             continue
         try:
             due = datetime.strptime(str(task.due_at), TIME_FORMAT)
         except ValueError:
             continue                      # 时间格式坏了的先不管它
-        fire = due - timedelta(minutes=minutes)
-        if fire <= moment < fire + timedelta(minutes=REMIND_WINDOW_MINUTES):
-            found.append((task, minutes))
+        for minutes in leads:
+            fire = due - timedelta(minutes=minutes)
+            if fire <= moment < fire + timedelta(minutes=REMIND_WINDOW_MINUTES):
+                found.append((task, minutes))
     found.sort(key=lambda item: item[1])
     return found[:max(0, int(limit))]
 

@@ -23,7 +23,8 @@ from pathlib import Path
 
 from ..contracts.models import STATUS_DONE, STATUS_DROPPED, STATUS_OPEN
 from ..runtime.humanize import human_due
-from ..runtime.scheduler import describe_remind, remind_options
+from ..runtime.scheduler import (describe_leads, describe_remind, remind_options,
+                                 task_leads)
 from ..sinks.router import channel_status, push_help_section, push_ready
 
 
@@ -226,18 +227,16 @@ class Api:
             "sender": task.sender or "",
             "quoted": task.quoted or "",
             "detail": task.detail or "",
-            "remind": int(task.remind_level),
-            # 这条现在会怎么提醒，人话（"提前 30 分钟提醒一次" /
-            # "默认：只在每日汇总里出现"）。让后端算这句话，是为了和调度器
-            # 用的是同一套口径 —— 界面上另写一份迟早对不上。
-            "remind_text": describe_remind(task.remind_level),
-            # 详情里那个下拉能选的档：默认 + 设置里配的那几个。
+            # 这条待办选了哪几个提前量（**可以有多个**）。界面拿它勾勾选框。
+            "remind": task_leads(task),
+            # 这句话是给人看的（"提前 1 小时、提前 10 分钟各提醒一次" /
+            # "默认：只在每日汇总里出现"）。让后端算，是为了和调度器同一套口径。
+            "remind_text": describe_leads(task_leads(task)),
+            # 详情里能勾的那几档（设置里配的）。**一个都不勾 = 默认**：
+            # 只在每日汇总里出现 —— 所以这里不放那个"默认"项，它不是一个提前量。
             # 文案由后端一起给（和调度器同一套口径），界面不自己拼"1 小时"这种词。
-            "remind_options": [
-                {"minutes": 0, "label": describe_remind(0)},
-                *[{"minutes": m, "label": describe_remind(m)}
-                  for m in remind_options()],
-            ],
+            "remind_options": [{"minutes": m, "label": describe_remind(m)}
+                               for m in remind_options()],
             "attachments": len(task.attachments),
             "files": [{"name": a.name, "path": a.path, "size": int(a.size),
                        "kind": a.kind} for a in task.attachments],
@@ -436,20 +435,36 @@ class Api:
         self._revision += 1
         return {"ok": True}
 
-    def set_remind(self, task_id: int, minutes: int) -> dict:
-        """改这一条的提醒力度：截止前多少分钟单独提醒一次（0 = 只在汇总里出现）。
+    def set_remind(self, task_id: int, minutes) -> dict:
+        """改这一条的提醒力度：截止前哪几个时间点各提醒一次。
 
-        用户要的原话："旧软件那种，开始前可以选自己设定的力度，也可以是默认，
-        比如 60 分钟前、30 分钟前、10 分钟前、3 分钟前"。
-        能选哪几个档在设置里配（[remind] options），这里只负责存一个整数。
+        用户第一版的原话："旧软件那种，开始前可以选自己设定的力度，也可以是默认，
+        比如 60 分钟前、30 分钟前、10 分钟前、3 分钟前"；
+        第二版补了一句："要能实现多次提醒，不是只能选一个" —— 所以这里收的是
+        **一组**分钟数（也收单个数字，界面早期版本传的就是单个）。
+        一个都不选 = 默认：只在每日汇总里出现。
         """
-        value = int(minutes or 0)
-        if value < 0:
-            return {"ok": False, "message": "提醒提前量不能是负数"}
-        self.store.update_fields(int(task_id), {"remind_level": value})
+        if isinstance(minutes, (list, tuple, set)):
+            raw = list(minutes)
+        else:
+            raw = [minutes]
+        leads: set[int] = set()
+        for item in raw:
+            try:
+                value = int(item)
+            except (TypeError, ValueError):
+                continue
+            if value < 0:
+                return {"ok": False, "message": "提醒提前量不能是负数"}
+            if value > 0:
+                leads.add(value)
+        stored = ",".join(str(m) for m in sorted(leads, reverse=True))
+        # 只留一个值时也写进新列（老列留着不动，免得两处语义打架）
+        self.store.update_fields(int(task_id), {"remind_leads": stored,
+                                               "remind_level": 0})
         self._revision += 1
-        return {"ok": True, "remind": value,
-                "text": describe_remind(value)}
+        return {"ok": True, "remind": sorted(leads, reverse=True),
+                "text": describe_leads(sorted(leads, reverse=True))}
 
     def push_history(self) -> dict:
         """最近推过什么。用户问"手机上怎么没收到"时，第一眼看这里。"""

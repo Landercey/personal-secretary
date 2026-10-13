@@ -1219,6 +1219,23 @@ settings   设置 → 推送到手机 → 提醒力度：options = [60, 30, 10, 
 * **去重跟汇总共用一本账**（`push_records`，批次 `remind:<任务号>:<提前量>`）：
   重启、手动再开一次程序，都不会把"还有一小时"推两遍。
 
+**追加（同一天晚些，用户第二句话）**："要能实现多次提醒，不是只能选一个"。
+
+于是那一行从下拉改成**能点好几个的小胶囊**，存储也跟着变：
+
+```
+tasks.remind_leads  TEXT  -- 逗号分隔的分钟数，比如 "60,10"
+tasks.remind_level  INTEGER -- 留着不删：老库的单个提前量在这儿
+```
+
+两个字段并存是**故意的**：SQLite 改不了列类型，加列是唯一安全的迁移方式
+（`repository._add_missing_columns()`，开库时按 `PRAGMA table_info` 判断缺不缺，
+缺了就 `ALTER TABLE ADD COLUMN` 并把老的 `remind_level > 0` 的值搬过去）。
+读的时候 `scheduler.task_leads()` 新列优先、空就回退老列 —— 老数据一条都不会丢。
+
+⚠️ **迁移只在 open_database 里做**（`CREATE TABLE IF NOT EXISTS` 对已存在的表
+什么都不做，不显式 ALTER 的话老用户的库永远缺这一列，一读就 KeyError）。
+
 ### 7.8 「挂不了后台」+「频繁登录太麻烦」（2026-10-13 用户报，两个独立原因）
 
 用户原话："现在好像挂不了后台，点 X 后直接退了……频繁登录太麻烦了，

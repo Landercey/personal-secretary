@@ -143,6 +143,11 @@ class Task:
     due_at: str | None = None
     location: str | None = None
     remind_level: int = 0                       # 同 TaskDraft：提前多少分钟
+    # 一条待办要提醒**多次**时用它：逗号分隔的分钟数，比如 "60,10" =
+    # 提前一小时、提前十分钟各提醒一次。留空就看 remind_level（单值）。
+    # 为什么两个字段并存：加列是 SQLite 里唯一安全的迁移方式（改不了列类型），
+    # 老数据的单值就留在原地，不去动它。
+    remind_leads: str = ""
     priority: int = 2
     source_kind: str = SOURCE_MANUAL
     source_name: str = ""

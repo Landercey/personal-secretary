@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- 提醒力度：截止前多少分钟单独提醒一次；0 = 只在每日汇总里出现
     -- （2026-10-13 之前这里是 1/2/3 三个档，open_database 会一次性把老值归零）
     remind_level  INTEGER NOT NULL DEFAULT 0,
+    -- 一次提醒不够时用这个：**逗号分隔的分钟数**，比如 "60,10" = 提前一小时和
+    -- 提前十分钟各提醒一次。没填就走上面那个单值（老数据全靠它）。
+    -- 为什么另开一列而不是改上面那列：SQLite 改不了列类型，加列才是安全的迁移。
+    remind_leads  TEXT NOT NULL DEFAULT '',
     priority      INTEGER NOT NULL DEFAULT 2,
     source_kind   TEXT NOT NULL DEFAULT 'manual',
     source_name   TEXT NOT NULL DEFAULT '',

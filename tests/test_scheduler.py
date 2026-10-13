@@ -204,6 +204,26 @@ class TestDueReminders(unittest.TestCase):
         """设了提前一天的那条，前一天就提一次。"""
         self.assertEqual(self.found("2026-10-08 15:00"), [("交表", 1440)])
 
+    def test_one_task_can_fire_several_times(self):
+        """一条待办设了多个提前量 → 每个时间点各提醒一次（用户要的"多次提醒"）。"""
+        task = [t for t in self.store.list_tasks("open") if t.title == "三点开会"][0]
+        self.store.update_fields(task.task_id, {"remind_leads": "60,10"})
+
+        # 提前一小时：14:00 那次
+        self.assertEqual(self.found("2026-10-09 14:00"), [("三点开会", 60)])
+        # 提前十分钟：14:50 那次
+        self.assertEqual(self.found("2026-10-09 14:50"), [("三点开会", 10)])
+
+    def test_leads_parse_and_fall_back(self):
+        """新列优先；没有就回退到老的单值。"""
+        task = [t for t in self.store.list_tasks("open") if t.title == "顺路取快递"][0]
+        self.assertEqual(sch.task_leads(task), [])          # 默认：只进汇总
+        self.store.update_fields(task.task_id, {"remind_level": 30})
+        self.assertEqual(sch.task_leads(self.store.get_task(task.task_id)), [30])
+        self.store.update_fields(task.task_id,
+                                 {"remind_leads": "60，30, 60", "remind_level": 5})
+        self.assertEqual(sch.task_leads(self.store.get_task(task.task_id)), [60, 30])
+
     def test_one_task_one_reminder_per_tick(self):
         """同一条待办一轮只推一个提前量，不重复轰炸。"""
         both = self.found("2026-10-09 14:00")

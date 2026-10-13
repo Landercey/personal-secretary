@@ -141,6 +141,11 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
 .meta .due.soon    { color: var(--soon) }
 .meta .sep { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .5 }
 .meta .clip { opacity: .8 }
+/* 提醒力度的选项：一排能点的小胶囊，**可以点好几个**（一条待办提醒多次） */
+.chip { display: inline-block; margin: 2px 6px 2px 0; padding: 3px 9px;
+        border: 1px solid var(--line); border-radius: 999px; font-size: 11.5px;
+        color: var(--text-2); background: var(--panel); cursor: pointer }
+.chip.on { border-color: var(--accent); color: var(--accent); font-weight: 600 }
 
 .empty { text-align: center; color: var(--text-3); padding: 60px 20px; font-size: 13px; line-height: 2 }
 
@@ -684,7 +689,7 @@ function drawDetail() {
     <div class="kv"><b>时间</b><span>${esc(t.due)}</span></div>
     ${t.location ? `<div class="kv"><b>地点</b><span>${esc(t.location)}</span></div>` : ''}
     ${t.source ? `<div class="kv"><b>来源</b><span>${esc(t.source)}${t.sender ? ' · ' + esc(t.sender) : ''}</span></div>` : ''}
-    <div class="kv"><b>提醒力度</b><span>${remindSelect(t)}
+    <div class="kv"><b>提醒力度</b><span>${remindBox(t)}
       <a id="btnRemindSet" style="color:var(--accent);cursor:pointer;margin-left:6px">改选项 ›</a>
     </span></div>
     ${t.attachments ? `<div class="kv"><b>附件</b><span>${t.attachments} 个</span></div>` : ''}
@@ -694,15 +699,22 @@ function drawDetail() {
     ${detailActions(t)}`;
   const back = $('btnRestore');
   if (back) back.onclick = () => act('restore', t.id);
-  // 提醒力度：改完立刻存，不用另点保存（就一个下拉，多一步保存只会让人忘）
-  const remind = $('selRemind');
-  if (remind) remind.onchange = async () => {
-    const res = await call('set_remind', t.id, Number(remind.value));
-    if (!res || !res.ok) {
-      toast((res && res.message) || '没改成功');
-      return;
-    }
+  // 提醒力度：点一下就存，**可以勾好几个**（"要能实现多次提醒，不是只能选一个"）
+  const chips = $('remindChips');
+  if (chips) chips.onclick = async (event) => {
+    const chip = event.target.closest('.chip');
+    if (!chip) return;
+    const minutes = Number(chip.dataset.minutes);
+    const chosen = (t.remind || []).map(Number).filter(n => n > 0);
+    const next = chosen.includes(minutes)
+      ? chosen.filter(n => n !== minutes)
+      : chosen.concat(minutes);
+    const res = await call('set_remind', t.id, next);
+    if (!res || !res.ok) { toast((res && res.message) || '没改成功'); return; }
+    t.remind = res.remind;                    // 本地先更新，面板立刻重画
+    t.remind_text = res.text;
     toast(`提醒力度：${res.text}`);
+    renderPanel(true);
     refresh();
   };
   // 后面那个「改选项 ›」：跳到设置里 [remind] 那一段（能选的档在那儿配）
@@ -741,18 +753,28 @@ function junkSummary(text) {
   return first.length > 42 ? first.slice(0, 42) + '…' : first;
 }
 
-/* 「提醒力度」那个下拉：默认 + 设置里配的那几档（文案由后端给，别在这儿另拼）。
-   当前值不在表里也要显示出来 —— 用户把设置里的选项改小之后，
-   老的那条待办还得看得见、改得动。 */
-function remindSelect(t) {
+/* 「提醒力度」：**勾选**，可以勾好几个（用户原话："要能实现多次提醒，不是只能选一个"）。
+   一个都不勾 = 默认（只在每日汇总里出现），所以这里没有一个叫"默认"的勾选项。
+   当前选中的如果不在设置那张表里（用户后来把选项改小了），也补一个出来给他取消。 */
+function remindBox(t) {
+  const chosen = (t.remind || []).map(Number).filter(n => n > 0);
   const list = (t.remind_options || []).slice();
-  const current = Number(t.remind) || 0;
-  if (!list.some(option => Number(option.minutes) === current)) {
-    list.push({ minutes: current, label: t.remind_text || `提前 ${current} 分钟提醒一次` });
+  for (const minutes of chosen) {
+    if (!list.some(option => Number(option.minutes) === minutes)) {
+      list.push({ minutes, label: `提前 ${minutes} 分钟提醒一次` });
+    }
   }
-  return `<select id="selRemind">${list.map(option =>
-    `<option value="${option.minutes}"${Number(option.minutes) === current
-      ? ' selected' : ''}>${esc(option.label)}</option>`).join('')}</select>`;
+  if (!list.length) {
+    return '<span class="hint">设置里没配提前量（去「改选项」加一个）</span>';
+  }
+  const chips = list.map(option => {
+    const on = chosen.includes(Number(option.minutes));
+    return `<a class="chip ${on ? 'on' : ''}" data-minutes="${option.minutes}"
+      title="${esc(option.label)}">${on ? '✓ ' : ''}${esc(option.label)}</a>`;
+  }).join('');
+  return `<span id="remindChips">${chips}</span>
+    <p class="hint" style="margin-top:4px">${esc(t.remind_text || '')}
+      （可多选；一个都不点就是"只在每日汇总里出现"）</p>`;
 }
 
 /* 已完成 / 已归档的不在主列表里，所以动作只有一个：**移出**。

@@ -68,8 +68,26 @@ def open_database(path: str | Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
     _normalize_remind_unit(conn)
+    _add_missing_columns(conn)
     conn.commit()
     return conn
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    """给**老库**补上后来加的列。
+
+    `CREATE TABLE IF NOT EXISTS` 对已存在的表什么都不做 —— 所以加一列必须
+    显式 ALTER，不然老用户那边的库永远缺这一列，一读就报错。
+    （2026-10-13 用户要"一条待办提醒多次"时加的 `remind_leads`。）
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
+    if "remind_leads" not in columns:
+        conn.execute("ALTER TABLE tasks ADD COLUMN remind_leads TEXT NOT NULL DEFAULT ''")
+        # 老数据里"提前多少分钟"记在 remind_level 上，搬过来；
+        # 0 = 只在汇总里出现，新列留空正好是同一个意思。
+        conn.execute(
+            "UPDATE tasks SET remind_leads = CAST(remind_level AS TEXT) "
+            "WHERE remind_level > 0")
 
 
 def _normalize_remind_unit(conn: sqlite3.Connection) -> None:
@@ -431,7 +449,8 @@ class SqliteStore(Store):
         （完成时间、误判原因、归档原因）。混在一个万能方法里，
         以后没人说得清"这条到底被谁改过什么"。
         """
-        allowed = ("title", "detail", "due_at", "location", "remind_level")
+        allowed = ("title", "detail", "due_at", "location", "remind_level",
+                   "remind_leads")
         changes = {key: value for key, value in (fields or {}).items() if key in allowed}
         if not changes:
             return
@@ -514,6 +533,7 @@ class SqliteStore(Store):
             due_at=row["due_at"],
             location=row["location"],
             remind_level=int(row["remind_level"]),
+            remind_leads=str(row["remind_leads"] or ""),
             priority=int(row["priority"]),
             source_kind=row["source_kind"],
             source_name=row["source_name"],
