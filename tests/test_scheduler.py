@@ -245,7 +245,31 @@ class TestScheduler(unittest.TestCase):
         sent = self.scheduler.run_once(at("2026-10-08 07:31"))
         self.assertEqual(sent, ["2026-10-08 07:30"])
         self.assertEqual(len(self.sink.sent), 1)
-        self.assertIn("交作业", self.sink.sent[0].body)
+        # 早报只管今天（+逾期）；"拿快递"没写时间，按"今天"算
+        self.assertIn("拿快递", self.sink.sent[0].body)
+
+    def test_morning_skips_tomorrow_evening_keeps_it(self):
+        """早报不列明天的，晚报列 —— 这是"推送太繁琐"那条改的口径。
+
+        以前标题写着"今天要做的"，正文把 10 月 30 号的交作业也列上，
+        一天两次、每次一长串。现在每份只报它该报的那段：早报看今天，
+        晚报看明天；再远的等它到日子自然进来（界面上一直能看到全部）。
+        """
+        self.scheduler.run_once(at("2026-10-08 07:31"))
+        self.assertNotIn("交作业", self.sink.sent[0].body)     # 明天下午才交
+        self.assertIn("更远的还有 1 条", self.sink.sent[0].body)
+
+        self.scheduler.run_once(at("2026-10-08 21:31"))
+        self.assertIn("交作业", self.sink.sent[1].body)        # 晚报把明天的带上
+
+    def test_line_is_short_and_readable(self):
+        """那一行不能再出现 "2026-10-09 15:00:00"、"（私聊 xxx（我发的））" 这种。"""
+        self.scheduler.run_once(at("2026-10-08 21:31"))
+        body = self.sink.sent[0].body
+
+        self.assertIn("已逾期 · 10-09 15:00", body)            # 人话时间（这条是过期的）
+        self.assertNotIn(":00:00", body)                       # 没有秒
+        self.assertNotIn("手动录入", body)                      # 自己记的不写来源
 
     def test_does_not_deliver_twice(self):
         """同一份早报只推一次 —— 重启一次就重发一遍是最招人烦的。"""
@@ -315,14 +339,15 @@ class TestScheduler(unittest.TestCase):
 
         path = Path(self.tmp.name) / "pic.png"
         path.write_bytes(b"x")
-        task = self.store.list_tasks("open")[0]
+        # 附件挂在"交作业"上，那条是明天到期 —— 得看晚报才会出现
+        task = [t for t in self.store.list_tasks("open") if t.title == "交作业"][0]
         with self.store.conn:
             self.store.conn.execute(
                 "INSERT INTO attachments (task_id,msg_id,name,path,mime,size,kind,sha256)"
                 " VALUES (?,?,?,?,?,?,?,?)",
                 (task.task_id, "", "pic.png", str(path), "image/png", 1,
                  KIND_IMAGE, ""))
-        self.scheduler.run_once(at("2026-10-08 07:31"))
+        self.scheduler.run_once(at("2026-10-08 21:31"))
         self.assertTrue(self.sink.sent[0].attachments)
 
     def test_memory_gate_blocks_pushing(self):

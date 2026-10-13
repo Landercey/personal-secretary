@@ -156,6 +156,33 @@ def slot_title(moment: datetime) -> str:
     return "待办汇总"
 
 
+def slot_horizon(moment: datetime) -> int:
+    """这一份汇总该管到第几天（0 = 只看今天，1 = 看到明天）。
+
+    标题写着"今天要做的"，正文却把 10 月 30 号的交作业也列上 —— 用户的原话是
+    "推送的太繁琐了"。早报只看今天，晚报看明天（顺带把逾期的补上）；
+    再远的等它到日子自然会进来，这样每一份都短、都能一眼扫完。
+    """
+    return 0 if moment.hour < 12 else 1
+
+
+def within_horizon(task, moment: datetime, horizon: int) -> bool:
+    """这条该不该出现在这一份汇总里。
+
+    逾期的一律要（它们还没做完）；没写时间的也算今天（和界面「今天」一个口径）。
+    """
+    if not task.due_at:
+        return True
+    try:
+        due = datetime.strptime(str(task.due_at), TIME_FORMAT)
+    except ValueError:
+        return True                        # 时间认不出来的别藏起来
+    if due < moment:                       # 逾期：一定要提醒
+        return True
+    today = moment.date()
+    return (due.date() - today).days <= horizon
+
+
 def due_slots(now: datetime | None = None, *, times: list[str] | None = None,
               catch_up_minutes: int | None = None) -> list[Slot]:
     """现在有哪些时间点该推了。**不查数据库**，纯计算，方便测试。
@@ -275,13 +302,18 @@ class Scheduler:
         """组一份汇总发出去，并记账。"""
         from ..sinks.console import build_digest
 
-        tasks = self.store.list_tasks("open", limit=50)
-        payload = build_digest(tasks, title=slot.title)
+        everything = self.store.list_tasks("open", limit=50)
+        horizon = slot_horizon(slot.when)
+        tasks = [t for t in everything if within_horizon(t, slot.when, horizon)]
+        payload = build_digest(tasks, title=slot.title,
+                               rest=len(everything) - len(tasks))
         payload.channel = getattr(self.sink, "name", "console")
 
-        # 收消息那边没连上（没登录/后台没跑）时，在推送里说一句。
-        # 用户的原话是"我软件没登录，怎么一直有推送"—— 推送本来就跟登录无关
+        # 收消息那边没连上（没登录/后台没跑）时，才在推送尾巴上说一句。
+        # 用户的原话是"我软件没登录，怎么一直有推送" —— 推送本来就跟登录无关
         # （推的是你的待办汇总），但**不写清楚就会让人以为程序在瞎推**。
+        # ⚠️ 只在"出事了"的时候写：一切正常时那句状态＋数据目录是纯噪音，
+        # 用户 2026-10-13 的原话是"推送的太繁琐了"。
         from .heartbeat import state as beat_state
 
         detail = str(beat_state(self.store).get("detail") or "")
@@ -293,13 +325,14 @@ class Scheduler:
 
             where = re.sub(r"\\Users\\[^\\]+", r"\\Users\\…",
                            str(default_data_dir()))
-            payload.body += f"\n\n（收消息那边现在的状态：{detail}；这份汇总来自：{where}）"
+            payload.body += f"\n\n（⚠️ 收消息那边：{detail}；这份汇总来自：{where}）"
 
         result = self._send(slot.batch, payload)
         if result is None:
             return False
         if result.ok:
-            self._say(f"{slot.batch} 已推送「{slot.title}」（{len(tasks)} 条待办）")
+            self._say(f"{slot.batch} 已推送「{slot.title}」"
+                      f"（{len(tasks)} 条，另有 {len(everything) - len(tasks)} 条更远）")
         else:
             self._say(f"{slot.batch} 推送失败：{result.message}")
         return bool(result.ok)

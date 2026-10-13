@@ -17,7 +17,8 @@
 from __future__ import annotations
 
 from ..contracts.interfaces import Sink, SinkResult
-from ..contracts.models import PushPayload, Task
+from ..contracts.models import SOURCE_QQ_GROUP, PushPayload, Task
+from ..runtime.humanize import human_due
 
 
 class ConsoleSink(Sink):
@@ -36,35 +37,76 @@ class ConsoleSink(Sink):
 
 
 def format_task_line(task: Task, index: int = 0) -> str:
-    """一条待办 → 一行人话。推送和列表共用同一个格式，避免两处不一致。"""
-    when = task.due_at or "没写时间"
-    where = f" @{task.location}" if task.location else ""
-    origin = f"（{task.source_name}）" if task.source_name else ""
+    """一条待办 → **一行**，手机上要能一眼扫过去。
+
+    2026-10-13 用户原话："推送的太繁琐了，改改"。以前那一行长这样：
+        1. 交作业 — 2026-10-30 18:30:00（私聊 987654321（我发的））
+                  ↳ 10 月 30 号 18:30 交作业
+    猜都猜得到问题在哪：秒也写、来源里套括号、原话又跟标题重复一遍。
+    现在：
+        1. 交作业（10-30 18:30）
+
+    · 时间说人话（今天/明天/周几，超过一周才写月-日）；
+    · 来源只给**群消息**加，而且是群名 —— 私聊/自己发的不加
+      （"（私聊 987654321（我发的））"这种纯属噪音）；
+    · 原话不再每条都附：它是从消息里抄出来的，跟标题基本重复。
+      真要看原话，界面的详情里一直有（AI 归纳的那些除外，见 build_digest）。
+    """
+    when = human_due(task.due_at)[0]
+    where = f" · {task.location}" if task.location else ""
     head = f"{index}. " if index else ""
+    origin = ""
+    if task.source_kind == SOURCE_QQ_GROUP and task.source_name:
+        origin = f"（{_short_source(str(task.source_name))}）"
     # confidence < 1 = 这条是 AI 归纳出来的，不是规则算出来的。
     # 必须让用户在推送里就看得出来，不然他没法判断"这是原文说的还是模型补的"。
     ai = "【AI】" if float(getattr(task, "confidence", 1.0) or 1.0) < 1 else ""
-    return f"{head}{task.title} — {when}{where}{origin}{ai}"
+    return f"{head}{task.title}{ai}（{when}{where}）{origin}"
+
+
+def _short_source(name: str) -> str:
+    """群名太长就砍一刀 —— 推送那一行放不下十几个字的名字。"""
+    clean = " ".join(str(name or "").split())
+    return clean if len(clean) <= 12 else clean[:12] + "…"
+
+
+def _excerpt_line(task: Task) -> str:
+    """要不要给这条附一句原话。**只给 AI 归纳的那些附。**
+
+    规则算出来的标题就是从原话里摘的，附上只是把消息写长一倍；
+    AI 归纳的标题可能跟原话差得远，那才需要原文在旁边作对照
+    （合同里也要求这种情况必须标出来）。
+    """
+    quote = " ".join(str(task.quoted or "").split())
+    if not quote or float(getattr(task, "confidence", 1.0) or 1.0) >= 1:
+        return ""
+    return f"   ↳ 原话：{quote[:60]}{'…' if len(quote) > 60 else ''}"
 
 
 def build_digest(tasks: list[Task], title: str = "待办汇总",
-                 max_attachments: int = 5) -> PushPayload:
+                 max_attachments: int = 5, rest: int = 0) -> PushPayload:
     """一批待办 → 一条汇总推送。
 
     `max_attachments` 是安全阀：群机器人每分钟只能发 20 条，
     一天的汇总如果每条待办都带 3 张图，一秒钟就把额度用光，
     后面真正的提醒反而发不出去了。
+
+    `rest` = "还有多少条不在这次汇总里"（更远的日子）。不写出来的话，
+    用户会以为清单就这么几条、别的不见了。
     """
     if not tasks:
-        body = "现在没有待办。"
+        body = "这段时间没有要做的。" + (f"\n（更远的还有 {rest} 条，界面里能看到）"
+                                         if rest else "")
     else:
         lines = [format_task_line(t, i + 1) for i, t in enumerate(tasks)]
-        quotes = [f"   ↳ {t.quoted}" for t in tasks if t.quoted]
+        quotes = [line for line in (_excerpt_line(t) for t in tasks) if line]
         tail = [""] + quotes if quotes else []
         # 有一条是 AI 归纳的，就在末尾说清楚（合同里写明必须标）
         if any(float(getattr(t, "confidence", 1.0) or 1.0) < 1 for t in tasks):
             tail += ["", "【AI 整理，可能有误】带【AI】的那几条是模型归纳的，"
                          "原文和附件都留在本地，点开详情能看到。"]
+        if rest:
+            tail += ["", f"（更远的还有 {rest} 条，界面里能看到）"]
         body = "\n".join(lines + tail)
 
     # 附件：只带前面几条的，且只带真实存在的文件。

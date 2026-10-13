@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..contracts.models import STATUS_DONE, STATUS_DROPPED, STATUS_OPEN
+from ..runtime.humanize import human_due
 from ..runtime.scheduler import describe_remind, remind_options
 from ..sinks.router import channel_status, push_help_section, push_ready
 
@@ -50,37 +51,6 @@ def tracked(fn):
         return result
 
     return wrapper
-
-
-def _human_due(due_at: str | None) -> tuple[str, str]:
-    """把到期时间变成人话，返回 (文字, 紧急程度)。
-
-    紧急程度给界面用来上色：overdue 红、today 橙、soon 蓝、later 灰、
-    none 无时间。
-    """
-    if not due_at:
-        return "没写时间", "none"
-    try:
-        moment = datetime.strptime(due_at, "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        return due_at, "later"
-
-    today = datetime.now().date()
-    day = moment.date()
-    delta = (day - today).days
-    clock = moment.strftime("%H:%M")
-
-    if moment < datetime.now() and delta <= 0:
-        return f"已逾期 · {moment.strftime('%m-%d %H:%M')}", "overdue"
-    if delta == 0:
-        # 当天 23:59 是我们表示"全天"的约定，显示成"今天"更好懂
-        return ("今天" if clock == "23:59" else f"今天 {clock}"), "today"
-    if delta == 1:
-        return ("明天" if clock == "23:59" else f"明天 {clock}"), "soon"
-    if delta < 7:
-        weekday = "一二三四五六日"[day.weekday()]
-        return f"周{weekday}" + ("" if clock == "23:59" else f" {clock}"), "soon"
-    return moment.strftime("%m-%d %H:%M"), "later"
 
 
 def _normalize_due(text: str) -> str:
@@ -243,7 +213,7 @@ class Api:
     @staticmethod
     def _task_dict(task) -> dict:
         """一条待办 → 界面要的形状。列表、搜索、废件箱共用一个。"""
-        due_text, urgency = _human_due(task.due_at)
+        due_text, urgency = human_due(task.due_at)
         return {
             "id": task.task_id,
             "title": task.title,
