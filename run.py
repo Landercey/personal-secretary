@@ -586,7 +586,11 @@ def run_deploy(store, pipeline, account: int) -> int:
             state = source.status()
             heartbeat.beat(store, (
                 f"登录号 {state.get('self_id') or '?'}｜收到 {state.get('received', 0)}"
-                if state.get("connected") else "等扫码登录"))
+                if state.get("connected") else "等扫码登录"),
+                # ⚠️ 这一处才是**真正在跑**的那个循环（run_serve 里另建了一个
+                # QQSource，见上面那个同名变量）—— "加过哪些群"必须从这里捎出去。
+                # 2026-10-13 踩过：只在等扫码那个循环里加了，界面读到的永远是空的。
+                groups=source.groups())
             if heartbeat.stop_requested():
                 print("  收到停止请求，收工。")
                 break

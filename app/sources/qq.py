@@ -688,6 +688,7 @@ class QQSource(Source):
         }
         self._connection: Any = None
         self._groups: list[dict[str, Any]] = []
+        self._group_task: Any = None      # 问群列表的那个后台任务（只为了留个引用）
         self._server: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
@@ -918,9 +919,14 @@ class QQSource(Source):
 
         self._connection = connection
         self._set(connected=True, error="")
-        # 顺手问一遍"我加了哪些群"（设置页要用它做勾选）。在这儿等一下是可以的：
-        # 刚连上还没消息进来，最多等 8 秒；扔成后台任务反而要额外管异常和引用。
-        await self._refresh_groups()
+        # 顺手问一遍"我加了哪些群"（设置页要用它做勾选）。
+        #
+        # ⚠️ **必须扔成后台任务，绝不能在这里 await**（2026-10-13 真踩过）：
+        # 回执是靠下面那个 `async for` 循环收到事件、再去 `feed_event` 里
+        # 配对的（见 `_resolve_pending`）。在这儿 await 等于把同一个协程堵住 ——
+        # 它永远读不到自己的回执，只能干等到超时。表现就是
+        # 「读取我加的群」永远是空的（而 NapCat 那边其实答得好好的，实测 29 个群）。
+        self._group_task = asyncio.get_running_loop().create_task(self._refresh_groups())
         try:
             async for raw in connection:
                 if isinstance(raw, bytes):
