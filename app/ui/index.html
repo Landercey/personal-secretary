@@ -679,6 +679,21 @@ function drawDetail() {
     return;
   }
 
+  $('detailInner').innerHTML = `
+    <h2>${esc(t.title)}</h2>
+    <div class="kv"><b>时间</b><span>${esc(t.due)}</span></div>
+    ${t.location ? `<div class="kv"><b>地点</b><span>${esc(t.location)}</span></div>` : ''}
+    ${t.source ? `<div class="kv"><b>来源</b><span>${esc(t.source)}${t.sender ? ' · ' + esc(t.sender) : ''}</span></div>` : ''}
+    ${t.attachments ? `<div class="kv"><b>附件</b><span>${t.attachments} 个</span></div>` : ''}
+    ${t.quoted ? `<div class="quote"><em>原始消息（判错了你能看出为什么）</em>${esc(t.quoted)}</div>` : ''}
+    ${t.detail ? `<div class="quote">${esc(t.detail).slice(0, 800)}</div>` : ''}
+    ${(t.files && t.files.length) ? '<div class="files" id="files"></div>' : ''}
+    ${detailActions(t)}`;
+  const back = $('btnRestore');
+  if (back) back.onclick = () => act('restore', t.id);
+  if (t.files && t.files.length) renderFiles(t);
+}
+
 /* 废件箱里那条"被规则拦下的原文"：**当时到底收到了什么**。
    列表上只写一行 "[图片]" 是答不上来的 —— 用户要的是"这张图你给我读了什么、
    它还在不在"。这里把当时那条摊开：谁发的、正文、程序读到的结论、图本身。 */
@@ -701,19 +716,12 @@ async function drawJunkBody(dropId) {
       : ''}`;
 }
 
-  $('detailInner').innerHTML = `
-    <h2>${esc(t.title)}</h2>
-    <div class="kv"><b>时间</b><span>${esc(t.due)}</span></div>
-    ${t.location ? `<div class="kv"><b>地点</b><span>${esc(t.location)}</span></div>` : ''}
-    ${t.source ? `<div class="kv"><b>来源</b><span>${esc(t.source)}${t.sender ? ' · ' + esc(t.sender) : ''}</span></div>` : ''}
-    ${t.attachments ? `<div class="kv"><b>附件</b><span>${t.attachments} 个</span></div>` : ''}
-    ${t.quoted ? `<div class="quote"><em>原始消息（判错了你能看出为什么）</em>${esc(t.quoted)}</div>` : ''}
-    ${t.detail ? `<div class="quote">${esc(t.detail).slice(0, 800)}</div>` : ''}
-    ${(t.files && t.files.length) ? '<div class="files" id="files"></div>' : ''}
-    ${detailActions(t)}`;
-  const back = $('btnRestore');
-  if (back) back.onclick = () => act('restore', t.id);
-  if (t.files && t.files.length) renderFiles(t);
+/* 列表上只给一行摘要。拦下的原文可能是一整段（一张海报 OCR 出来 32 行），
+   整段铺在列表里，那一屏就只剩它了。全文在详情里，一个字都不少。 */
+function junkSummary(text) {
+  const lines = String(text || '').split('\n').map(s => s.trim()).filter(Boolean);
+  const first = lines[0] || '';
+  return first.length > 42 ? first.slice(0, 42) + '…' : first;
 }
 
 /* 已完成 / 已归档的不在主列表里，所以动作只有一个：**移出**。
@@ -1889,7 +1897,9 @@ async function refresh() {
     // 以前只显示后者，所以点了"这不是待办"那条就找不回来了。
     items = ((res && res.items) || []).map(d => ({
       id: `junk-${d.kind}-${d.id}`, junkId: d.id, junkKind: d.kind,
-      title: d.text, due: d.reason, urgency: 'later', location: '',
+      // 列表上只给一行摘要：拦下的原文可能是一整段（海报 OCR 32 行），
+      // 整段铺在列表里就没法看了。全文在详情里。
+      title: junkSummary(d.text), due: d.reason, urgency: 'later', location: '',
       source: d.source || '', sender: '', quoted: '', detail: '',
       attachments: 0, files: [], junk: true,
     }));
