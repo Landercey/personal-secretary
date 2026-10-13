@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..contracts.models import STATUS_DONE, STATUS_DROPPED, STATUS_OPEN
-from ..runtime.scheduler import describe_level
+from ..runtime.scheduler import describe_remind, remind_options
 from ..sinks.router import channel_status, push_help_section, push_ready
 
 
@@ -257,10 +257,17 @@ class Api:
             "quoted": task.quoted or "",
             "detail": task.detail or "",
             "remind": int(task.remind_level),
-            # 这一档到底会怎么提醒，人话（"强提醒：截止前 1 小时各提醒一次"）。
-            # 让后端算这句话，是因为它跟着设置走 —— 用户改了提前量，
-            # 详情里那句话要跟着变，不能在界面上另写一份。
-            "remind_text": describe_level(task.remind_level),
+            # 这条现在会怎么提醒，人话（"提前 30 分钟提醒一次" /
+            # "默认：只在每日汇总里出现"）。让后端算这句话，是为了和调度器
+            # 用的是同一套口径 —— 界面上另写一份迟早对不上。
+            "remind_text": describe_remind(task.remind_level),
+            # 详情里那个下拉能选的档：默认 + 设置里配的那几个。
+            # 文案由后端一起给（和调度器同一套口径），界面不自己拼"1 小时"这种词。
+            "remind_options": [
+                {"minutes": 0, "label": describe_remind(0)},
+                *[{"minutes": m, "label": describe_remind(m)}
+                  for m in remind_options()],
+            ],
             "attachments": len(task.attachments),
             "files": [{"name": a.name, "path": a.path, "size": int(a.size),
                        "kind": a.kind} for a in task.attachments],
@@ -458,6 +465,21 @@ class Api:
         })
         self._revision += 1
         return {"ok": True}
+
+    def set_remind(self, task_id: int, minutes: int) -> dict:
+        """改这一条的提醒力度：截止前多少分钟单独提醒一次（0 = 只在汇总里出现）。
+
+        用户要的原话："旧软件那种，开始前可以选自己设定的力度，也可以是默认，
+        比如 60 分钟前、30 分钟前、10 分钟前、3 分钟前"。
+        能选哪几个档在设置里配（[remind] options），这里只负责存一个整数。
+        """
+        value = int(minutes or 0)
+        if value < 0:
+            return {"ok": False, "message": "提醒提前量不能是负数"}
+        self.store.update_fields(int(task_id), {"remind_level": value})
+        self._revision += 1
+        return {"ok": True, "remind": value,
+                "text": describe_remind(value)}
 
     def push_history(self) -> dict:
         """最近推过什么。用户问"手机上怎么没收到"时，第一眼看这里。"""

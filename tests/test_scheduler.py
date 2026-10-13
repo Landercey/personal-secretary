@@ -121,50 +121,45 @@ class TestSlotTitle(unittest.TestCase):
         self.assertEqual(sch.slot_title(at("2026-10-08 13:00")), "待办汇总")
 
 
-class TestRemindLevels(unittest.TestCase):
-    """提醒强度：详情里那句话怎么说，以及"提前量"怎么读配置。
+class TestRemindOptions(unittest.TestCase):
+    """提醒力度：一句人话怎么说，下拉里能选哪几档。
 
-    这一档以前只有个数字（1/2/3），界面上不显示、行为上也不生效 ——
-    用户要的是"详情里看得见它，并且真的会在截止前提醒我"。
+    以前这里存的是"1 普通 / 2 强提醒 / 3 极重要"三个抽象档，
+    用户要的是"60 分钟前 / 30 分钟前 / 10 分钟前 / 3 分钟前"这种能对上表的时间
+    （原话："旧软件那种，开始前可以选自己设定的力度，也可以是默认"）。
     """
 
-    def test_three_levels_read_in_plain_words(self):
-        self.assertEqual(sch.describe_level(1), "普通：只在每日汇总里出现")
-        self.assertIn("截止前 1 小时", sch.describe_level(2))
-        self.assertIn("截止前 1 天", sch.describe_level(3))     # 默认 1440 + 60
+    def test_plain_words(self):
+        self.assertEqual(sch.describe_remind(0), "默认：只在每日汇总里出现")
+        self.assertEqual(sch.describe_remind(60), "提前 1 小时提醒一次")
+        self.assertEqual(sch.describe_remind(30), "提前 30 分钟提醒一次")
+        self.assertEqual(sch.describe_remind(1440), "提前 1 天提醒一次")
 
     def test_human_minutes(self):
         self.assertEqual(sch.human_minutes(1440), "1 天")
         self.assertEqual(sch.human_minutes(60), "1 小时")
         self.assertEqual(sch.human_minutes(90), "90 分钟")
 
-    def test_empty_list_means_summary_only(self):
-        """留空 = 这一档不单独提醒。界面上的话要跟着改，不能还说"提前一小时"。"""
-        original = list(config.get("remind", "level2_minutes", []))
-        try:
-            config["remind"]["level2_minutes"] = []
-            self.assertEqual(sch.lead_minutes(2), [])
-            self.assertEqual(sch.describe_level(2), "强提醒：只在每日汇总里出现")
-        finally:
-            config["remind"]["level2_minutes"] = original
+    def test_options_read_from_config(self):
+        self.assertEqual(sch.remind_options(), [3, 10, 30, 60])
 
     def test_garbage_in_config_is_dropped_not_crashed(self):
-        """一个手滑的数字不该让提醒整个不工作。"""
-        original = list(config.get("remind", "level2_minutes", []))
+        """一个手滑的数字不该让整张下拉表消失。"""
+        original = list(config.get("remind", "options", []))
         try:
-            config["remind"]["level2_minutes"] = ["", "abc", "-5", "30"]
-            self.assertEqual(sch.lead_minutes(2), [30])
+            config["remind"]["options"] = ["", "abc", "-5", "30"]
+            self.assertEqual(sch.remind_options(), [30])
         finally:
-            config["remind"]["level2_minutes"] = original
+            config["remind"]["options"] = original
 
     def test_accepts_chinese_comma_and_string(self):
         """中文输入法打出来的逗号也算 —— 这是用户最常犯的那个手滑。"""
-        original = config.get("remind", "level2_minutes", [])
+        original = config.get("remind", "options", [])
         try:
-            config["remind"]["level2_minutes"] = "1440，60"
-            self.assertEqual(sch.lead_minutes(2), [1440, 60])
+            config["remind"]["options"] = "60，30"
+            self.assertEqual(sch.remind_options(), [30, 60])
         finally:
-            config["remind"]["level2_minutes"] = original
+            config["remind"]["options"] = original
 
 
 class TestDueReminders(unittest.TestCase):
@@ -176,10 +171,10 @@ class TestDueReminders(unittest.TestCase):
         message = Message(msg_id="m:1", source_kind=SOURCE_MANUAL, text="x")
         self.store.save_message(message)
         self.store.save_drafts(message, [
-            TaskDraft(title="三点开会", due_at="2026-10-09 15:00:00", remind_level=2),
-            TaskDraft(title="交表", due_at="2026-10-09 15:00:00", remind_level=3),
+            TaskDraft(title="三点开会", due_at="2026-10-09 15:00:00", remind_level=60),
+            TaskDraft(title="交表", due_at="2026-10-09 15:00:00", remind_level=1440),
             TaskDraft(title="买牛奶"),                       # 没时间 → 只进汇总
-            TaskDraft(title="顺路取快递", due_at="2026-10-09 15:00:00"),  # 普通档
+            TaskDraft(title="顺路取快递", due_at="2026-10-09 15:00:00"),  # 默认 → 只进汇总
         ])
 
     def tearDown(self):
@@ -192,9 +187,7 @@ class TestDueReminders(unittest.TestCase):
 
     def test_fires_inside_the_window(self):
         """三点开会、设了提前一小时 → 两点那会儿该提醒。"""
-        # 同一个提前量时谁先谁后不重要，这里不锁顺序
-        self.assertEqual(set(self.found("2026-10-09 14:00")),
-                         {("交表", 60), ("三点开会", 60)})
+        self.assertEqual(self.found("2026-10-09 14:00"), [("三点开会", 60)])
 
     def test_nothing_before_or_after_the_window(self):
         """窗口外不推：还没到点不用催；错过太久（电脑那会儿关着）也别补 ——
@@ -202,13 +195,13 @@ class TestDueReminders(unittest.TestCase):
         self.assertEqual(self.found("2026-10-09 13:00"), [])
         self.assertEqual(self.found("2026-10-09 15:30"), [])
 
-    def test_level1_and_no_due_are_never_reminded(self):
+    def test_default_and_no_due_are_never_reminded(self):
         titles = [title for title, _ in self.found("2026-10-09 14:00")]
         self.assertNotIn("顺路取快递", titles)
         self.assertNotIn("买牛奶", titles)
 
-    def test_level3_gets_an_earlier_shot_too(self):
-        """极重要提前一天也提一次。"""
+    def test_a_long_lead_fires_a_day_early(self):
+        """设了提前一天的那条，前一天就提一次。"""
         self.assertEqual(self.found("2026-10-08 15:00"), [("交表", 1440)])
 
     def test_one_task_one_reminder_per_tick(self):
@@ -281,7 +274,7 @@ class TestScheduler(unittest.TestCase):
         self.store.save_drafts(
             Message(msg_id="m:2", source_kind=SOURCE_MANUAL, text="x"),
             [TaskDraft(title="三点开会", due_at="2026-10-09 15:00:00",
-                       remind_level=2)])
+                       remind_level=60)])
         config["push"]["times"] = []          # 只验临期提醒，别掺汇总
 
         sent = self.scheduler.run_once(at("2026-10-09 14:00"))

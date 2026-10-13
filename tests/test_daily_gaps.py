@@ -61,6 +61,99 @@ class Base(unittest.TestCase):
         return created[0].task_id
 
 
+class TestRemindStrengthPerTask(Base):
+    """详情里能自己选提醒力度 —— 旧软件那种"开始前选力度"，也可以是默认。
+
+    用户原话："设置提醒力度呢，我点消息详情怎么没看到……比如 60 分钟前、
+    30 分钟前、10 分钟前、3 分钟前。"
+    """
+
+    def test_default_is_zero_and_means_summary_only(self):
+        task_id = self.add("拿快递")
+        task = self.store.get_task(task_id)
+
+        self.assertEqual(task.remind_level, 0)
+        self.assertEqual(self.api._task_dict(task)["remind_text"],
+                         "默认：只在每日汇总里出现")
+
+    def test_pick_a_lead_and_it_shows_up_in_plain_words(self):
+        task_id = self.add("三点开会", due=stamp(1, 15))
+
+        result = self.api.set_remind(task_id, 60)
+
+        self.assertEqual(result["ok"], True)
+        self.assertEqual(result["text"], "提前 1 小时提醒一次")
+        task = self.store.get_task(task_id)
+        self.assertEqual(task.remind_level, 60)
+        self.assertEqual(self.api._task_dict(task)["remind_text"],
+                         "提前 1 小时提醒一次")
+
+    def test_the_dropdown_offers_default_plus_the_configured_ones(self):
+        task_id = self.add("拿快递")
+        options = self.api._task_dict(self.store.get_task(task_id))["remind_options"]
+
+        self.assertEqual([o["minutes"] for o in options], [0, 3, 10, 30, 60])
+        self.assertEqual(options[0]["label"], "默认：只在每日汇总里出现")
+        self.assertEqual(options[-1]["label"], "提前 1 小时提醒一次")
+
+    def test_negative_is_refused(self):
+        """提前量是负数等于"截止后才提醒"，没有那种事。"""
+        task_id = self.add("拿快递")
+
+        self.assertEqual(self.api.set_remind(task_id, -5)["ok"], False)
+        self.assertEqual(self.store.get_task(task_id).remind_level, 0)
+
+
+class TestOldRemindLevelsAreNormalized(unittest.TestCase):
+    """老库里那三个档（1 普通 / 2 强提醒 / 3 极重要）第一次打开时归零。
+
+    不然它们会被按新含义读成"提前 1/2/3 分钟" —— 那是假的提醒时间
+    （2026-10-13 把 remind_level 从档位改成分钟数时留下的坑）。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "old.db"
+        store = SqliteStore(open_database(self.path))
+        message = Message(msg_id="t:1", source_kind=SOURCE_MANUAL, text="x")
+        store.save_message(message)
+        created = store.save_drafts(message, [TaskDraft(title="老待办"),
+                                              TaskDraft(title="老待办2")])
+        for task, level in zip(created, (1, 3)):
+            store.update_fields(task.task_id, {"remind_level": level})
+        # 抹掉"已经是分钟数"那个标记 = 假装这个库上次是被**老版本**打开的
+        with store.conn:
+            store.conn.execute("DELETE FROM meta WHERE key='remind_unit'")
+        store.close()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def reopen(self) -> SqliteStore:
+        return SqliteStore(open_database(self.path))
+
+    def test_old_levels_become_zero(self):
+        store = self.reopen()
+        try:
+            self.assertEqual([t.remind_level for t in store.list_tasks("open")], [0, 0])
+        finally:
+            store.close()
+
+    def test_it_only_happens_once(self):
+        """再打开一次不能把用户自己选的分钟数也抹掉。"""
+        store = self.reopen()
+        task_id = store.list_tasks("open")[0].task_id
+        store.update_fields(task_id, {"remind_level": 30})
+        store.close()
+
+        store = self.reopen()
+        try:
+            levels = sorted(t.remind_level for t in store.list_tasks("open"))
+            self.assertEqual(levels, [0, 30])
+        finally:
+            store.close()
+
+
 class TestNoDueDateCountsAsToday(Base):
     """没写时间的待办，算「今天」。
 

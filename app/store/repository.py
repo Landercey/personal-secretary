@@ -67,8 +67,25 @@ def open_database(path: str | Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(target), timeout=10.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    _normalize_remind_unit(conn)
     conn.commit()
     return conn
+
+
+def _normalize_remind_unit(conn: sqlite3.Connection) -> None:
+    """一次性把老的"提醒档位"（1 普通 / 2 强提醒 / 3 极重要）归零。
+
+    2026-10-13 起 `remind_level` 的含义是**提前多少分钟**（0 = 只在汇总里出现）。
+    老值 1/2/3 按新含义会被读成"提前 1/2/3 分钟" —— 那是假的提醒时间，
+    所以第一次打开新版本时把它们归零（等于原来的"普通"档：只在汇总里出现）。
+    meta 里留个标记，只做一次；用户自己后来选的分钟数不会被碰。
+    """
+    row = conn.execute("SELECT value FROM meta WHERE key='remind_unit'").fetchone()
+    if row is not None:
+        return
+    conn.execute("UPDATE tasks SET remind_level=0 WHERE remind_level BETWEEN 1 AND 3")
+    conn.execute("INSERT OR REPLACE INTO meta (key, value) "
+                 "VALUES ('remind_unit', 'minutes')")
 
 
 def _synchronized(method):
@@ -255,7 +272,7 @@ class SqliteStore(Store):
           · due_at    —— **只在原来没有时才补**。原来有就说明已经定过时间，
                           不能被后一次转发的解析结果覆盖掉
           · location  —— 同理，缺了才补
-          · remind    —— 取大的（重复出现说明这事更要紧）
+          · remind    —— 取大的（= 提前更久的那个；重复出现说明这事更要紧）
           · 附件      —— 追加，去重靠 sha256
           · 手动重复  —— 记一笔事件，日后想加"加急跳级"有数据可用
         """

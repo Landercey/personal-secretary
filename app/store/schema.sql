@@ -39,7 +39,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     detail        TEXT NOT NULL DEFAULT '',
     due_at        TEXT,
     location      TEXT,
-    remind_level  INTEGER NOT NULL DEFAULT 1,
+    -- 提醒力度：截止前多少分钟单独提醒一次；0 = 只在每日汇总里出现
+    -- （2026-10-13 之前这里是 1/2/3 三个档，open_database 会一次性把老值归零）
+    remind_level  INTEGER NOT NULL DEFAULT 0,
     priority      INTEGER NOT NULL DEFAULT 2,
     source_kind   TEXT NOT NULL DEFAULT 'manual',
     source_name   TEXT NOT NULL DEFAULT '',

@@ -482,7 +482,6 @@ def parse_line(line: str) -> TaskDraft | None:
         detail=" ".join(_URL.findall(raw)),
         due_at=due_at,
         location=location,
-        remind_level=_remind_level(raw, due_at is not None),
         priority=_priority(raw, due_at is not None),
         source_kind=SOURCE_MANUAL,
     )
@@ -502,17 +501,6 @@ def _compose_due(date_part: datetime | None, time_part: tuple[int, int, str] | N
     from ..contracts.models import TIME_FORMAT
 
     return base.replace(hour=hour, minute=minute, second=0, microsecond=0).strftime(TIME_FORMAT)
-
-
-def _remind_level(text: str, has_due: bool) -> int:
-    """提醒等级。旧项目的 L0~L4 简化成三档（CONTRACT.md 第二节"明确不做"）。"""
-    if any(word in text for word in _URGENT + _MUST):
-        return 3
-    if "@我" in text or "全体" in text or "所有人" in text:
-        return 2
-    if has_due and any(word in text for word in _ACK + _IMPORTANT):
-        return 2
-    return 1
 
 
 def _priority(text: str, has_due: bool) -> int:

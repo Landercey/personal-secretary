@@ -18,7 +18,7 @@
 想改这里的话，先看这张地图
 =====================================================================
   改推送时间            → config.toml 的 [push] times
-  改"每档提醒强度怎么提醒" → config.toml 的 [remind] + `lead_minutes()`
+  改"提醒力度有哪些档可选" → config.toml 的 [remind] options + `remind_options()`
   改每份汇总的标题和内容 → `slot_title()` 和 sinks/console.py 的 build_digest()
   改"错过了还补推吗"     → config.toml 的 [push] catch_up_minutes
   改检查频率            → 本文件的 DEFAULT_TICK
@@ -40,8 +40,8 @@
    宁可晚点推。
 
 除了上面那份"每天几次"的汇总，这里还负责**临期提醒**：每条待办有自己的
-提醒强度（普通 / 强提醒 / 极重要，见 models.TaskDraft），强提醒和极重要
-会在截止前按 `[remind]` 里配的提前量单独推这一条。
+提醒力度（= 截止前多少分钟，在详情里选；见 models.Task），选了的那种
+会在到点前单独推这一条。
 为什么值得单独推：汇总是一天两次的"大扫除"，而"三点开会、现在两点半"
 这种事，等到晚上九点那份汇总里才看到就晚了。
 """
@@ -67,11 +67,6 @@ SLOT_FORMAT = "%H:%M"
 # 窗口外（比如电脑那会儿关着）就跳过 —— 那条已经进过汇总了，不用补。
 REMIND_WINDOW_MINUTES = 5
 
-# 提醒强度的三档，和 quick_parse 判出来的数字对应。
-# 1 普通故意没有"提前量"配置：它就是"只在每日汇总里出现"。
-LEVEL_NAMES: dict[int, str] = {1: "普通", 2: "强提醒", 3: "极重要"}
-
-
 def human_minutes(minutes: int) -> str:
     """分钟数 → 人话（"1 天" / "1 小时" / "30 分钟"）。"""
     if minutes >= 1440 and minutes % 1440 == 0:
@@ -81,13 +76,13 @@ def human_minutes(minutes: int) -> str:
     return f"{minutes} 分钟"
 
 
-def lead_minutes(level: int) -> list[int]:
-    """这一档要提前多少分钟单独提醒。返回的分钟数从大到小。
+def remind_options() -> list[int]:
+    """详情里那个「提醒力度」下拉能选的档（分钟），从小到大去掉重复和坏值。
 
-    值来自 config.toml 的 [remind] level2_minutes / level3_minutes；
-    写坏的项直接丢掉 —— 一个手滑的数字不该让提醒整个不工作。
+    来自 config.toml 的 [remind] options。写坏的项直接丢掉 ——
+    一个手滑的数字不该让整张下拉表消失。
     """
-    raw = config.get("remind", f"level{int(level)}_minutes", [])
+    raw = config.get("remind", "options", [])
     if isinstance(raw, str):
         raw = raw.replace("，", ",").split(",")
     found: set[int] = set()
@@ -98,21 +93,19 @@ def lead_minutes(level: int) -> list[int]:
             continue
         if minutes > 0:
             found.add(minutes)
-    return sorted(found, reverse=True)
+    return sorted(found)
 
 
-def describe_level(level: int) -> str:
-    """这一档到底会怎么提醒 —— 界面上（待办详情）直接显示这句话。
+def describe_remind(minutes: int) -> str:
+    """这条待办的提醒力度用一句话怎么说 —— 待办详情里直接显示。
 
-    为什么要一句话说清：界面上光写"强提醒"三个字，用户没法知道它跟"普通"
-    差在哪儿，只能猜。这句话就是答案，而且跟着配置走（改了设置它就变）。
+    为什么不用"强提醒/极重要"这种词：用户要的是"提前 60 分钟"这种能对上表的时间，
+    光写"强提醒"三个字，他没法知道它到底提前多久。
     """
-    name = LEVEL_NAMES.get(int(level), LEVEL_NAMES[1])
-    leads = lead_minutes(level)
-    if not leads:
-        return f"{name}：只在每日汇总里出现"
-    when = "、".join(f"截止前 {human_minutes(minutes)}" for minutes in leads)
-    return f"{name}：{when}各提醒一次"
+    minutes = int(minutes or 0)
+    if minutes <= 0:
+        return "默认：只在每日汇总里出现"
+    return f"提前 {human_minutes(minutes)}提醒一次"
 
 
 @dataclass(slots=True)
@@ -196,9 +189,11 @@ def due_reminders(store, now: datetime | None = None,
                   limit: int = 5) -> list[tuple[object, int]]:
     """现在该单独提醒的待办：[(待办, 提前量分钟), …]。
 
-    判据三样都得占：有截止时间、还没完成、而且**正好走进某一档的提前量窗口**
+    判据三样都得占：有截止时间、还没完成、而且**正好走进它的提前量窗口**
     （到点后 REMIND_WINDOW_MINUTES 分钟内都算）。
     没有截止时间的只在汇总里出现 —— 没有"截止前"可言。
+    提前量就是这条待办自己的 `remind_level`（0 = 只在汇总里出现，跳过），
+    值由用户在详情里选（那排选项来自 config 的 [remind] options）。
 
     limit 兜住一次推太多：一口气 50 条提醒比不提醒还烦。
     返回按提前量从小到大排（越急的越靠前）。
@@ -206,18 +201,16 @@ def due_reminders(store, now: datetime | None = None,
     moment = now or datetime.now()
     found: list[tuple[object, int]] = []
     for task in store.list_tasks("open", limit=200):
-        leads = lead_minutes(getattr(task, "remind_level", 1))
-        if not leads or not task.due_at:
+        minutes = int(getattr(task, "remind_level", 0) or 0)
+        if minutes <= 0 or not task.due_at:
             continue
         try:
             due = datetime.strptime(str(task.due_at), TIME_FORMAT)
         except ValueError:
             continue                      # 时间格式坏了的先不管它
-        for minutes in leads:
-            fire = due - timedelta(minutes=minutes)
-            if fire <= moment < fire + timedelta(minutes=REMIND_WINDOW_MINUTES):
-                found.append((task, minutes))
-                break                     # 同一条待办一次只推一个提前量
+        fire = due - timedelta(minutes=minutes)
+        if fire <= moment < fire + timedelta(minutes=REMIND_WINDOW_MINUTES):
+            found.append((task, minutes))
     found.sort(key=lambda item: item[1])
     return found[:max(0, int(limit))]
 

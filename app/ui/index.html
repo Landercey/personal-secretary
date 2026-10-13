@@ -684,8 +684,9 @@ function drawDetail() {
     <div class="kv"><b>时间</b><span>${esc(t.due)}</span></div>
     ${t.location ? `<div class="kv"><b>地点</b><span>${esc(t.location)}</span></div>` : ''}
     ${t.source ? `<div class="kv"><b>来源</b><span>${esc(t.source)}${t.sender ? ' · ' + esc(t.sender) : ''}</span></div>` : ''}
-    ${t.remind_text ? `<div class="kv"><b>提醒强度</b><span>${esc(t.remind_text)}<a
-        id="btnRemindSet" style="color:var(--accent);cursor:pointer;margin-left:6px">去设置 ›</a></span></div>` : ''}
+    <div class="kv"><b>提醒力度</b><span>${remindSelect(t)}
+      <a id="btnRemindSet" style="color:var(--accent);cursor:pointer;margin-left:6px">改选项 ›</a>
+    </span></div>
     ${t.attachments ? `<div class="kv"><b>附件</b><span>${t.attachments} 个</span></div>` : ''}
     ${t.quoted ? `<div class="quote"><em>原始消息（判错了你能看出为什么）</em>${esc(t.quoted)}</div>` : ''}
     ${t.detail ? `<div class="quote">${esc(t.detail).slice(0, 800)}</div>` : ''}
@@ -693,7 +694,18 @@ function drawDetail() {
     ${detailActions(t)}`;
   const back = $('btnRestore');
   if (back) back.onclick = () => act('restore', t.id);
-  // 「提醒强度」后面那个「去设置 ›」：跳过去并展开 [remind] 那一段
+  // 提醒力度：改完立刻存，不用另点保存（就一个下拉，多一步保存只会让人忘）
+  const remind = $('selRemind');
+  if (remind) remind.onchange = async () => {
+    const res = await call('set_remind', t.id, Number(remind.value));
+    if (!res || !res.ok) {
+      toast((res && res.message) || '没改成功');
+      return;
+    }
+    toast(`提醒力度：${res.text}`);
+    refresh();
+  };
+  // 后面那个「改选项 ›」：跳到设置里 [remind] 那一段（能选的档在那儿配）
   const remindSet = $('btnRemindSet');
   if (remindSet) remindSet.onclick = () => openSettings('remind');
   if (t.files && t.files.length) renderFiles(t);
@@ -727,6 +739,20 @@ function junkSummary(text) {
   const lines = String(text || '').split('\n').map(s => s.trim()).filter(Boolean);
   const first = lines[0] || '';
   return first.length > 42 ? first.slice(0, 42) + '…' : first;
+}
+
+/* 「提醒力度」那个下拉：默认 + 设置里配的那几档（文案由后端给，别在这儿另拼）。
+   当前值不在表里也要显示出来 —— 用户把设置里的选项改小之后，
+   老的那条待办还得看得见、改得动。 */
+function remindSelect(t) {
+  const list = (t.remind_options || []).slice();
+  const current = Number(t.remind) || 0;
+  if (!list.some(option => Number(option.minutes) === current)) {
+    list.push({ minutes: current, label: t.remind_text || `提前 ${current} 分钟提醒一次` });
+  }
+  return `<select id="selRemind">${list.map(option =>
+    `<option value="${option.minutes}"${Number(option.minutes) === current
+      ? ' selected' : ''}>${esc(option.label)}</option>`).join('')}</select>`;
 }
 
 /* 已完成 / 已归档的不在主列表里，所以动作只有一个：**移出**。

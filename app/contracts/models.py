@@ -116,7 +116,10 @@ class TaskDraft:
     detail: str = ""                            # 正文/网址/原文，详情面板用
     due_at: str | None = None                   # 截止时间；只说了哪天 → 当天 23:59
     location: str | None = None                 # 地点
-    remind_level: int = 1                       # 1 普通 / 2 强提醒 / 3 极重要
+    # 提醒力度：**截止前多少分钟**单独提醒一次；0 = 不单独提醒，只在每日汇总里出现。
+    # 2026-10-13 从"1 普通 / 2 强提醒 / 3 极重要"三个档改成直接的分钟数 ——
+    # 用户要的是"详情里能选 60/30/10/3 分钟前"，一个数字比三个抽象档位直白。
+    remind_level: int = 0
     priority: int = 2                           # 调度优先级，数字越小越靠前
     source_kind: str = SOURCE_MANUAL            # 溯源，推送时显示
     source_name: str = ""
@@ -139,7 +142,7 @@ class Task:
     detail: str = ""
     due_at: str | None = None
     location: str | None = None
-    remind_level: int = 1
+    remind_level: int = 0                       # 同 TaskDraft：提前多少分钟
     priority: int = 2
     source_kind: str = SOURCE_MANUAL
     source_name: str = ""
