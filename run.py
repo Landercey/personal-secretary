@@ -603,11 +603,7 @@ def run_deploy(store, pipeline, account: int) -> int:
                 deploy.write_onebot_config(shell, account, token, port)
                 deploy.report("NapCat 重建了配置，已自动补好并重启一次", active=False)
                 if napcat.poll() is None:
-                    napcat.terminate()
-                    try:
-                        napcat.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        napcat.kill()
+                    deploy.stop_shell(napcat)          # 连子进程一起收（否则每修一次漏一窝 QQ）
                 napcat = deploy.start_shell(shell)
                 time.sleep(3)                  # 让它先起来，别立刻又判一次
                 continue
@@ -625,8 +621,10 @@ def run_deploy(store, pipeline, account: int) -> int:
         print("\n  停止中…")
     finally:
         source.stop()
-        if napcat.poll() is None:
-            napcat.terminate()
+        # 连子进程一起收：真正的 QQ 是 NapCat 的子进程，光 terminate 启动器
+        # 会留下一堆 QQ 在跑（占内存 + 锁着 napcat/ 目录）—— 见 deploy.stop_shell。
+        if napcat is not None:
+            deploy.stop_shell(napcat)
     return 0
 
 

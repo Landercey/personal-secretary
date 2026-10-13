@@ -443,6 +443,32 @@ def start_shell(shell_dir: Path, qq: int | None = None,
         sink.close()          # 父进程这边关掉，子进程自己留着那个句柄
 
 
+def stop_shell(proc) -> None:
+    """把 NapCat **连着它的子进程**一起收掉。
+
+    ⚠️ 只 terminate 那个启动器是不够的（2026-10-13 实测）：真正的 QQ 是它的
+    **子进程**（这台机器上二十多个 QQ.exe），Windows 不会连带杀 ——
+    结果就是"停止后台"之后还剩一大堆 QQ 在跑：占一个多 G 内存，
+    而且**锁着 napcat/ 目录**（打包时要挪它，挪不动就会半路删掉一半文件）。
+    用 taskkill /T 连整棵树一起收。
+    """
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                       capture_output=True, timeout=20,
+                       creationflags=no_window_flags())
+    except Exception:
+        pass
+    try:
+        proc.wait(timeout=10)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
 def is_installed(onekey_dir: Path) -> bool:
     """装好了吗：有 Shell 目录、有启动器、有配置目录。"""
     shell = find_shell_dir(onekey_dir)
