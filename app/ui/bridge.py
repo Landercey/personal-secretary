@@ -724,6 +724,94 @@ class Api:
                 # 而不是拿 60 秒宽限里的"还活着"糊弄过去
                 "alive": heartbeat.proc_alive(), "at": str(beat.get("at") or "")}
 
+    # ------------------------------------------------------------------ 更新
+    @staticmethod
+    def _update_repo() -> str:
+        from ..runtime.config import config
+
+        return str(config.get("ui", "update_source", "") or "").strip()
+
+    def check_update(self) -> dict:
+        """手动问一次有没有新版本（左下角那次是后台自动的，这个是按钮点的）。
+
+        顺带把结果写进缓存 —— 左下角那行读的就是缓存，于是手动查完它也跟着变。
+        """
+        from ..runtime import update
+        from ..version import VERSION
+
+        repo = self._update_repo()
+        if not repo:
+            return {"ok": False, "message": "没配更新源（设置 → 界面与更新）"}
+        release = update.fetch_release(repo)
+        if not release:
+            return {"ok": False, "message": "问不到 GitHub（断网或者连不上）。"
+                                            "过会儿再试，不影响你现在用。"}
+        latest = str(release.get("tag_name") or "").strip().lstrip("vV")
+        if not latest:
+            return {"ok": False, "message": "GitHub 那边没给出版本号"}
+        update.write_cache(latest)
+        has_new = update.is_newer(latest, VERSION)
+        return {"ok": True, "current": VERSION, "latest": latest, "has_new": has_new,
+                "page": str(release.get("html_url") or ""),
+                "message": (f"有新版本 v{latest}（你现在 v{VERSION}）" if has_new
+                            else f"已经是最新的（v{VERSION}）")}
+
+    def install_update(self) -> dict:
+        """一键更新：下补丁 → 写更新脚本 → 停后台 → 关自己，让脚本覆盖再打开。
+
+        **这个调用返回之后界面就该退出了**（脚本在等这个进程消失）。
+        覆盖的只有 `私人秘书.exe` 和 `_internal/`，配置、待办、插件、
+        下好的 QQ 都在别的文件夹里 —— 所以**不用重新扫码登录**。
+        """
+        import os
+
+        from ..runtime import heartbeat, selfupdate, update
+        from ..runtime.config import default_root
+
+        repo = self._update_repo()
+        if not repo:
+            return {"ok": False, "message": "没配更新源（设置 → 界面与更新）"}
+        release = update.fetch_release(repo)
+        url = selfupdate.pick_patch(release)
+        if not url:
+            return {"ok": False,
+                    "message": "这一版没放补丁包（只有完整版）。去下载页手动覆盖一次，"
+                               "以后的版本就有一键更新了。"}
+
+        app_dir = default_root()
+        try:
+            selfupdate.download(url, app_dir / selfupdate.ZIP_NAME)
+        except Exception as exc:
+            return {"ok": False, "message": f"下载失败：{type(exc).__name__}: {exc}"}
+
+        # 后台是**同一个 exe** 在跑（--serve）。它不退，脚本会一直等 —— 先让它停，
+        # 顺便记下"原来在跑"，更新完再帮它起回来。
+        was_running = heartbeat.proc_alive()
+        if was_running:
+            heartbeat.request_stop()
+            for _ in range(40):                       # 最多等 20 秒
+                if not heartbeat.proc_alive():
+                    break
+                time.sleep(0.5)
+
+        script = selfupdate.updater_script(app_dir, os.getpid(),
+                                          restart_receiver=was_running)
+        try:
+            selfupdate.launch(script)
+        except OSError as exc:
+            return {"ok": False, "message": f"起不来更新脚本：{exc}"}
+        return {"ok": True, "restart_receiver": was_running,
+                "message": "开始更新：程序会自己关掉，几秒后重新打开。"
+                           "配置和待办都不动，也不用重新扫码登录。"}
+
+    def quit_app(self) -> dict:
+        """把界面关掉。一键更新用得上：脚本在等这个进程消失。"""
+        window = getattr(self, "window", None)
+        if window is None:
+            return {"ok": False, "message": "拿不到窗口（源码直接跑的时候没有）"}
+        window.destroy()
+        return {"ok": True}
+
     # ------------------------------------------------------------------ 新手引导
     def setup_state(self) -> dict:
         """还差哪几件事没做。界面拿它决定"新手引导"留不留。"""

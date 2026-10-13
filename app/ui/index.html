@@ -1073,9 +1073,17 @@ function renderSection(sec, first) {
          <div class="glist" data-grouplist style="display:none"></div>
        </div>`
     : '';
+  // 「界面与更新」那段多一个检查更新的按钮。**一键更新只覆盖 exe 和 _internal**，
+  // 配置、待办、插件、下好的 QQ 都在别的文件夹里 —— 所以不用重新扫码登录。
+  const updater = sec.name === 'ui'
+    ? `<div class="acts" style="margin-top:10px">
+         <button class="block" data-checkupdate>检查更新</button>
+         <p class="hint" data-updateresult>点一下问 GitHub 有没有新版。更新不碰配置和待办，也不用重新扫码。</p>
+       </div>`
+    : '';
   return `<details class="sec" data-section="${sec.name}"${open ? ' open' : ''}>
       <summary>${esc(sec.title)}<i>${esc(sec.desc)}</i></summary>${
-      common.map(f => renderField(sec.name, f)).join('')}${tester}${picker}${tail}</details>`;
+      common.map(f => renderField(sec.name, f)).join('')}${tester}${picker}${updater}${tail}</details>`;
 }
 
 function activateTab(name) {
@@ -1219,6 +1227,50 @@ function drawSettings() {
           <input type="checkbox" data-gid="${g.id}"${chosen.includes(g.id) ? ' checked' : ''}>
           <span>${esc(g.name || '这个群没有名字')}</span><em>${g.id}</em></label>`).join('');
       box.querySelectorAll('[data-gid]').forEach(cb => { cb.onchange = syncGroupIds; });
+    };
+  });
+  // 检查更新 / 一键更新：只覆盖 exe 和 _internal，配置、待办、下好的 QQ 都不动，
+  // 也不用重新扫码 —— 所以更新完程序自己重新打开就能接着用。
+  $('detailInner').querySelectorAll('[data-checkupdate]').forEach(b => {
+    b.onclick = async () => {
+      const box = b.parentElement.querySelector('[data-updateresult]');
+      b.disabled = true;
+      b.textContent = '正在问 GitHub…';
+      const res = await call('check_update');
+      b.disabled = false;
+      b.textContent = '检查更新';
+      const ok = res && res.ok;
+      const has = ok && res.has_new;
+      if (box) {
+        box.className = 'hint';
+        box.style.color = has ? 'var(--accent)' : '';
+        box.innerHTML = `${ok ? (has ? '🎉' : '✅') : '⚠️'} ${
+          esc((res && res.message) || '没反应，看看后台日志')}`;
+      }
+      const old = b.parentElement.querySelector('[data-doupdate]');
+      if (old) old.remove();
+      if (!has) return;
+      const btn = document.createElement('button');
+      btn.className = 'block';
+      btn.dataset.doupdate = '1';
+      btn.textContent = '一键更新（程序会自己关掉再打开）';
+      btn.onclick = async () => {
+        if (!window.confirm('现在更新？程序会自己关掉，几秒后重新打开。\n' +
+                            '配置、待办、下好的 QQ 都不会动，也不用重新扫码。')) return;
+        btn.disabled = true;
+        btn.textContent = '正在下载…（约 38 MB，别关窗口）';
+        const done = await call('install_update');
+        if (!done || !done.ok) {
+          btn.disabled = false;
+          btn.textContent = '一键更新（程序会自己关掉再打开）';
+          toast((done && done.message) || '更新失败');
+          return;
+        }
+        toast(done.message);
+        await new Promise(r => setTimeout(r, 1800));   // 让用户看清那句话再关
+        await call('quit_app');
+      };
+      b.parentElement.appendChild(btn);
     };
   });
   // 一键重启后台：QQ 那段配置改完必须重启才读得到。
