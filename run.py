@@ -360,7 +360,10 @@ def run_qq(store, pipeline) -> int:
             # 没有这个，界面左下角那个"11 个群"会一直显示得一切正常。
             heartbeat.beat(store, (
                 f"登录号 {state.get('self_id') or '?'}｜收到 {state.get('received', 0)}"
-                if state.get("connected") else "等 NapCat 连上来"))
+                if state.get("connected") else "等 NapCat 连上来"),
+                # 顺手把"加过哪些群"捎给界面 —— 它开不了跟 QQ 说话的口子，
+                # 只能这么把列表带过去（设置页要拿它做勾选）。
+                groups=source.groups())
             if heartbeat.stop_requested():
                 print("  收到停止请求（界面里点的「停止后台」），收工。")
                 break

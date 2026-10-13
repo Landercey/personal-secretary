@@ -240,6 +240,12 @@ button:disabled { opacity: .5; cursor: default }
 .acts .two { display: flex; gap: 7px }
 .acts .two button { flex: 1 }
 .acts button.block { width: 100% }
+/* 群列表勾选：一行一个群，左边方框、中间名字、右边群号 */
+.glist { margin-top: 2px; max-height: 240px; overflow: auto;
+         border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px }
+.gitem { display: flex; align-items: center; gap: 8px; padding: 5px 0;
+         font-size: 12.5px; cursor: pointer }
+.gitem em { margin-left: auto; font-style: normal; color: var(--text-3); font-size: 11.5px }
 
 /* ---------- 设置面板 ---------- */
 .panelhead { display: flex; align-items: center; gap: 10px; margin-bottom: 4px }
@@ -1058,9 +1064,18 @@ function renderSection(sec, first) {
          <p class="hint" data-testresult>读的是<b>已经保存</b>的地址 —— 刚改完先点下面的「保存」再点这里。</p>
        </div>`
     : '';
+  // QQ 段多一个「读取我加的群」：群号一个个手填是最烦的一步
+  // （还得先去 QQ 里找到群号）。后台问 QQ 要一份列表捎上来，这里做成勾选。
+  const picker = sec.name === 'qq'
+    ? `<div class="acts" style="margin-top:10px">
+         <button class="block" data-loadgroups>读取我加的群（不用自己找群号）</button>
+         <p class="hint" data-groupstip>得先让后台跑起来并登录（「📱 QQ 接收」→ 启动 QQ），登录之后才读得到。</p>
+         <div class="glist" data-grouplist style="display:none"></div>
+       </div>`
+    : '';
   return `<details class="sec" data-section="${sec.name}"${open ? ' open' : ''}>
       <summary>${esc(sec.title)}<i>${esc(sec.desc)}</i></summary>${
-      common.map(f => renderField(sec.name, f)).join('')}${tester}${tail}</details>`;
+      common.map(f => renderField(sec.name, f)).join('')}${tester}${picker}${tail}</details>`;
 }
 
 function activateTab(name) {
@@ -1081,6 +1096,35 @@ function wireUnlock() {
       link.textContent = '已解锁。改完必须让 NapCat 那边也对得上，否则 QQ 收不到消息。';
     };
   });
+}
+
+/* ---------- 群勾选 ---------- */
+// 群号那格是配置项自动生成的普通文本框，勾选**直接改写它** ——
+// 保存、脏标记、"改完要重启"的提醒就全都复用现成那一套，不用另开一条路。
+// 按 data-path 找，别按 id 找：那格的 id 是 `${section}_${key}` 拼出来的，
+// 写死一个 id 等于把"界面怎么生成 id"抄了一遍（页面上一改就悄悄失联）。
+function groupIdsInput() {
+  const panel = $('detailInner');
+  return panel ? panel.querySelector('[data-path="qq.group_ids"]') : null;
+}
+
+function chosenGroupIds() {
+  const el = groupIdsInput();
+  if (!el) return [];
+  return el.value.split(/[,，\s]+/).map(s => parseInt(s, 10)).filter(Boolean);
+}
+
+function syncGroupIds() {
+  const el = groupIdsInput();
+  const box = document.querySelector('[data-grouplist]');
+  if (!el || !box) return;
+  const ids = [...box.querySelectorAll('[data-gid]')]
+    .filter(cb => cb.checked).map(cb => Number(cb.dataset.gid));
+  // 自己手填过、但这份列表里没有的群号要留着 ——
+  // 不然点一下勾选就把它悄悄抹掉了（那是用户自己敲进去的）。
+  const keep = chosenGroupIds().filter(id => !box.querySelector(`[data-gid="${id}"]`));
+  el.value = [...keep, ...ids].join(', ');
+  el.dispatchEvent(new Event('input', { bubbles: true }));   // 触发"改过没保存"的提醒
 }
 
 function drawSettings() {
@@ -1147,6 +1191,34 @@ function drawSettings() {
         box.style.color = ok ? '' : 'var(--overdue)';
       }
       toast(ok ? '发出去了，看看手机' : '没发成功，看下面那行说明');
+    };
+  });
+  // 「读取我加的群」：列表是后台问 QQ 要来的（界面开不了那个口子），
+  // 这里只负责勾选和把结果写回群号那一格。
+  $('detailInner').querySelectorAll('[data-loadgroups]').forEach(b => {
+    b.onclick = async () => {
+      const tip = b.parentElement.querySelector('[data-groupstip]');
+      const box = b.parentElement.querySelector('[data-grouplist]');
+      b.disabled = true;
+      b.textContent = '正在读…';
+      const res = await call('qq_groups');
+      b.disabled = false;
+      b.textContent = '读取我加的群（不用自己找群号）';
+      const groups = (res && res.groups) || [];
+      if (!groups.length) {
+        box.style.display = 'none';
+        tip.innerHTML = (res && res.alive)
+          ? 'QQ 那边这会儿没给出列表（刚连上时要等几秒）。过一会儿再点一次。'
+          : '读不到 —— <b>后台没在跑</b>。先去「📱 QQ 接收」点「启动 QQ」扫码登录，再回来点这里。';
+        return;
+      }
+      const chosen = chosenGroupIds();
+      tip.textContent = `读到你加了 ${groups.length} 个群，勾上要收的就行（记得点下面的保存）。`;
+      box.style.display = '';
+      box.innerHTML = groups.map(g => `<label class="gitem">
+          <input type="checkbox" data-gid="${g.id}"${chosen.includes(g.id) ? ' checked' : ''}>
+          <span>${esc(g.name || '这个群没有名字')}</span><em>${g.id}</em></label>`).join('');
+      box.querySelectorAll('[data-gid]').forEach(cb => { cb.onchange = syncGroupIds; });
     };
   });
   // 一键重启后台：QQ 那段配置改完必须重启才读得到。

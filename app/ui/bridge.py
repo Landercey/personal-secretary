@@ -679,6 +679,28 @@ class Api:
         return {"ok": bool(result.ok), "channel": channel,
                 "message": message or ("发出去了" if result.ok else "发送失败")}
 
+    def qq_groups(self) -> dict:
+        """后台读到的"登录的号加过哪些群"，给设置页做勾选。
+
+        为什么要绕这么一圈：群列表只能从 QQ 那边问出来（get_group_list），
+        而跟 QQ 说话的是**后台那个进程** —— 界面这边没有连接。所以后台把列表
+        写进心跳，界面读心跳（见 runtime/heartbeat.py 和 qq.QQSource.groups）。
+
+        返回里带 `alive`：没在跑的时候界面得说清楚"为什么读不到"，
+        而不是丢一个空列表给用户猜。
+        """
+        from ..runtime import heartbeat
+        from ..runtime.config import config
+
+        beat = heartbeat.state(self.store)
+        groups = [g for g in (beat.get("groups") or []) if g.get("id")]
+        try:
+            selected = [int(x) for x in (config.get("qq", "group_ids") or [])]
+        except (TypeError, ValueError):
+            selected = []
+        return {"groups": groups, "selected": selected,
+                "alive": bool(beat.get("alive")), "at": str(beat.get("at") or "")}
+
     # ------------------------------------------------------------------ 新手引导
     def setup_state(self) -> dict:
         """还差哪几件事没做。界面拿它决定"新手引导"留不留。"""

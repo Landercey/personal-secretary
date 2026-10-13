@@ -54,8 +54,13 @@ WRITE_EVERY_SECONDS = 10.0
 _last_write = 0.0
 
 
-def beat(store, detail: str = "", *, force: bool = False) -> None:
-    """喊一声"我还活着"。调用方可以无脑每轮都调，这里会自己节流。"""
+def beat(store, detail: str = "", *, groups: list | None = None,
+         force: bool = False) -> None:
+    """喊一声"我还活着"。调用方可以无脑每轮都调，这里会自己节流。
+
+    `groups` 是"登录的号加过哪些群"，由后台问 QQ 要来的。界面自己开不了那个口子
+    （跟 QQ 说话的是后台进程），所以借心跳捎过来 —— 见 qq.QQSource.groups()。
+    """
     global _last_write
     now = time.monotonic()
     if not force and now - _last_write < WRITE_EVERY_SECONDS:
@@ -64,6 +69,7 @@ def beat(store, detail: str = "", *, force: bool = False) -> None:
     from .sysmon import self_rss_mb
 
     payload = {"at": datetime.now().strftime(TIME_FORMAT), "detail": str(detail or ""),
+               "groups": list(groups or []),
                # 后台自己占多少内存。界面那侧要把它和"界面自己"加起来给用户看，
                # 但界面读不到别的进程的数 —— 让它自己报最省事。
                "rss_mb": self_rss_mb()}
@@ -76,21 +82,27 @@ def beat(store, detail: str = "", *, force: bool = False) -> None:
 def state(store) -> dict:
     """读心跳。界面拿它决定显示"接收中"还是"没在跑"。"""
     if store is None:
-        return {"alive": False, "age_seconds": None, "detail": "", "at": "", "rss_mb": None}
+        return {"alive": False, "age_seconds": None, "detail": "", "at": "",
+                "rss_mb": None, "groups": []}
     try:
         payload = json.loads(store.get_meta(KEY, "") or "{}")
     except (ValueError, TypeError):
         payload = {}
+    # 群列表**心跳过期也照给**：后台刚停，这份列表照样能用（用户还能在设置里挑群）。
+    groups = [g for g in (payload.get("groups") or [])
+              if isinstance(g, dict) and g.get("id")]
     at = str(payload.get("at") or "")
     if not at:
-        return {"alive": False, "age_seconds": None, "detail": "", "at": "", "rss_mb": None}
+        return {"alive": False, "age_seconds": None, "detail": "", "at": "",
+                "rss_mb": None, "groups": groups}
     try:
         age = (datetime.now() - datetime.strptime(at, TIME_FORMAT)).total_seconds()
     except ValueError:
-        return {"alive": False, "age_seconds": None, "detail": "", "at": at, "rss_mb": None}
+        return {"alive": False, "age_seconds": None, "detail": "", "at": at,
+                "rss_mb": None, "groups": groups}
     return {"alive": age < STALE_SECONDS, "age_seconds": round(age),
             "detail": str(payload.get("detail") or ""), "at": at,
-            "rss_mb": payload.get("rss_mb")}
+            "rss_mb": payload.get("rss_mb"), "groups": groups}
 
 
 def request_stop() -> None:

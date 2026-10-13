@@ -527,6 +527,30 @@ def preview_of(event: dict[str, Any]) -> str:
     return "[非消息事件]"
 
 
+def group_entries(reply: Any) -> list[dict[str, Any]]:
+    """`get_group_list` 的回执 → `[{"id": 123, "name": "计算机2301班"}]`，有名字的排前面。
+
+    设置页拿它做勾选，省掉"自己去 QQ 里找群号"那一步。
+    名字拿不到就留空（界面上只显示群号）——**不编一个**：用户认的是名字，
+    编错的名字比没有名字更害人（会点错群）。
+    """
+    data = reply.get("data") if isinstance(reply, dict) else None
+    if not isinstance(data, list):
+        return []
+    found: list[dict[str, Any]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        try:
+            gid = int(item.get("group_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if gid:
+            found.append({"id": gid, "name": str(item.get("group_name") or "").strip()})
+    # 有名字的按名字排，没名字的按群号排在最后
+    return sorted(found, key=lambda g: (not g["name"], g["name"] or str(g["id"])))
+
+
 # ===========================================================================
 # 配置
 # ===========================================================================
@@ -663,6 +687,7 @@ class QQSource(Source):
             "error": "",             # 出错信息
         }
         self._connection: Any = None
+        self._groups: list[dict[str, Any]] = []
         self._server: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
@@ -701,6 +726,25 @@ class QQSource(Source):
         if state.get("running"):
             return f"QQ 接入：已监听 {self.settings.bind_port}，等 NapCat 连接"
         return "QQ 接入：未启动"
+
+    def groups(self) -> list[dict[str, Any]]:
+        """登录的这个号加过哪些群（`[{"id":…, "name":…}]`）。
+
+        设置页拿它做勾选，省掉"自己去 QQ 里翻群号"这一步。
+        它是**问 QQ 要来的**（get_group_list），不是猜的；问不到就是空列表，
+        界面自己决定怎么跟用户解释（见 bridge.qq_groups）。
+        """
+        return list(self._groups)
+
+    async def _refresh_groups(self) -> None:
+        """刚连上时间一次"我加了哪些群"。
+
+        问不到就保留上一次的 —— 宁可给一份旧列表，也别把用户已经看到的东西清空。
+        """
+        reply = await self.call_api("get_group_list", {}, timeout=8.0)
+        found = group_entries(reply)
+        if found:
+            self._groups = found
 
     # ------------------------------------------------------------------ 生命周期
     def start(self) -> bool:
@@ -874,6 +918,9 @@ class QQSource(Source):
 
         self._connection = connection
         self._set(connected=True, error="")
+        # 顺手问一遍"我加了哪些群"（设置页要用它做勾选）。在这儿等一下是可以的：
+        # 刚连上还没消息进来，最多等 8 秒；扔成后台任务反而要额外管异常和引用。
+        await self._refresh_groups()
         try:
             async for raw in connection:
                 if isinstance(raw, bytes):
@@ -1005,6 +1052,11 @@ class QQSource(Source):
         这个方法不碰网络，所以测试可以直接喂假事件进来 ——
         不用真的开端口、不用真的登 QQ。
         """
+        # 接口回执（echo 对得上的）先摘出去：它不是消息，也不该记进"收到几条"。
+        # ⚠️ 少了这一步，call_api 永远等不到回执 —— 真踩过：按 file_id 取附件
+        #    那条路会**死等 25 秒**然后放弃，而且那 25 秒里后面的消息全堵在它后头。
+        if self._resolve_pending(event):
+            return None, "接口回执"
         self._set(received=self._status["received"] + 1)
         self_id = self.self_id or str(event.get("self_id") or "")
         message, reason = event_to_message(event, self.settings, self_id)
