@@ -25,6 +25,32 @@ from ..contracts.models import STATUS_DONE, STATUS_DROPPED, STATUS_OPEN
 from ..sinks.router import channel_status, push_help_section, push_ready
 
 
+def tracked(fn):
+    """把一次界面调用记进 `data/ui.log`（开始/耗时/出错）。
+
+    为什么只挑一部分方法加：**这些是会跟外面打交道、或者可能很慢的**
+    （联网、起进程、跑管线）。窗口卡住时，看门狗会把"是哪个调用卡了多久"
+    写进同一个文件 —— 2026-10-13 卡死那次，就是因为没有这个，
+    外面查了半天只能硬关掉重开。
+    """
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        from ..runtime import uilog
+
+        uilog.start(fn.__name__)
+        try:
+            result = fn(self, *args, **kwargs)
+        except Exception as exc:
+            uilog.finish(fn.__name__, f"{type(exc).__name__}: {exc}")
+            raise
+        uilog.finish(fn.__name__)
+        return result
+
+    return wrapper
+
+
 def _human_due(due_at: str | None) -> tuple[str, str]:
     """把到期时间变成人话，返回 (文字, 紧急程度)。
 
@@ -145,6 +171,11 @@ class Api:
         self._actions = dict(actions or {})
         # 网页轮询用：每次返回一个自增号，界面上"数据变了没"靠它判断
         self._revision = 0
+        # 看门狗：哪个界面调用卡住了，把它写进 data/ui.log（见 runtime/uilog.py）。
+        # 窗口冻住的时候，这个线程照样在跑 —— 就是靠它下次能查。
+        from ..runtime import uilog
+
+        uilog.watch()
         self._start_update_check()
 
     def _start_update_check(self) -> None:
@@ -372,6 +403,7 @@ class Api:
         raise ValueError("这个附件不在库里")
 
     # ------------------------------------------------------------------ QQ 那一页
+    @tracked
     def qq_panel(self) -> dict:
         """QQ 那一页要的全部状态：装没装、后台活没活、二维码还在不在。
 
@@ -471,6 +503,7 @@ class Api:
             problems.append("没填要登录的 QQ 号（设置 → 收消息 → QQ 接入 → 「要登录哪个 QQ 号」）")
         return problems
 
+    @tracked
     def start_qq(self) -> dict:
         """后台起一个 `run.py --serve`（收消息 + 定时推送）。
 
@@ -544,6 +577,7 @@ class Api:
                 "message": "后台起来了。第一次要等几十秒下载安装 NapCat，"
                            "完了二维码会出现在这里。"}
 
+    @tracked
     def stop_background(self) -> dict:
         """让后台进程自己收工（写个文件，它自己看到就退）。
 
@@ -581,6 +615,7 @@ class Api:
         }
 
     # ------------------------------------------------------------------ 环境
+    @tracked
     def config_summary(self) -> dict:
         """界面上显示"现在什么状态"用。"""
         from ..runtime import update
@@ -651,6 +686,7 @@ class Api:
                 # 不然我得靠猜（以前真猜过）。
                 "version": version_text()}
 
+    @tracked
     def save_settings(self, updates: dict) -> dict:
         """把界面上改动过的项写回 config.toml。写回是按行改，不动用户的注释。"""
         from ..runtime.config import config
@@ -665,6 +701,7 @@ class Api:
         self._revision += 1
         return {"ok": True, "changed": changed, "path": str(config.path or "")}
 
+    @tracked
     def test_push(self) -> dict:
         """发一条测试推送，看看地址到底通不通。
 
@@ -700,6 +737,7 @@ class Api:
         return {"ok": bool(result.ok), "channel": channel,
                 "message": message or ("发出去了" if result.ok else "发送失败")}
 
+    @tracked
     def qq_groups(self) -> dict:
         """后台读到的"登录的号加过哪些群"，给设置页做勾选。
 
@@ -731,6 +769,7 @@ class Api:
 
         return str(config.get("ui", "update_source", "") or "").strip()
 
+    @tracked
     def check_update(self) -> dict:
         """手动问一次有没有新版本（左下角那次是后台自动的，这个是按钮点的）。
 
@@ -759,6 +798,7 @@ class Api:
                 "message": (f"有新版本 v{latest}（你现在 v{VERSION}）" if has_new
                             else f"已经是最新的（v{VERSION}）")}
 
+    @tracked
     def install_update(self) -> dict:
         """一键更新：下补丁 → 写更新脚本 → 停后台 → 关自己，让脚本覆盖再打开。
 
@@ -912,6 +952,7 @@ class Api:
         return {"ok": True}
 
     # ------------------------------------------------------------------ 录入选
+    @tracked
     def add_text(self, text: str) -> dict:
         """手动粘贴一条。走的是和 QQ 消息**完全相同**的那条管线。"""
         text = str(text or "").strip()
@@ -921,6 +962,7 @@ class Api:
         self._revision += 1
         return {"ok": True, "added": added}
 
+    @tracked
     def sync_now(self) -> dict:
         """立刻拉一遍插件来源（课表这类需要主动去拿的）。"""
         result = self._act("sync") or {}
@@ -931,6 +973,7 @@ class Api:
                 "notes": list(result.get("notes") or [])}
 
     # ------------------------------------------------------------------ 拖进来的东西
+    @tracked
     def stage_drop(self, name: str, data_base64: str) -> dict:
         """把拖进窗口的文件先落到暂存区，等用户选"怎么处理"。
 
@@ -965,6 +1008,7 @@ class Api:
         return {"id": token, "name": token.split("-", 2)[2],
                 "size": len(blob), "limit_mb": limit_mb}
 
+    @tracked
     def ingest_drop(self, token: str) -> dict:
         """把暂存的文件**挪进附件目录**再入库。
 
@@ -1108,6 +1152,7 @@ class Api:
         return {"ok": True, "url": target}
 
     # ------------------------------------------------------------------ 意见反馈
+    @tracked
     def feedback_report(self, note: str = "", include_junk: bool = False) -> dict:
         """生成一份可以复制走的反馈，**默认脱敏**。
 
@@ -1124,6 +1169,7 @@ class Api:
         from ..runtime.config import config, default_data_dir
         from ..runtime.heartbeat import state as beat_state
         from ..runtime.sysmon import memory_state, self_rss_mb
+        from ..runtime import uilog
         from ..version import version_text
 
         root = _plugin_root()
@@ -1194,6 +1240,14 @@ class Api:
         if tail:
             lines += ["", "—— 后台最近输出 ——"]
             lines += [f"  {_redact(line)}" for line in tail]
+
+        # 界面自己的动作日志：**卡过/出错的话，这一份就是现场**。
+        # 加这一节的原因：2026-10-13 窗口"未响应"，从外面什么都查不出来
+        # （没对话框、没联网、没在算），因为界面这一侧当时压根不写日志。
+        ui_tail = uilog.tail(12)
+        if ui_tail:
+            lines += ["", "—— 界面最近动作 ——"]
+            lines += [f"  {_redact(line)}" for line in ui_tail]
 
         if include_junk:
             rows = self.store.list_dropped(limit=5)
