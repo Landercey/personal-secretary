@@ -1087,6 +1087,9 @@ function renderSection(sec, first) {
 }
 
 function activateTab(name) {
+  // ⚠️ 必须记下来：设置面板每次保存后会整块重画，而重画时要靠它决定"停在哪个标签"。
+  // 以前它只读不写（永远是 null），于是**一保存就跳回第一个标签**（用户报的）。
+  activeGroup = name;
   $('detailInner').querySelectorAll('.tab').forEach(b =>
     b.classList.toggle('on', b.dataset.g === name));
   $('detailInner').querySelectorAll('.tabpane').forEach(p =>
