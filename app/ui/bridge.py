@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..contracts.models import STATUS_DONE, STATUS_DROPPED, STATUS_OPEN
+from ..runtime.scheduler import describe_level
 from ..sinks.router import channel_status, push_help_section, push_ready
 
 
@@ -256,6 +257,10 @@ class Api:
             "quoted": task.quoted or "",
             "detail": task.detail or "",
             "remind": int(task.remind_level),
+            # 这一档到底会怎么提醒，人话（"强提醒：截止前 1 小时各提醒一次"）。
+            # 让后端算这句话，是因为它跟着设置走 —— 用户改了提前量，
+            # 详情里那句话要跟着变，不能在界面上另写一份。
+            "remind_text": describe_level(task.remind_level),
             "attachments": len(task.attachments),
             "files": [{"name": a.name, "path": a.path, "size": int(a.size),
                        "kind": a.kind} for a in task.attachments],

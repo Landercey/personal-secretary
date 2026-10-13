@@ -684,6 +684,8 @@ function drawDetail() {
     <div class="kv"><b>时间</b><span>${esc(t.due)}</span></div>
     ${t.location ? `<div class="kv"><b>地点</b><span>${esc(t.location)}</span></div>` : ''}
     ${t.source ? `<div class="kv"><b>来源</b><span>${esc(t.source)}${t.sender ? ' · ' + esc(t.sender) : ''}</span></div>` : ''}
+    ${t.remind_text ? `<div class="kv"><b>提醒强度</b><span>${esc(t.remind_text)}<a
+        id="btnRemindSet" style="color:var(--accent);cursor:pointer;margin-left:6px">去设置 ›</a></span></div>` : ''}
     ${t.attachments ? `<div class="kv"><b>附件</b><span>${t.attachments} 个</span></div>` : ''}
     ${t.quoted ? `<div class="quote"><em>原始消息（判错了你能看出为什么）</em>${esc(t.quoted)}</div>` : ''}
     ${t.detail ? `<div class="quote">${esc(t.detail).slice(0, 800)}</div>` : ''}
@@ -691,6 +693,9 @@ function drawDetail() {
     ${detailActions(t)}`;
   const back = $('btnRestore');
   if (back) back.onclick = () => act('restore', t.id);
+  // 「提醒强度」后面那个「去设置 ›」：跳过去并展开 [remind] 那一段
+  const remindSet = $('btnRemindSet');
+  if (remindSet) remindSet.onclick = () => openSettings('remind');
   if (t.files && t.files.length) renderFiles(t);
 }
 
