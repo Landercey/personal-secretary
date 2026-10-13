@@ -393,7 +393,9 @@ def write_build_info() -> None:
 
 
 def main() -> int:
-    if app_is_running():
+    # 只在"确实要动用户那份安装"时才拦：设了 SECRETARY_BUILD_DIST 的话
+    # 产物落在别处，用户开着他的程序也不冲突（锁着的是 dist 里那份数据库）。
+    if _OUT_ROOT == ROOT / "dist" and app_is_running():
         raise SystemExit(
             f"{APP_NAME} 还开着。先把它关掉（界面右上角那个关闭按钮）再打包。\n"
             "开着的时候数据库被锁着，打包会把你自己的待办连带附件删掉一半 —— 真发生过。")
