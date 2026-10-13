@@ -591,6 +591,46 @@ class SqliteStore(Store):
         ).fetchall()
         return [dict(row) for row in rows]
 
+    @_synchronized
+    def get_dropped(self, drop_id: int) -> dict[str, Any] | None:
+        """取废件箱里的一条（界面上点开那条详情用）。"""
+        row = self.conn.execute(
+            "SELECT * FROM dropped_items WHERE drop_id=?", (int(drop_id),)
+        ).fetchone()
+        return dict(row) if row else None
+
+    @_synchronized
+    def delete_dropped(self, drop_id: int) -> int:
+        """把一条从废件箱里清走（捡回来了，或者用户就想清掉）。
+
+        只删这一笔：原始消息（messages 表）和附件都在原地 ——
+        "清废件箱"这个动作不该真的弄丢东西。
+        """
+        with self.conn:
+            cursor = self.conn.execute(
+                "DELETE FROM dropped_items WHERE drop_id=?", (int(drop_id),)
+            )
+        return int(cursor.rowcount or 0)
+
+    @_synchronized
+    def get_message(self, msg_id: str) -> dict[str, Any] | None:
+        """按编号取回**原始消息**，raw 已经解成字典。
+
+        用途：废件箱那条被截到 500 字，界面要回答"当时到底收到了什么"、
+        "程序读到了什么"（raw 里的 extract_notes）时，得回原文看。
+        """
+        row = self.conn.execute(
+            "SELECT * FROM messages WHERE msg_id=?", (str(msg_id),)
+        ).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        try:
+            item["raw"] = json.loads(item.get("raw") or "{}")
+        except ValueError:
+            item["raw"] = {}          # 坏 JSON 不该让界面打不开详情
+        return item
+
     # ------------------------------------------------------------------ 合并窗口
     @_synchronized
     def recent_task_for(self, source_kind: str, source_name: str, sender: str,

@@ -246,6 +246,51 @@ def ingest_file(store, source, pipeline, path: str) -> dict:
             "notes": [str(item) for item in (message.raw.get("extract_notes") or [])]}
 
 
+def promote_dropped(store, pipeline, row: dict, paths: list[str]) -> int:
+    """废件箱里的一条 → 待办（用户在界面上按了「这条其实有用」）。
+
+    为什么不复用 `ingest_message`：那里有个"合并窗口"—— 同一来源同一个发送人
+    60 秒内的消息会挂到**上一条**待办上。用户在这儿是**指着这一条**要它变成
+    待办，被塞进一条不相干的待办里等于按了没反应。所以这里只跑理解层，
+    然后直接入库。
+
+    正文优先用 messages 表里的**全文**：废件箱那笔为了不占地方截到 500 字。
+    """
+    from app.contracts.models import SOURCE_MANUAL, Message, TaskDraft
+    from app.pipeline.actionable import strip_placeholders
+    from app.sources.manual import build_attachment
+
+    original = store.get_message(str(row.get("msg_id") or "")) or {}
+    msg_id = str(row.get("msg_id") or "") or f"drop:{row.get('drop_id') or 0}"
+    text = str(original.get("text") or row.get("text") or "").strip()
+    source_kind = str(row.get("source_kind") or SOURCE_MANUAL)
+    source_name = str(row.get("source_name") or "")
+    sender = str(original.get("sender") or "")
+    attachments = [build_attachment(path) for path in paths]
+
+    message = Message(
+        msg_id=msg_id, source_kind=source_kind, source_name=source_name,
+        sender=sender, sent_at=str(original.get("sent_at") or ""),
+        text=text, attachments=attachments,
+        # explicit：用户已经点着按钮表过态了，理解层不该再拿规则替他判断。
+        raw={"explicit": True, "promoted_from_drop": True},
+    )
+    _prepared, drafts = pipeline.run(message)
+    stored = store.save_drafts(message, drafts)
+
+    if not stored and attachments:
+        # 一张图、图里一个字都没有（群里那种表情包）。理解层对"群里没字的图"
+        # 是**刻意不收**的；但用户亲手按了这个按钮，就是"这张我要留着"，
+        # 那就按附件收下 —— 否则按钮等于没反应，比不收更让人难受。
+        stored = store.save_drafts(message, [TaskDraft(
+            title=strip_placeholders(text).strip() or f"来自{source_name or '群里'}的图片",
+            detail=text, source_kind=source_kind, source_name=source_name,
+            sender=sender, origin_msg_id=msg_id, attachments=attachments,
+            quoted=text,
+        )])
+    return len(stored)
+
+
 def extract_preview(path: str) -> dict:
     """只把文件里的字读出来，不入库（界面上「只看写了什么」用）。
 
@@ -699,6 +744,7 @@ def open_ui(store, source, pipeline, sink, registry) -> int:
         "sync": lambda: sync_sources(store, pipeline, registry.sources),
         "ingest_file": lambda path: ingest_file(store, source, pipeline, path),
         "read_file_text": extract_preview,
+        "promote_drop": lambda row, paths: promote_dropped(store, pipeline, row, paths),
     }
 
     # 打包版第一次被双击：桌面上还没有快捷方式就自己建一个。

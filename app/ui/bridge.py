@@ -144,6 +144,26 @@ def _drop_name(token: str) -> str:
 _DIGITS = re.compile(r"\d{6,}")
 _SECRET = re.compile(r"(key=|access_token=|token[\"'=:\s]+)\S+", re.IGNORECASE)
 
+_IMAGE_MIME = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".bmp": "image/bmp", ".webp": "image/webp", ".gif": "image/gif",
+}
+_PREVIEW_MAX_BYTES = 3 * 1024 * 1024      # 界面预览上限，原图照旧点「打开」看
+
+
+def _preview_of(target: Path) -> str:
+    """图片 → 界面能直接显示的一段（data URL）。不是图片 / 太大 / 读不了 → 空串。"""
+    mime = _IMAGE_MIME.get(target.suffix.lower())
+    if not mime:
+        return ""
+    try:
+        if target.stat().st_size > _PREVIEW_MAX_BYTES:
+            return ""
+        blob = base64.b64encode(target.read_bytes()).decode("ascii")
+    except OSError:
+        return ""
+    return f"data:{mime};base64,{blob}"
+
 
 def _redact(text: str) -> str:
     """把反馈文本里的号码和密钥打掉。
@@ -300,6 +320,58 @@ class Api:
         items.sort(key=lambda item: item["at"], reverse=True)
         return {"items": items[:200]}
 
+    def dropped_detail(self, drop_id: int) -> dict:
+        """废件箱里一条"被规则拦下的原文"：**当时到底收到了什么**。
+
+        为什么要有这个（用户原话）："我看了详情，里面还有张图片，但一看就不是
+        [待办]……它是什么原因读取的？" —— 列表上只有一行 "[图片]" 是答不上来的：
+        那张图当时下载了没有、里面读没读出字、发的人是谁，全在这儿摊开。
+        """
+        row = self.store.get_dropped(int(drop_id))
+        if row is None:
+            return {"ok": False, "message": "这条已经不在废件箱里了"}
+        msg_id = str(row.get("msg_id") or "")
+        original = self.store.get_message(msg_id) or {}
+        files = self._dropped_files(msg_id)
+        preview = ""
+        for path in files:                  # 第一张能预览的图
+            preview = _preview_of(path)
+            if preview:
+                break
+        return {
+            "ok": True,
+            # 原文优先取全文（废件箱那笔截到 500 字）
+            "text": str(original.get("text") or row.get("text") or ""),
+            "reason": str(row.get("reason") or ""),
+            "source": str(row.get("source_name") or ""),
+            "sender": str(original.get("sender") or ""),
+            "at": str(original.get("sent_at") or row.get("dropped_at") or ""),
+            # 理解层当时算出来的结论，比如"图片里没有识别到文字"
+            "notes": [str(item) for item in ((original.get("raw") or {})
+                                             .get("extract_notes") or [])],
+            "files": [{"name": path.name, "size": path.stat().st_size}
+                      for path in files],
+            "preview": preview,
+        }
+
+    @staticmethod
+    def _dropped_files(msg_id: str) -> list[Path]:
+        """这条消息当时取回来的附件在哪。
+
+        QQ 来源存附件时文件名就是 `qq_<消息编号>_...`（见 sources/qq.py 的
+        `save_attachment`），所以按编号就能把当时那张图找回来 ——
+        不用为了废件箱再加一张表。
+        """
+        from ..runtime.config import attachments_dir
+
+        match = re.fullmatch(r"qq:(\d+)", str(msg_id or ""))
+        if not match:
+            return []
+        try:
+            return sorted(attachments_dir().glob(f"qq_{match.group(1)}_*"))
+        except OSError:
+            return []
+
     # ------------------------------------------------------------------ 写
     def complete(self, task_id: int) -> dict:
         self.store.set_status(int(task_id), STATUS_DONE, "界面里标记完成")
@@ -332,6 +404,35 @@ class Api:
         self.store.unarchive(task_id)
         self._revision += 1
         return {"ok": True}
+
+    @tracked
+    def promote_drop(self, drop_id: int) -> dict:
+        """废件箱里那条**其实有用** —— 把它捡回来变成待办。
+
+        以前这儿只有一句"复制下来贴到「＋ 新建待办」里"：两步手活，
+        而带附件的那种更绝 —— 正文只有 "[图片]"，**什么都复制不出来**。
+        用户真报过：两条图躺在废件箱里，一条都捡不回来。
+        """
+        row = self.store.get_dropped(int(drop_id))
+        if row is None:
+            return {"ok": False, "message": "这条已经不在废件箱里了"}
+        paths = [str(path) for path in self._dropped_files(str(row.get("msg_id") or ""))]
+        added = int(self._act("promote_drop", row, paths) or 0)
+        if added:
+            # 捡回来了就别在废件箱里留一份（原始消息和附件都还在，见 forget_drop）
+            self.store.delete_dropped(int(drop_id))
+            self._revision += 1
+        return {"ok": True, "added": added}
+
+    def forget_drop(self, drop_id: int) -> dict:
+        """「删掉它」：把这条从废件箱里清走。
+
+        只清这一笔 —— 原始消息（messages 表）和附件都留在原地，
+        所以用户清废件箱不会丢东西。
+        """
+        removed = self.store.delete_dropped(int(drop_id))
+        self._revision += 1
+        return {"ok": True, "removed": removed}
 
     def edit_task(self, task_id: int, title: str, due: str, location: str) -> dict:
         """手动改一条待办。
@@ -366,19 +467,14 @@ class Api:
     # ------------------------------------------------------------------ 附件
     def attachment_preview(self, task_id: int, path: str) -> dict:
         """给附件出个缩略图（图片才有）。界面里光写"📎1"是没法用的。"""
-        import base64
-
         target = self._known_attachment(task_id, path)
-        suffix = target.suffix.lower()
-        mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                ".bmp": "image/bmp", ".webp": "image/webp",
-                ".gif": "image/gif"}.get(suffix)
-        if not mime:
-            return {"ok": True, "image": "", "note": "这种文件没法预览，点「打开」"}
-        if target.stat().st_size > 3 * 1024 * 1024:
-            return {"ok": True, "image": "", "note": "图太大，点「打开」看原图"}
-        blob = base64.b64encode(target.read_bytes()).decode("ascii")
-        return {"ok": True, "image": f"data:{mime};base64,{blob}", "note": ""}
+        image = _preview_of(target)
+        if image:
+            return {"ok": True, "image": image, "note": ""}
+        note = ("这种文件没法预览，点「打开」"
+                if target.suffix.lower() not in _IMAGE_MIME
+                else "图太大，点「打开」看原图")
+        return {"ok": True, "image": "", "note": note}
 
     def open_attachment(self, task_id: int, path: str) -> dict:
         """用系统默认程序打开附件。这是用户自己的文件，双击本来也能开。"""

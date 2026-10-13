@@ -25,6 +25,7 @@ from app.contracts.models import (                             # noqa: E402
 )
 from app.pipeline.chat_filter import ChatNoiseEnricher          # noqa: E402
 from app.pipeline.parse_enricher import RuleParseEnricher       # noqa: E402
+from app.runtime.config import attachments_dir                  # noqa: E402
 from app.ui.bridge import Api                                   # noqa: E402
 
 
@@ -131,6 +132,138 @@ class TestIngestFileExplainsItself(unittest.TestCase):
         result = self.run.ingest_file(self.store, self.source, self.pipeline, str(target))
 
         self.assertEqual(result["added"], 1)
+
+
+class TestJunkBoxCanBeRecovered(unittest.TestCase):
+    """废件箱里"被规则拦下的原文"要能捡回来。
+
+    用户原话："他放了两条进废件箱，这不是待办……你看能不能找回来，
+    看一下它是什么原因读取的。" 以前那一段只有一句"复制下来贴到
+    「＋ 新建待办」里"：两步手活；而带附件的那种更绝 ——
+    正文只有 "[图片]"，**什么都复制不出来**。现在一条按钮捡回来。
+    """
+
+    def setUp(self):
+        import importlib
+
+        import run as run_module
+
+        from app.runtime.config import Config
+
+        # 注意用 import_module：`app.runtime.config` 这个名字在包上被那个
+        # 配置**实例**占了，写成 `import app.runtime.config as x` 拿到的是实例。
+        config_module = importlib.import_module("app.runtime.config")
+        self.run = run_module
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old_home = os.environ.get("SECRETARY_HOME")
+        os.environ["SECRETARY_HOME"] = self.tmp.name
+        # 附件一律按"太大、跳过"处理：这条测试要的是**捡回来这个动作**，
+        # 不该顺带把 OCR 引擎拉起来（慢，而且依赖本机装了什么）。
+        self._old_config = config_module.config
+        config_module.config = Config({"extract": {"max_attachment_mb": 0}})
+        self.store, source, pipeline, _sink, _reg = self.run.build(
+            Path(self.tmp.name) / "t.db")
+        self.api = Api(self.store, actions={
+            "add_text": lambda text: self.run.ingest(self.store, source, pipeline, text),
+            "promote_drop": lambda row, paths: self.run.promote_dropped(
+                self.store, pipeline, row, paths),
+        })
+
+    def tearDown(self):
+        import importlib
+
+        importlib.import_module("app.runtime.config").config = self._old_config
+        self.store.close()
+        if self._old_home is None:
+            os.environ.pop("SECRETARY_HOME", None)
+        else:
+            os.environ["SECRETARY_HOME"] = self._old_home
+        self.tmp.cleanup()
+
+    def drop(self, text: str, msg_id: str = "") -> int:
+        """造一条废件箱记录（走真库）。返回它的编号。"""
+        self.store.log_dropped_text(text, "碎片：摘掉时间后没内容",
+                                    SOURCE_QQ_GROUP, "某个技术群", msg_id)
+        return int(self.store.list_dropped(limit=1)[0]["drop_id"])
+
+    def picture(self, name: str) -> Path:
+        folder = attachments_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / name
+        target.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+        return target
+
+    def test_promote_turns_a_dropped_line_into_a_todo(self):
+        drop_id = self.drop("交到 3 号楼下", "qq:1001")
+
+        self.assertEqual(self.api.promote_drop(drop_id), {"ok": True, "added": 1})
+        self.assertIn("交到 3 号楼下", [t.title for t in self.store.list_tasks("open")])
+        self.assertEqual(self.store.list_dropped(), [])     # 捡回来就不在废件箱留一份
+
+    def test_promote_keeps_the_picture_when_there_is_no_text(self):
+        """用户手上那两条就是这种（群里发的表情包，图里没字）。
+
+        理解层对"群里没字的图"是**刻意不收**的 —— 每条表情包都变待办会刷满列表。
+        但用户亲手按了「这条其实有用」，那就按附件收下，图片跟着待办走。
+        """
+        image = self.picture("qq_1002_1_cafe_图.png")
+        drop_id = self.drop("[图片]", "qq:1002")
+
+        self.assertEqual(self.api.promote_drop(drop_id), {"ok": True, "added": 1})
+        task = self.store.list_tasks("open")[0]
+        self.assertEqual([a.name for a in task.attachments], [image.name])
+        self.assertEqual(task.title, "来自某个技术群的图片")   # 没正文时的兜底标题
+        self.assertEqual(self.store.list_dropped(), [])
+
+    def test_promote_that_finds_nothing_leaves_it_alone(self):
+        """没附件、正文又只有占位符 —— 什么都建不出来。
+
+        这时候**不能**把那笔删掉：用户点一下，废件箱里那条就没了，
+        看起来就是"程序把它吃了"。
+        """
+        drop_id = self.drop("[图片]", "qq:1005")
+
+        self.assertEqual(self.api.promote_drop(drop_id), {"ok": True, "added": 0})
+        self.assertEqual(len(self.store.list_dropped()), 1)
+
+    def test_forget_only_clears_the_junk_row(self):
+        """「删掉它」只清废件箱这一笔：原始消息和附件都留着。"""
+        self.store.save_message(Message(
+            msg_id="qq:1003", source_kind=SOURCE_QQ_GROUP,
+            source_name="某个技术群", sender="某人", text="哈哈哈哈哈"))
+        drop_id = self.drop("哈哈哈哈哈", "qq:1003")
+
+        self.assertEqual(self.api.forget_drop(drop_id), {"ok": True, "removed": 1})
+        self.assertEqual(self.store.list_dropped(), [])
+        self.assertIsNotNone(self.store.get_message("qq:1003"))
+
+    def test_detail_shows_what_it_read_and_the_picture(self):
+        """点开废件箱那条要能答"当时到底收到了什么、程序读到了什么"。"""
+        image = self.picture("qq_1004_1_beef_图.png")
+        self.store.save_message(Message(
+            msg_id="qq:1004", source_kind=SOURCE_QQ_GROUP, source_name="某个技术群",
+            sender="某同学", sent_at="2026-10-13 14:19:26", text="[图片]",
+            raw={"extract_notes": ["图.png：图片里没有识别到文字"]}))
+        drop_id = self.drop("[图片]", "qq:1004")
+
+        detail = self.api.dropped_detail(drop_id)
+
+        self.assertTrue(detail["ok"])
+        self.assertEqual(detail["sender"], "某同学")
+        self.assertIn("没有识别到文字", detail["notes"][0])
+        self.assertEqual(detail["files"][0]["name"], image.name)
+        self.assertTrue(detail["preview"].startswith("data:image/png;base64,"))
+
+    def test_gone_drop_is_reported_not_crashed(self):
+        for answer in (self.api.dropped_detail(999), self.api.promote_drop(999)):
+            self.assertFalse(answer["ok"])
+            self.assertIn("不在废件箱", answer["message"])
+
+    def test_only_qq_message_ids_are_looked_up(self):
+        """编号来自库里那条记录，拼进路径前必须校验 —— 不校验就等于
+        让一条字符串决定程序去读哪个文件。"""
+        for bad in ("../../config.toml", "qq:1*", "qq:1/2", "manual:1", ""):
+            self.assertEqual(Api._dropped_files(bad), [], bad)
 
 
 class TestDropStaging(unittest.TestCase):

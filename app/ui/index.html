@@ -652,13 +652,54 @@ function drawDetail() {
           ? `<button class="primary block" id="btnRestore">移出「废件箱」</button>
              <p class="hint" style="margin-top:2px">移到「全部未完成」——
                之后它在哪个分组，由截止时间自己决定（今天 / 本周 / 逾期…）。</p>`
-          : `<p class="hint">这是一段被拦下的原文，不是待办，没有"移出"可言。
-               想把它变成待办的话，复制下来贴到「＋ 新建待办」里。</p>`}
+          : `<div id="junkBody"><p class="hint">正在读它当时的样子…</p></div>
+             <button class="primary block" id="btnPromote">这条其实有用 → 变成待办</button>
+             <button class="block" id="btnForget">删掉它</button>
+             <p class="hint" style="margin-top:2px">删掉只是把这条从废件箱里清走；
+               原始消息和附件都还留在库里。</p>`}
       </div>`;
     const back = $('btnRestore');
     if (back) back.onclick = () => act('restore', t.junkId);
+    if (t.junkKind === 'text') {
+      const promote = $('btnPromote');
+      if (promote) promote.onclick = async () => {
+        const res = await call('promote_drop', t.junkId);
+        if (!res || !res.ok) { toast((res && res.message) || '没成功'); return; }
+        toast(res.added ? '捡回来了，去「全部未完成」看它' : '里面没有能当待办的内容');
+        if (res.added) { selected = null; refresh(); }
+      };
+      const forget = $('btnForget');
+      if (forget) forget.onclick = async () => {
+        await call('forget_drop', t.junkId);
+        selected = null;
+        refresh();
+      };
+      drawJunkBody(t.junkId);
+    }
     return;
   }
+
+/* 废件箱里那条"被规则拦下的原文"：**当时到底收到了什么**。
+   列表上只写一行 "[图片]" 是答不上来的 —— 用户要的是"这张图你给我读了什么、
+   它还在不在"。这里把当时那条摊开：谁发的、正文、程序读到的结论、图本身。 */
+async function drawJunkBody(dropId) {
+  const res = await call('dropped_detail', dropId);
+  const box = $('junkBody');       // 拉数据这几百毫秒里用户可能点了别的
+  if (!box) return;
+  if (!res || !res.ok) {
+    box.innerHTML = `<p class="hint">${esc((res && res.message) || '读不出来')}</p>`;
+    return;
+  }
+  box.innerHTML = `
+    <div class="kv"><b>当时收到</b><span>${esc(res.sender ? res.sender + ' · ' : '')}${esc(res.at)}</span></div>
+    ${res.text ? `<div class="quote">${esc(res.text)}</div>` : ''}
+    ${(res.notes || []).length
+      ? `<div class="kv"><b>程序读到</b><span>${esc(res.notes.join('；'))}</span></div>` : ''}
+    ${res.preview ? `<div class="file"><div class="fimg"><img src="${res.preview}" alt=""></div></div>` : ''}
+    ${(res.files || []).length
+      ? `<p class="hint">跟着这条存下来的附件 ${res.files.length} 份（在 data/attachments 里）。</p>`
+      : ''}`;
+}
 
   $('detailInner').innerHTML = `
     <h2>${esc(t.title)}</h2>
