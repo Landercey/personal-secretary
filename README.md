@@ -205,7 +205,7 @@ python tools/build_exe.py
 ```
 私人秘书\
   私人秘书.exe      ← 双击这个。图标就是那条小肥鱼（打包时就嵌在 exe 里）
-  用前必看.txt      ← 帮别人看的那 6 条
+  用前必看.txt      ← 帮别人看的那 9 条（杀软误报 / 卸载 / 升级都在这儿）
   _internal\        ← 程序自己的零件，别删
   config.toml  data\  plugins\  napcat\   ← 第一次双击之后才长出来
 ```
