@@ -165,6 +165,35 @@
 
 ---
 
+## 双击没反应 / 窗口点不动怎么办
+
+**现象**：双击桌面那个「私人秘书」，等半天不出窗口；或者窗口出来了、标题栏写着
+"未响应"、中间一直停在"正在连接…"。
+
+**按顺序试这三步**：
+
+1. **先看是不是被杀软拦了** —— 上一节那三步，尤其是"保护历史记录"里还原一下；
+2. **重启一次电脑**。Windows 更新、WebView2 运行时更新装完之后要重启才彻底生效，
+   "更新完就打不开"十有八九是它；
+3. **用最新版的补丁包重新覆盖一遍**。`v0.3.7` 及更早有个真 bug：窗口能出来但会卡死
+   （界面框架遍历对象时钻进了 .NET 里死等），**升级到 v0.3.8 就没有了** ——
+   不用去折腾 .NET、WebView2 那些。
+
+**如果上面三步都没用**，再检查这两样环境（一般是被"优化/清理"工具动过才会缺）：
+
+- **.NET Framework 4.8**：窗口本身靠它。Win10 / Win11 自带，缺了才要装 ——
+  [.NET Framework 4.8.1 运行时](https://dotnet.microsoft.com/download/dotnet-framework/net481)，
+  或者跑微软的 .NET Framework Repair Tool。
+  ⚠️ **不需要装 .NET 8**，那跟这个程序没关系（网上有些教程会让你装，白占 60 MB）；
+- **WebView2 运行时**：界面是网页画的，靠它显示。Win11 自带，Win10 一般随 Edge 也有；
+  真缺了就装 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。
+
+**解压不完整**也会这样：打开 `_internal\pythonnet\runtime\`，看
+`Python.Runtime.dll` 是不是 0 KB 或者几十 KB（正常的四百多 KB）——
+是的话把完整包重新解压一次。
+
+---
+
 ## 打包成 exe（给不想装 Python 的人）
 
 ```bat
