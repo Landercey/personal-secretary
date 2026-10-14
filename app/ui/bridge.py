@@ -150,6 +150,27 @@ def _redact(text: str) -> str:
     return _DIGITS.sub(lambda m: "*" * (len(m.group()) - 4) + m.group()[-4:], out)
 
 
+def _ai_ready(config) -> bool:
+    """AI 增强真的能用吗（不只是"开关打开了"）。
+
+    四条都要满足，缺一条插件就会安静地跳过 —— 所以界面上必须能看出是哪条缺了。
+    """
+    return not _ai_why(config)
+
+
+def _ai_why(config) -> str:
+    """AI 用不了时缺的是什么（能用就返回空串，界面据此决定显示哪一行）。"""
+    if not config.get("ai", "enabled"):
+        return ""
+    if not config.get("ai", "allow_upload"):
+        return "没允许把内容发出去"
+    if not str(config.get("ai", "base_url", "") or "").strip():
+        return "没填接口地址"
+    if not str(config.get("ai", "model", "") or "").strip():
+        return "没填模型名"
+    return ""
+
+
 class Api:
     """网页能调到的全部方法。加方法不用改别的，网页那边直接调。"""
 
@@ -163,6 +184,10 @@ class Api:
         self._actions = dict(actions or {})
         # 网页轮询用：每次返回一个自增号，界面上"数据变了没"靠它判断
         self._revision = 0
+        # 托盘图标：界面每 5 秒调一次 tray()，第一次建、之后只更新提示文字。
+        # 建在 GUI 线程上（js_api 调用就跑在那儿）—— NotifyIcon 必须这样建。
+        self._tray = None
+        self._tray_note = ""
         # 看门狗：哪个界面调用卡住了，把它写进 data/ui.log（见 runtime/uilog.py）。
         # 窗口冻住的时候，这个线程照样在跑 —— 就是靠它下次能查。
         from ..runtime import uilog
@@ -762,6 +787,13 @@ class Api:
             # 说明它卡住了 —— 那是另一句话。
             "running": heartbeat.proc_alive(),
             "qq_enabled": bool(config.get("qq", "enabled")),
+            # AI 增强到底接上没接上。**光看开关是不够的**：地址或模型名有一个
+            # 空着，插件就安静地跳过（2026-10-14 用户被这么坑了一整天 ——
+            # "我开了AI增强，你看看有没有用"，而左下角当时一个字都不显示）。
+            "ai_enabled": bool(config.get("ai", "enabled")),
+            "ai_model": str(config.get("ai", "model", "") or "").strip(),
+            "ai_ready": _ai_ready(config),
+            "ai_why": _ai_why(config),
             "db": str(getattr(self.store, "conn", "")),
         }
 
@@ -970,8 +1002,100 @@ class Api:
         window = getattr(self, "_window", None)
         if window is None:
             return {"ok": False, "message": "拿不到窗口（源码直接跑的时候没有）"}
+        self._dispose_tray()
         window.destroy()
         return {"ok": True}
+
+    # ------------------------------------------------------------------ 托盘图标
+    def tray(self, tooltip: str = "") -> dict:
+        """在任务栏托盘放个小图标，鼠标放上去就知道后台在不在跑。
+
+        为什么要有（2026-10-14 用户："不知道有没有在跑"）：窗口一关，这个程序
+        就彻底看不见了，用户只能靠猜。托盘上有个图标，hover 一下就有答案。
+
+        为什么能写在这儿：pywebview 的 js_api 调用跑在 WinForms 线程上，
+        而 NotifyIcon 必须建在有消息循环的线程上。界面每 5 秒调一次，
+        第一次把它建出来，之后只改提示文字；失败也只记一句，不影响界面。
+        """
+        try:
+            if self._tray is None:
+                self._tray = self._make_tray()
+            if self._tray is not None and tooltip:
+                self._tray.Text = str(tooltip)[:63]       # .NET 上限 63 个字符
+            return {"ok": self._tray is not None, "message": self._tray_note}
+        except Exception as exc:                          # noqa: BLE001
+            self._tray_note = f"{type(exc).__name__}: {exc}"
+            return {"ok": False, "message": self._tray_note}
+
+    def _make_tray(self):
+        """把 NotifyIcon 建出来。菜单两项：打开界面 / 退出界面。"""
+        import clr
+
+        clr.AddReference("System.Windows.Forms")
+        clr.AddReference("System.Drawing")
+        from System.Drawing import Icon
+        from System.Windows.Forms import (ContextMenuStrip, NotifyIcon,
+                                          ToolStripMenuItem)
+
+        def on_open(*_args) -> None:
+            try:
+                self._show_window()
+            except Exception:                             # noqa: BLE001
+                pass
+
+        def on_quit(*_args) -> None:
+            try:
+                self.quit_app()
+            except Exception:                             # noqa: BLE001
+                pass
+
+        menu = ContextMenuStrip()
+        open_item = ToolStripMenuItem("打开界面")
+        open_item.Click += on_open
+        quit_item = ToolStripMenuItem("退出界面（后台照常收消息）")
+        quit_item.Click += on_quit
+        menu.Items.Add(open_item)
+        menu.Items.Add(quit_item)
+
+        tray = NotifyIcon()
+        tray.Icon = self._tray_icon(Icon)
+        tray.ContextMenuStrip = menu
+        tray.DoubleClick += on_open
+        tray.Text = "私人秘书"
+        tray.Visible = True
+        return tray
+
+    @staticmethod
+    def _tray_icon(icon_cls):
+        """托盘图标：打包版用 exe 自带的那个，源码版用 assets/app.ico。"""
+        import sys
+
+        if getattr(sys, "frozen", False):
+            return icon_cls.ExtractAssociatedIcon(sys.executable)
+        ico = Path(__file__).resolve().parents[2] / "assets" / "app.ico"
+        if ico.is_file():
+            return icon_cls(str(ico))
+        return icon_cls.ExtractAssociatedIcon(sys.executable)
+
+    def _show_window(self) -> None:
+        window = getattr(self, "_window", None)
+        if window is None:
+            return
+        try:
+            window.show()
+        except Exception:                                 # noqa: BLE001
+            window.restore()
+
+    def _dispose_tray(self) -> None:
+        """退出时收掉托盘图标，别在托盘里留个"幽灵"（要 hover 一下才消失）。"""
+        tray, self._tray = self._tray, None
+        if tray is None:
+            return
+        try:
+            tray.Visible = False
+            tray.Dispose()
+        except Exception:                                 # noqa: BLE001
+            pass
 
     # ------------------------------------------------------------------ 新手引导
     def setup_state(self) -> dict:

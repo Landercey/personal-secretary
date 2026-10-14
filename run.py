@@ -773,9 +773,15 @@ def open_ui(store, source, pipeline, sink, registry) -> int:
     # 只补缺：他已经有的（或者故意删掉的）不去动。
     if getattr(sys, "frozen", False):
         try:
-            from app.runtime.desktop import create_shortcut
+            from app.runtime.desktop import (create_shortcut, ensure_autostart,
+                                             refresh_icon_cache)
 
             create_shortcut(only_if_missing=True)
+            # 更新完之后有两处会"看着不对"，都在这儿就地修掉：
+            #   · 桌面/任务栏图标被系统缓存成白板（用户："一更新就不能用"）
+            #   · 开机自启那条指向了旧路径（用户："开机自启动没弄"）
+            refresh_icon_cache()
+            ensure_autostart()
         except Exception:
             pass                      # 建不了也照常开界面，不是致命问题
 

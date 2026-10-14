@@ -6,6 +6,8 @@
   改快捷方式的名字/图标/参数   → `_SCRIPT`（那段 PowerShell 模板）+ `SHORTCUT_NAME`
   改开机自启指向哪个进程       → `set_autostart()`（现在挂的是 `--serve`，不开窗口）
   自启"到底有没有用"判据       → `autostart_enabled()` + `_volatile()`
+  自启那条指歪了怎么办         → `ensure_autostart()`（每次开界面时自检自修）
+  更新后图标变白板             → `refresh_icon_cache()`（踢一脚系统缓存）
   读一个 .lnk 指向哪儿         → `resolve_shortcut()`（拖进来的快捷方式靠它跟过去）
   打包版/源码版分别用什么       → `frozen_exe()` / `pythonw()` / `launcher()`
 
@@ -89,7 +91,11 @@ $shell = New-Object -ComObject WScript.Shell
 #   · 存在但指向别的地方      → 也要建（软件挪过位置，比如从"下载"挪到 D 盘）；
 #     不重建的话用户双击桌面那个图标什么都不会发生，只会以为软件坏了。
 if ('{only_if_missing}' -eq '1' -and (Test-Path $link)) {{
-  if ($shell.CreateShortcut($link).TargetPath -eq $target) {{ Write-Output $link; exit 0 }}
+  # 目标 / 参数 / 起始位置 三样都对才不碰它。只比目标是不够的：
+  # 换过文件夹、或者以前建歪了（参数丢了），双击照样打不开。
+  $cur = $shell.CreateShortcut($link)
+  if ($cur.TargetPath -eq $target -and $cur.Arguments -eq $args -and
+      $cur.WorkingDirectory -eq $root) {{ Write-Output $link; exit 0 }}
 }}
 if (-not (Test-Path $target)) {{ throw ('找不到要启动的程序：' + $target) }}
 # 图标位置可以带序号（'...\程序.exe,0'）—— 判断"文件在不在"得先把序号去掉。
@@ -330,3 +336,42 @@ def set_autostart(enabled: bool, root: Path | None = None) -> tuple[bool, str]:
     if not ok:
         return False, output or "PowerShell 建快捷方式失败"
     return True, "已开启：下次开机它会自己跑起来"
+
+
+def refresh_icon_cache() -> None:
+    """让资源管理器重读图标。
+
+    为什么要有：Windows 按**路径**缓存图标。更新程序（覆盖 exe）之后，
+    快捷方式还是那条、路径也没变，桌面/任务栏就会继续顶着老图标 —— 有时
+    干脆是一块白板。用户看到白板只会得出一个结论："更新完就不能用了"。
+    这不是 bug，是缓存，但我们得替他把缓存踢一脚。
+    """
+    try:
+        import ctypes
+
+        # SHCNE_ASSOCCHANGED = 0x08000000，SHCNF_IDLIST = 0
+        ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, None, None)
+    except Exception:
+        pass                     # 刷不动也不能影响打开界面
+
+
+def ensure_autostart(root: Path | None = None) -> str:
+    """开机自启那条快捷方式指歪了就修好，返回一句给人看的话。
+
+    只在"用户本来就开着自启"时动手（那条 .lnk 在，就说明他开过）。
+    为什么要修：软件挪过文件夹、或者被清理软件收走过一次之后，
+    自启那条会指向一个不存在的程序 —— 开机时什么都不发生，
+    而界面上还写着"已开启"。用户的原话是"开机自启动没弄"。
+    """
+    entry = autostart_entry()
+    if not entry.is_file():
+        return "开机自启没开"
+    project = Path(root) if root else default_root()
+    target, _icon = launcher(project)
+    if target is None:
+        return ""
+    current = resolve_shortcut(entry)
+    if current is not None and Path(current) == Path(target):
+        return "开机自启指向正确"
+    ok, why = set_autostart(True, project)
+    return f"开机自启已修好：{why}" if ok else f"开机自启修不了：{why}"

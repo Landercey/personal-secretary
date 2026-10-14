@@ -2069,6 +2069,20 @@ async function refresh() {
     titles.push(...list.map(p => `${p.title}：正常`));
   }
 
+  // ⑦ AI 增强接上了没。**只在开着时显示**（关着不占地方）；
+  //    开了但缺东西必须说清楚缺哪一样 —— 否则就是"开了等于没开"，
+  //    用户从界面上根本查不出来（2026-10-14 真发生过）。
+  if (env.ai_enabled) {
+    if (env.ai_ready) {
+      lines.push({label: 'AI 增强', value: env.ai_model, go: 'ai'});
+      titles.push(`已接上：${env.ai_model}（长消息交给它挑待办）`);
+    } else {
+      lines.push({label: `AI 开了没配好：${env.ai_why}`, value: '点这里',
+                  go: 'ai', warn: true});
+      titles.push('点这一行就是「AI 增强」那段设置，把缺的填上就生效');
+    }
+  }
+
   // 有新版本就摆一行（点它跳到下载页）。**只在真有新版时出现** ——
   // 平时不占地方，也不会天天唠叨。
   const upd = env.update || {};
@@ -2111,6 +2125,11 @@ async function refresh() {
     };
   });
   $('foot').classList.toggle('warn', receiverBad);
+
+  // 托盘图标：窗口一关，桌面上就再也看不见这个程序了 —— 鼠标放到托盘那个
+  // 小图标上就能回答"后台还在不在跑"。（后端只在第一次建图标，之后只改文字。）
+  call('tray', (env.running === false ? '后台没在跑' : '后台在跑') +
+    ((receiver && receiver.detail) ? ` · ${receiver.detail}` : ''));
 }
 
 /* ---------- 接线 ---------- */

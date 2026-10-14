@@ -528,5 +528,48 @@ class TestFullwidthPunctuation(unittest.TestCase):
                 self.assertEqual(len(coerce(section, key, "a，b")), 2)
 
 
+class TestAiStatusForTheFooter(unittest.TestCase):
+    """左下角要能看出 AI 到底接上没接上。
+
+    2026-10-14 用户原话："我开了AI增强，你看看有没有用"。当时开关是开的、
+    内容也允许上传，可**接口地址空着** —— 插件就安静地跳过，界面上一个字
+    都不显示，用户只能猜。所以状态要分三样说：开没开 / 能不能用 / 缺哪一样。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "config.toml"
+        self.path.write_text(OWN_FILE, encoding="utf-8")
+        self.config = Config.load(self.path)
+        self._original = config_module.config
+        config_module.config = self.config
+        self.api = Api(None)
+
+    def tearDown(self):
+        config_module.config = self._original
+        self.tmp.cleanup()
+
+    def test_off_means_no_line_at_all(self):
+        summary = self.api.config_summary()
+        self.assertFalse(summary["ai_enabled"])      # 默认是关的
+        self.assertEqual(summary["ai_why"], "")      # 关着就没什么可说的，不占地方
+
+    def test_on_but_address_missing_says_which_bit_is_missing(self):
+        self.api.save_settings({"ai.enabled": True, "ai.allow_upload": True,
+                                "ai.model": "gemini-3.5-flash-lite"})
+        summary = self.api.config_summary()
+        self.assertTrue(summary["ai_enabled"])
+        self.assertFalse(summary["ai_ready"])
+        self.assertEqual(summary["ai_why"], "没填接口地址")
+
+    def test_ready_reports_the_model_name(self):
+        self.api.save_settings({"ai.enabled": True, "ai.allow_upload": True,
+                                "ai.model": "gemini-3.5-flash-lite",
+                                "ai.base_url": "http://127.0.0.1:31415/v1"})
+        summary = self.api.config_summary()
+        self.assertTrue(summary["ai_ready"])
+        self.assertEqual(summary["ai_model"], "gemini-3.5-flash-lite")
+
+
 if __name__ == "__main__":
     unittest.main()
