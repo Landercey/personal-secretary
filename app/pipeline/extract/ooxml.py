@@ -1,5 +1,8 @@
 """用 Python 标准库读取 Office 文件（docx / pptx / xlsx）。
 
+想改这里的话：**这个文件只管 Word / PPT / Excel 三种的读法**（都是 zip+XML，
+所以不引第三方库）；哪些后缀走这里由 `service.py` 的 `_READERS` 决定。
+
 为什么不用 python-docx / python-pptx / openpyxl：
   这三个文件格式本质就是「zip 包 + 一堆 XML」。标准库的 zipfile 和
   ElementTree 完全够用，省掉三个依赖、省掉几十 MB 体积、
