@@ -80,7 +80,7 @@ class TestConfig(unittest.TestCase):
         "resource": ["mem_critical_percent"],
         "risk": ["confirmed_secondary_account"],
         "wecom_bot": ["enabled", "webhook", "max_per_minute", "timeout"],
-        # 通用推送地址：钉钉 / 飞书 / PushPlus / Bark 共用这一段
+        # 通用推送地址：钉钉 / 飞书 / Bark 共用这一段
         "push_webhook": ["enabled", "url", "timeout"],
     }
 

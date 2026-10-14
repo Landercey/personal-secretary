@@ -1,4 +1,4 @@
-"""通用推送地址（钉钉 / 飞书 / PushPlus / Bark）。
+"""通用推送地址（钉钉 / 飞书 / Bark，另有一个只做兼容的旧服务）。
 
 盯住这类通道最容易出错的三件事：
   · 认错地址 → 报文形状不对 → 对方回 400 或者干脆忽略
@@ -92,7 +92,8 @@ class TestVendorDetection(unittest.TestCase):
         cases = {
             "https://oapi.dingtalk.com/robot/send?access_token=x": "钉钉机器人",
             "https://open.feishu.cn/open-apis/bot/v2/hook/abc": "飞书机器人",
-            f"https://www.pushplus.plus/send?token={FAKE}": "PushPlus",
+            # 这家后来收费了，不再推荐；识别能力留着只是为了不让老配置直接失效
+            f"https://www.pushplus.plus/send?token={FAKE}": "PushPlus（收费，不再推荐）",
             f"https://api.day.app/{FAKE}": "Bark",
             f"http://127.0.0.1:8000/hook?token={FAKE}": "自定义地址",
         }

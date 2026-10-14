@@ -3,7 +3,7 @@
 本包内部分工：
   console.py    控制台（开发期验证用，也是最后的兜底通道）
   wecom_bot.py  企业微信群机器人（第 3 步）
-  webhook.py    通用推送地址：钉钉 / 飞书 / PushPlus / Bark（第 3 步补的）
+  webhook.py    通用推送地址：钉钉 / 飞书 / Bark（第 3 步补的）
   router.py     挑一个当前能用的通道
 
 课表和语音是插件，不在这里。

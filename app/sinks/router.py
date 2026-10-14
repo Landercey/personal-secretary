@@ -13,7 +13,7 @@
   2. 在下面 `build_sink()` 里加一句候选；
   3. 别的代码一行都不用改 —— 这就是契约的意义。
 
-钉钉 / 飞书 / PushPlus / Bark 已经由 sinks/webhook.py 一个类全包了
+钉钉 / 飞书 / Bark 已经由 sinks/webhook.py 一个类全包了
 （它们都是"POST 一段 JSON 到你这个地址"，只是报文形状不同，认域名就行）。
 """
 

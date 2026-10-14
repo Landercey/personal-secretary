@@ -2218,12 +2218,12 @@ QQ 面板（真浏览器）：装着中 → 进度块 + 按钮灰掉；装完 �
 |---|---|---|
 | `dingtalk.com` | `{"msgtype":"text","text":{"content":…}}` | `errcode == 0` |
 | `feishu.cn` | `{"msg_type":"text","content":{"text":…}}` | `code == 0` |
-| `pushplus.plus` | `{"title":…,"content":…,"template":"txt"}` | `code == 200` |
+| `pushplus.plus`（**收费，不再推荐**，只为不让老配置失效） | `{"title":…,"content":…,"template":"txt"}` | `code == 200` |
 | `day.app`（Bark） | `{"title":…,"body":…}` | `code == 200` |
 | 其它（自建服务） | `{"title":…,"text":…}` | HTTP 200 就算发到 |
 
 不是一家一个类：域名 → 报文形状是一张表（`VENDORS`），加一家是加一行。
-PushPlus 的 token、Bark 的 key 都在**地址本身**里，所以用户只需填一个框。
+Bark 的 key 就在**地址本身**里，所以用户只需填一个框。
 
 ### 三条硬约束（都写进代码注释了）
 
@@ -2265,15 +2265,16 @@ import 那一刻就把那个 config 对象绑死了。程序运行中只有一�
 
 · **不发附件**：这几家没有发文件的接口。要用附件还是企业微信，发不了会明说；
 · **不限速**：一天两三条，限速没意义（企业微信那条有官方硬限制才需要）；
-· **没真号验证**：作者没有钉钉/飞书/Bark/PushPlus 账号。但四家都拿**假 token
-  真发过一次**（2026-10-12），回的全是"凭证无效"而不是"格式错误" ——
+· **没真号验证**：作者没有钉钉/飞书/Bark 账号（另有一个后来收费、不再推荐的旧服务，
+  只在代码里留着兼容）。但这几家都拿**假 token 真发过一次**（2026-10-12），
+  回的全是"凭证无效"而不是"格式错误" ——
   说明报文形状和成功判据都是对的：
 
   ```
   钉钉      errcode 300005  token is not exist
-  PushPlus  code 903       用户令牌不正确
   飞书      code 19001     param invalid: incoming webhook access token invalid
   Bark      HTTP 400       failed to get device token: failed to get [xxx] ...
+  （那个已弃用的服务）code 903  用户令牌不正确
   ```
 
   剩下唯一没验的是"**凭证有效时手机能不能真的收到**"。第一次真发时看错误码：
@@ -2329,7 +2330,7 @@ import 那一刻就把那个 config 对象绑死了。程序运行中只有一�
 
 加通用推送地址之后冒出来的问题：**刚填完地址的人没法知道对不对**，
 只能等下一次定时推送（最长 12 小时）。钉钉的「关键词没对上」（errcode 310000）、
-PushPlus 的 token 抄错一位，都是点一下就能看出来的事。
+通用地址里的 token 抄错一位，都是点一下就能看出来的事。
 
 · `Api.test_push()`：拿 `build_sink()` 发一条固定的测试内容，返回
   `{ok, channel, message}`；企微那条会用现成的 `explain()` 把错误码翻成人话。

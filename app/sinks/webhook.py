@@ -1,10 +1,10 @@
-"""通用推送地址：钉钉 / 飞书 / PushPlus / Bark —— 只填一个地址就行。
+"""通用推送地址：钉钉 / 飞书 / Bark —— 只填一个地址就行。
 
 =====================================================================
 想改这里的话，先看这张地图
 =====================================================================
   加一家的支持            → `VENDORS` 那张表（认域名）+ 下面挨着写一个 `_xxx()`
-  改某家的报文格式        → 对应的 `_dingtalk()` / `_feishu()` / `_pushplus()` / `_bark()`
+  改某家的报文格式        → 对应的 `_dingtalk()` / `_feishu()` / `_bark()`（老的 `_pushplus()` 也还在）
   认不出来的地址怎么办    → `_generic()`（按 {title, text} 发，自建服务够用）
   改"算不算发送成功"      → `_verdict()`（**四家失败时也返回 200**，只能看 body 里的错误码）
   改超时/重试             → config.toml 的 [push_webhook] timeout / retry_times
@@ -16,8 +16,8 @@
 为什么加这个（2026-10-12）
 =====================================================================
 企业微信得先注册一个"企业"（哪怕只有你一个人）才能建群机器人，
-这一步劝退的人比想象中多。而钉钉、飞书建个群就有机器人地址，
-PushPlus 微信扫个码就有 token —— 都不用任何"企业"身份。
+这一步劝退的人比想象里多。而钉钉、飞书建个群就有机器人地址 ——
+都不用任何"企业"身份。
 
 =====================================================================
 怎么认的
@@ -31,7 +31,6 @@ PushPlus 微信扫个码就有 token —— 都不用任何"企业"身份。
 
   钉钉      https://open.dingtalk.com/document/orgapp/custom-robot-access
   飞书      https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot
-  PushPlus  https://www.pushplus.plus/doc/guide/api.html
   Bark      https://bark.day.app
 
 =====================================================================
@@ -80,6 +79,9 @@ def _feishu(title: str, body: str) -> tuple[dict[str, Any], str, tuple[str, ...]
 
 
 def _pushplus(title: str, body: str) -> tuple[dict[str, Any], str, tuple[str, ...]]:
+    # ⚠️ 这家后来**收费**了，我们不再推荐（文档里已经不提它）。
+    # 代码留着只是因为：老用户的 config.toml 里可能已经填着它的地址，
+    # 删掉这段会让那份配置直接发不出去 —— 属于"偷偷把人弄坏"。
     # token 跟在地址后面（?token=xxx）就行，所以这里不用再带。
     # 用 txt 模板：默认的 html 模板会把换行吃掉，一天的汇总就糊成一坨了。
     return {"title": title, "content": body, "template": "txt"}, "code", ("200",)
@@ -97,7 +99,7 @@ def _generic(title: str, body: str) -> tuple[dict[str, Any], str, tuple[str, ...
 VENDORS: tuple[tuple[str, str, Build], ...] = (
     ("dingtalk.com", "钉钉机器人", _dingtalk),
     ("feishu.cn", "飞书机器人", _feishu),
-    ("pushplus.plus", "PushPlus", _pushplus),
+    ("pushplus.plus", "PushPlus（收费，不再推荐）", _pushplus),
     ("day.app", "Bark", _bark),
     ("", "自定义地址", _generic),
 )
