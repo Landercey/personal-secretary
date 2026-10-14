@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import os
+import importlib
 import sys
 import tempfile
 import unittest
@@ -25,7 +26,12 @@ from app.contracts.interfaces import Sink, SinkResult                  # noqa: E
 from app.contracts.models import SOURCE_MANUAL, Message, TaskDraft     # noqa: E402
 from app.runtime import scheduler as sch                               # noqa: E402
 from app.runtime.config import config                                  # noqa: E402
+from app.runtime.config import Config as _Config                       # noqa: E402
 from app.store.repository import SqliteStore, open_database            # noqa: E402
+
+# 用模块路径取，不能 `from ... import config` —— 那样拿到的是导入那一刻的对象，
+# 测试里换掉它（关掉"新待办默认带提醒"）就换不动了。
+repo = importlib.import_module("app.store.repository")
 
 
 class FakeSink(Sink):
@@ -168,6 +174,12 @@ class TestDueReminders(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.store = SqliteStore(open_database(Path(self.tmp.name) / "s.db"))
+        # 这个类只验"按手工指定的档来提醒"。先把「新待办默认带提醒」关掉 ——
+        # 不然没写提醒的那几条也会带上默认档，断言就跟着变。
+        # （新默认那条契约由 tests/test_remind_defaults.py 专门守。）
+        self._old_repo_config = repo.config
+        repo.config = _Config({"remind": {"default_leads": [],
+                                          "timetable_leads": []}})
         message = Message(msg_id="m:1", source_kind=SOURCE_MANUAL, text="x")
         self.store.save_message(message)
         self.store.save_drafts(message, [
@@ -180,6 +192,7 @@ class TestDueReminders(unittest.TestCase):
     def tearDown(self):
         self.store.close()
         self.tmp.cleanup()
+        repo.config = self._old_repo_config
 
     def found(self, when: str) -> list[tuple[str, int]]:
         return [(task.title, minutes)
@@ -234,6 +247,10 @@ class TestScheduler(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.store = SqliteStore(open_database(Path(self.tmp.name) / "s.db"))
+        # 同上：这个类只验"到点推一次"，先把新待办的默认提醒关掉。
+        self._old_repo_config = repo.config
+        repo.config = _Config({"remind": {"default_leads": [],
+                                          "timetable_leads": []}})
         message = Message(msg_id="m:1", source_kind=SOURCE_MANUAL, text="x")
         self.store.save_message(message)
         self.store.save_drafts(message, [
@@ -260,6 +277,7 @@ class TestScheduler(unittest.TestCase):
         config["resource"]["mem_critical_percent"] = self._saved["mem"]
         self.store.close()
         self.tmp.cleanup()
+        repo.config = self._old_repo_config
 
     def test_delivers_once_at_slot(self):
         sent = self.scheduler.run_once(at("2026-10-08 07:31"))

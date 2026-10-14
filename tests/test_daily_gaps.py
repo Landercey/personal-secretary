@@ -29,8 +29,12 @@ from app.contracts.models import (                            # noqa: E402
     TaskDraft,
 )
 from app.runtime import heartbeat                              # noqa: E402
+from app.runtime.config import Config as _Config               # noqa: E402
 from app.store.repository import SqliteStore, open_database    # noqa: E402
 from app.ui.bridge import Api, _normalize_due                  # noqa: E402
+import importlib                                               # noqa: E402
+
+repo = importlib.import_module("app.store.repository")
 
 
 def stamp(days: int, hour: int = 9) -> str:
@@ -68,11 +72,31 @@ class TestRemindStrengthPerTask(Base):
     30 分钟前、10 分钟前、3 分钟前。"
     """
 
-    def test_default_is_zero_and_means_summary_only(self):
+    def test_default_now_comes_with_reminders(self):
+        """默认不再是"啥都不提醒"。
+
+        用户原话："加一个提醒力度默认是全选，不然都不提醒" —— 以前新待办
+        留空 = 只在每日汇总里出现，用户会觉得"这软件根本不提醒人"。
+        """
         task_id = self.add("拿快递")
         task = self.store.get_task(task_id)
 
-        self.assertEqual(task.remind_level, 0)
+        self.assertEqual(task.remind_level, 0)              # 老字段仍然是 0
+        self.assertEqual(task.remind_leads, "60,30,10,3")   # 新默认：全选
+        text = self.api._task_dict(task)["remind_text"]
+        self.assertIn("提前 1 小时", text)
+        self.assertNotIn("默认", text)
+
+    def test_emptying_the_default_goes_back_to_summary_only(self):
+        """想安静就把 [remind] default_leads 清空 —— 回到"只进汇总"。"""
+        original = repo.config
+        repo.config = _Config({"remind": {"default_leads": [],
+                                          "timetable_leads": []}})
+        self.addCleanup(setattr, repo, "config", original)
+
+        task_id = self.add("拿快递")
+        task = self.store.get_task(task_id)
+        self.assertEqual(task.remind_leads, "")
         self.assertEqual(self.api._task_dict(task)["remind_text"],
                          "默认：只在每日汇总里出现")
 

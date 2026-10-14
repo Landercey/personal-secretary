@@ -2021,7 +2021,13 @@ async function refresh() {
     receiverBad = true;
     statusLine = {label: '后台没在跑，点这里启动', dot: 'bad', go: 'panel:qq'};
   } else if (receiver.alive) {
-    statusLine = {label: receiver.detail || 'QQ 接收中', dot: 'ok', go: 'panel:qq'};
+    // "登录号 1137532133｜收到 1234" —— **数字要拆到 value 那一栏**：
+    // .value 是 flex:none、不参与省略，数字再大也看得见。整个塞进 label 的话，
+    // 收到几百条之后就会被截成"登录号 113753…"（用户报的"数字会省略"）。
+    const parts = String(receiver.detail || '').split('｜');
+    statusLine = {label: parts[0] || 'QQ 接收中',
+                  value: parts.length > 1 ? parts.slice(1).join('｜') : undefined,
+                  dot: 'ok', go: 'panel:qq'};
   } else {
     // 走到这儿 = 进程还在（running 没说是 false），但心跳断了。
     // 那不是"没在跑"，是**卡住了** —— 两句话不一样，别混。
@@ -2095,10 +2101,13 @@ async function refresh() {
   $('foot').title = titles.join('\n');
   const row = (line) => `<span class="label">${esc(line.label)}</span>${
     line.value === undefined ? '' : `<b class="value">${esc(line.value)}</b>`}`;
+  // 状态行也可以带一个数值（比如"收到 1234"）：它在 .value 里，永远不会被省略。
+  const statusValue = status.value === undefined ? ''
+    : `<b class="value">${esc(status.value)}</b>`;
   $('foot').innerHTML =
     // 状态行永远在最上面，带状态点
     `<a class="status" data-go="${esc(status.go)}">
-       <i class="dot ${esc(status.dot)}"></i><span class="label">${esc(status.label)}</span>
+       <i class="dot ${esc(status.dot)}"></i><span class="label">${esc(status.label)}</span>${statusValue}
      </a>` +
     lines.map(line => line.go
       ? `<a class="kv" data-go="${esc(line.go)}">${row(line)}</a>`

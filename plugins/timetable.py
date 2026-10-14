@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.contracts.interfaces import Source
-from app.contracts.models import Message
+from app.contracts.models import SOURCE_TIMETABLE, Message
 from app.runtime.config import config
 
 NAME = "timetable"
@@ -625,7 +625,7 @@ def message_for(lesson: Lesson) -> Message:
 
     return Message(
         msg_id="timetable:" + lesson_key(lesson),
-        source_kind="timetable",
+        source_kind=SOURCE_TIMETABLE,
         source_name="课表",
         text=text,
         raw={"title": lesson.title, "location": lesson.location},

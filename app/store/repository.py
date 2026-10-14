@@ -37,12 +37,42 @@ from ..contracts.models import (
     STATUS_DROPPED,
     STATUS_OPEN,
     SOURCE_MANUAL,
+    SOURCE_TIMETABLE,
     Attachment,
     Message,
     Task,
     TaskDraft,
 )
 from ..runtime.config import attachments_dir, config
+
+
+def default_leads_for(source_kind: str) -> str:
+    """新待办默认带哪几档提醒，存成 `"60,30,10,3"` 这种串（空串 = 不单独提醒）。
+
+    用户原话："加一个提醒力度默认是全选，不然都不提醒"。以前这里是空的，
+    而空 = 只在每日汇总里出现 —— 新待办一声不响，用户会觉得"这软件不提醒人"。
+
+    **课表单独一套**（`[remind] timetable_leads`）：一天四五节课，
+    配成和待办一样的四档会变成轰炸，所以它默认只提前 10 分钟响一次。
+
+    只认 `[remind] options` 里有的档：用户要是把 15 写进默认值，详情里那个
+    勾选框根本显示不出来，他会以为没生效。要用 15 就先把它加进 options。
+    """
+    key = "timetable_leads" if source_kind == SOURCE_TIMETABLE else "default_leads"
+    try:
+        wanted = list(config.get("remind", key, []) or [])
+        options = {int(item) for item in (config.get("remind", "options", []) or [])}
+    except (TypeError, ValueError):
+        return ""
+    out: list[int] = []
+    for item in wanted:
+        try:
+            minutes = int(item)
+        except (TypeError, ValueError):
+            continue
+        if minutes > 0 and (not options or minutes in options) and minutes not in out:
+            out.append(minutes)
+    return ",".join(str(m) for m in sorted(out, reverse=True))
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
@@ -259,13 +289,18 @@ class SqliteStore(Store):
                     return None
             cursor = self.conn.execute(
                 """INSERT INTO tasks
-                   (title, detail, due_at, location, remind_level, priority,
+                   (title, detail, due_at, location, remind_level, remind_leads,
+                    priority,
                     source_kind, source_name, sender, origin_msg_id, confidence,
                     quoted, status, is_archived, dedup_key, created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
                    ON CONFLICT(dedup_key) WHERE dedup_key <> '' DO NOTHING""",
                 (draft.title, draft.detail, draft.due_at, draft.location,
-                 int(draft.remind_level), int(draft.priority),
+                 int(draft.remind_level),
+                 # 新待办默认带提醒（用户要"默认全选"）—— 见 default_leads_for()
+                 default_leads_for(draft.source_kind or message.source_kind
+                                   or SOURCE_MANUAL),
+                 int(draft.priority),
                  draft.source_kind or message.source_kind or SOURCE_MANUAL,
                  draft.source_name or message.source_name,
                  draft.sender or message.sender,

@@ -38,6 +38,7 @@ SOURCE_QQ_GROUP = "qq_group"    # QQ 群里别人发的（严格过滤）
 SOURCE_QQ_INBOX = "qq_inbox"    # 自己发给小号的（宽松过滤，微信/短信转发走这条）
 SOURCE_QQ_PRIVATE = "qq_private"  # 别人私下发给你的（严格过滤）
 SOURCE_EMAIL = "email"          # 预留：邮箱插件
+SOURCE_TIMETABLE = "timetable"  # 课表插件推来的（提醒力度和待办分开配，见 [remind]）
 
 # ---------------------------------------------------------------------------
 # 附件类型。推送时靠它决定走"图片接口"还是"文件接口"（企微两套接口不一样）。
