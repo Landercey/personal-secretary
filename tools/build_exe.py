@@ -91,6 +91,12 @@ HIDDEN_IMPORTS = [
     "webview.platforms.mshtml",           # 老系统兜底
     "clr",                                # pythonnet：上面两个都靠它
     "clr_loader",
+    # 插件（plugins/*.py）是**运行时**才加载的，静态分析看不见它们的 import ——
+    # 所以插件用到的标准库也得写在这儿，不然打包版一加载就 ModuleNotFoundError。
+    # （2026-10-14：邮箱插件 import imaplib，打包版就是这么炸的；源码运行完全正常。）
+    "imaplib",                            # 邮箱插件
+    "email", "email.header", "email.utils", "email.message",
+    "html",
 ]
 
 # **绝对不许被拖进包里的东西。**

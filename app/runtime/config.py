@@ -200,6 +200,25 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         # "单周/双周/1-16周" 时才需要它；留空就当成每周都上。
         "term_start": "",
     },
+    "mail": {
+        # 邮箱插件（plugins/mail.py）：只在点「同步」时拉一次，不常驻、不轮询。
+        # 留空 = 不用这个插件。
+        "enabled": False,
+        # 各家邮箱的 IMAP 服务器地址：
+        #   QQ 邮箱 imap.qq.com ／ 163 imap.163.com ／ Gmail imap.gmail.com
+        #   Outlook outlook.office365.com
+        "host": "",
+        "port": 993,
+        "user": "",                 # 你的邮箱地址
+        # ⚠️ 这里要填**授权码**，不是登录密码 —— 邮箱设置里生成的那串。
+        # 它存在本地 config.toml 里，别把填好的这份发人、别传网盘。
+        "password": "",
+        "folder": "INBOX",
+        # 第一次同步只看最近几天、最多几封 —— 一次性把两百封邮件灌进待办，
+        # 用户第一眼就懵了（而且每封都要过一次 AI）。
+        "keep_days": 7,
+        "max_per_sync": 10,
+    },
     # 界面自己的小限制。
     "ui": {
         # 拖进窗口的文件最大多少 MB。
@@ -373,6 +392,24 @@ KEY_COMMENTS: dict[str, str] = {
     "timetable.term_start": "开学第一周的周一，例如 \"2026-09-01\"。\n"
                             "#   只有表格里写了「单周 / 双周 / 1-16周」才需要填；\n"
                             "#   留空就当成每周都上（一周内的待办不受影响）。",
+    # [mail] 邮箱插件
+    "mail.enabled": "打开之后，点「同步」会去邮箱拉最近的通知，变成待办。\n"
+                    "#   只在点同步时拉一次：不常驻连接、不轮询、不标已读。",
+    "mail.host": "邮箱的 IMAP 服务器地址。\n"
+                 "#   QQ 邮箱 imap.qq.com ／ 163 imap.163.com ／ Gmail imap.gmail.com\n"
+                 "#   Outlook outlook.office365.com（拿不准就搜「<你的邮箱> IMAP 服务器」）",
+    "mail.user": "你的邮箱地址（要收信的那个）。",
+    "mail.password": "⚠️ 这里填**授权码**，不是你的登录密码。\n"
+                     "#   QQ 邮箱：设置 → 账号 → 开启 IMAP → 生成授权码\n"
+                     "#   163 邮箱：设置 → POP3/SMTP/IMAP → 开启 → 新增授权密码\n"
+                     "#   Gmail：开两步验证后生成「应用专用密码」\n"
+                     "# 它明文存在本地 config.toml 里：别把这份文件发给别人、别传网盘。",
+    "mail.port": "IMAP 端口，默认 993（SSL）。没特殊要求不用改。",
+    "mail.folder": "看哪个文件夹，默认收件箱 INBOX。",
+    "mail.keep_days": "第一次同步只看最近几天的邮件，默认 7 天。\n"
+                      "#   往后每次同步只拉「上次之后的新邮件」，不再看这个。",
+    "mail.max_per_sync": "一次最多拉几封，默认 10。\n"
+                         "#   别设太大：每封都会过一次识别（开了 AI 就过一次 AI）。",
     # [ui] 界面
     "ui.drop_max_mb": "拖进窗口的文件最大多少 MB，默认 12。\n"
                       "#   拖进来的文件是「摊成文本」传给后端的（网页拿不到真实路径），\n"
@@ -407,6 +444,7 @@ SECTION_GROUPS: tuple[tuple[str, str, str, tuple[tuple[str, str, str], ...]], ..
         ("qq", "QQ 接入", "收哪些群、哪些私聊"),
         ("risk", "用大号还是小号", "挂机之前先想清楚"),
         ("timetable", "课表", "把课表变成待办（不用就留空）"),
+        ("mail", "邮箱", "把邮件通知也变成待办（可选，点同步才拉）"),
     )),
     ("group_understand", "看懂消息", "什么样的消息算待办", (
         ("ai", "AI 增强", "可选。不填就只用规则解析，功能照常"),
@@ -429,6 +467,8 @@ ADVANCED_KEYS: frozenset[str] = frozenset({
     "extract.ocr_engine", "extract.max_pages", "extract.render_scale",
     # AI 这两项一般不用动：短于多少字才问 AI、等多久算超时。
     "ai.token_budget_per_day", "ai.min_chars", "ai.timeout_seconds",
+    # 邮箱这四项一般不用动：端口、看哪个文件夹、第一次看几天、一次拉几封。
+    "mail.port", "mail.folder", "mail.keep_days", "mail.max_per_sync",
     "title.max_len", "title.min_meaningful_chars",
 })
 

@@ -348,7 +348,9 @@ class TestPluginSlots(unittest.TestCase):
         by_name = {s.name: s for s in statuses}
         self.assertIn("timetable", by_name)
         self.assertTrue(by_name["timetable"].ok, by_name["timetable"].error)
-        self.assertEqual([s.kind for s in registry.sources], ["timetable"])
+        # 只断言"它在里面"。写死整个列表的话，以后每加一个来源插件这条就红一次，
+        # 而那种红一个字的错都指不出来。
+        self.assertIn("timetable", [s.kind for s in registry.sources])
 
     def test_source_without_target_produces_nothing(self):
         """没配订阅地址/文件时这个插件必须完全安静，不能报错、不能瞎拉。
