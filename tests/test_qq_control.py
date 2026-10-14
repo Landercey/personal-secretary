@@ -502,7 +502,15 @@ class MemoryReadout(Base):
         self.assertLess(value, 2000)
 
     def test_summary_reports_own_memory(self):
+        from app.runtime import heartbeat
         from app.runtime.sysmon import self_rss_mb
+
+        # 这个测试只想验"界面自己吃多少"。可它读的是**真实**心跳文件 ——
+        # 作者这台机器上后台大部分时间都在跑，"后台没跑"这个前提就时真时假，
+        # 于是测试时红时绿（不稳定的测试比没有测试更糟）。先把心跳压成"没有"。
+        original = heartbeat.state
+        heartbeat.state = lambda store: {}
+        self.addCleanup(setattr, heartbeat, "state", original)
 
         summary = Api(self.store).config_summary()
         self.assertEqual(summary["ui_mb"], self_rss_mb())

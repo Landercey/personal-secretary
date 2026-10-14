@@ -75,7 +75,8 @@ def launcher(root: Path) -> tuple[Path | None, str]:
 
 
 # 在 PowerShell 里跑的一段脚本。用 {} 占位，由 Python 填好再编码。
-_SCRIPT = """
+# r"" 是必须的：里面有 `,\d+$` 这种正则，普通字符串会被 Python 当成坏转义并报警告。
+_SCRIPT = r"""
 $ErrorActionPreference = 'Stop'
 # 不关掉进度流的话，输出里会混进一坨 CLIXML（powershell 首次加载模块时的进度记录）
 $ProgressPreference = 'SilentlyContinue'
