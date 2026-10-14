@@ -964,7 +964,10 @@ class Api:
 
     def quit_app(self) -> dict:
         """把界面关掉。一键更新用得上：脚本在等这个进程消失。"""
-        window = getattr(self, "window", None)
+        # 名字带下划线是硬要求，别改回 `window`：pywebview 会遍历 js_api 的
+        # 公开属性去生成 JS 代理，碰到窗口就会钻 .NET 对象把界面卡死（见 run.py
+        # open_ui 里 api._window 那段说明）。
+        window = getattr(self, "_window", None)
         if window is None:
             return {"ok": False, "message": "拿不到窗口（源码直接跑的时候没有）"}
         window.destroy()

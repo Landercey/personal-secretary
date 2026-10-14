@@ -802,7 +802,11 @@ def open_ui(store, source, pipeline, sink, registry) -> int:
                                    min_size=(820, 520), js_api=api)
     # 一键更新要把界面关掉（更新脚本在等这个进程消失）。桥自己拿不到窗口，
     # 所以在这儿递给它 —— 见 bridge.quit_app 和 runtime/selfupdate.py。
-    api.window = window
+    # **名字必须以下划线开头**：pywebview 生成 JS 代理时会 dir() 遍历 js_api，
+    # 顺着公开属性一路钻进 WinForms/.NET 对象（Window → BrowserForm → 无障碍
+    # 对象），那一步要跨公寓 COM 往返、还握着 GIL —— 界面就"未响应"了，
+    # 页面永远停在"正在连接…"（2026-10-14 实锤，py-spy 抓到栈在 util.py:196）。
+    api._window = window
     # 标题栏图标。pywebview 的 create_window 不收这个参数，只有 start 收。
     webview.start(icon=str(icon) if icon.is_file() else None)
     return 0

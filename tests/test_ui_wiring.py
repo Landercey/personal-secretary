@@ -160,6 +160,30 @@ class TestUiEntryPoint(unittest.TestCase):
         self.assertEqual(kw["js_api"]._plugins, [])      # 插件的加载结果真的递进去了
         self.assertIn("icon", self.calls["start"])
 
+    def test_js_api_keeps_the_window_out_of_public_attributes(self):
+        """窗口只能挂在 `_window` 上 —— 挂到公开属性上会把界面卡死。
+
+        2026-10-14 真踩过（用户原话："怎么打开又是未响应"）：pywebview 生成 JS
+        代理时会 `dir()` 遍历 js_api、对每个公开属性 `getattr`，顺着 `api.window`
+        一路走进 WinForms 的 `BrowserForm` → 无障碍对象；那一步要跨公寓 COM
+        往返、又握着 GIL —— 窗口冻住、页面永远停在"正在连接…"。
+        （py-spy 抓到的栈停在 pywebview 的 util.py `get_functions`。）
+        """
+        code = self.run.open_ui(None, None, None, None, self.registry)
+        self.assertEqual(code, 0)
+        js_api = self.calls["window"][2]["js_api"]
+
+        self.assertTrue(hasattr(js_api, "_window"),
+                        "窗口没递进去，quit_app / 一键更新会失灵")
+        self.assertFalse(hasattr(js_api, "window"),
+                         "窗口又挂到公开属性上了 —— 界面会未响应")
+
+        leaked = [name for name in dir(js_api)
+                  if not name.startswith("_")
+                  and getattr(type(getattr(js_api, name)), "__module__", "")
+                  .startswith("webview")]
+        self.assertEqual(leaked, [], f"这些公开属性会把界面带进 .NET 对象：{leaked}")
+
 
 if __name__ == "__main__":
     unittest.main()
