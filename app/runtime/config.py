@@ -182,6 +182,14 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         # 微信/短信截图转发到这里，就等于丢进收件箱。
         "inbox_ids": [],
         "only_mention": False,            # true = 群里只有 @我 的消息才收
+        # ===== 开机补收（程序关着那段时间的消息）=====
+        # 刚连上时问一次"最近几条历史"，把开机前的一小段补进来。
+        # 只能补到 QQ 愿意给的那一小段（通常每个会话最近几十条），
+        # 补不了"昨天一整天"；重复的会被自动去掉，不会变成两条待办。
+        "catch_up": True,
+        "catch_up_count": 20,             # 每个会话最多补几条
+        "catch_up_hours": 12,             # 太老的不要（超过这么多小时的不补）
+        "catch_up_total": 60,             # 一次总共最多补几条（开 AI 时每条都要过一遍模型）
         # ===== 安全阀 =====
         "max_text_chars": 3000,           # 单条消息最多留多少字，防超长轰炸
     },
@@ -379,6 +387,14 @@ KEY_COMMENTS: dict[str, str] = {
                     "#      连文件里读出来的字也当待办（别的地方会严格过滤）。\n"
                     "#      因为那是你专门记给自己的，机器不该替你判断值不值得。",
     "qq.only_mention": "true = 群里只有 @我 的消息才收。群太吵可以打开。",
+    "qq.catch_up": "刚连上时，把「开机前那一小段」的消息补进来（默认开）。\n"
+                   "#   只能补到 QQ 愿意给的一小段（通常每个会话最近几十条），\n"
+                   "#   补不了「昨天一整天」那种；重复的会被自动去掉。",
+    "qq.catch_up_count": "每个会话最多补几条，默认 20。",
+    "qq.catch_up_hours": "只补最近多少小时内的消息，默认 12。更老的不补 —— "
+                         "一晚上的刷屏全灌进来只会把待办列表淹掉。",
+    "qq.catch_up_total": "一次总共最多补几条，默认 60。\n"
+                         "#   开了 AI 的话每条都要过一次模型，别设太大（开机时会卡）。",
     "qq.max_text_chars": "单条消息最多保留多少字，防超长内容刷屏。",
     # [timetable] 课表插件
     "timetable.url": "课表订阅地址（iCal / .ics）。留空 = 不用这个。\n"
@@ -469,6 +485,8 @@ ADVANCED_KEYS: frozenset[str] = frozenset({
     "ai.token_budget_per_day", "ai.min_chars", "ai.timeout_seconds",
     # 邮箱这四项一般不用动：端口、看哪个文件夹、第一次看几天、一次拉几封。
     "mail.port", "mail.folder", "mail.keep_days", "mail.max_per_sync",
+    # 补收的三个上限一般不用动（补几条、多久内、一次总共几条）。
+    "qq.catch_up_count", "qq.catch_up_hours", "qq.catch_up_total",
     "title.max_len", "title.min_meaningful_chars",
 })
 

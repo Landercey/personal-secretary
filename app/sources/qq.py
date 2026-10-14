@@ -551,6 +551,35 @@ def group_entries(reply: Any) -> list[dict[str, Any]]:
     return sorted(found, key=lambda g: (not g["name"], g["name"] or str(g["id"])))
 
 
+def history_events(reply: Any, kind: str, target: int) -> list[dict[str, Any]]:
+    """`get_group_msg_history` / `get_friend_msg_history` 的回执 → 能喂给管线的事件。
+
+    为什么要这一层：历史接口给的是**消息对象**，而管线认的是**事件**。
+    转成事件之后，后面"收不收这个会话、算不算待办、要不要去重"全都复用同一条路 ——
+    补收的消息和刚收到的消息不该有两套规矩。
+
+    两种返回形状都认：`data.messages` 和 `data` 直接是数组（不同实现不一样）。
+    返回前按时间**从旧到新**排好：历史消息常常是倒着给的，正序才对
+    （"60 秒内同一个人连着发的合成一条"靠的就是顺序）。
+    """
+    data = reply.get("data") if isinstance(reply, dict) else None
+    items = data.get("messages") if isinstance(data, dict) else data
+    events: list[dict[str, Any]] = []
+    for item in items or []:
+        if not isinstance(item, dict) or not item:
+            continue
+        event = dict(item)
+        event["post_type"] = "message"
+        event["message_type"] = "group" if kind == "group" else "private"
+        if kind == "group":
+            event.setdefault("group_id", target)
+        else:
+            event.setdefault("user_id", target)
+        events.append(event)
+    events.sort(key=lambda e: float(e.get("time") or 0))
+    return events
+
+
 # ===========================================================================
 # 配置
 # ===========================================================================
@@ -747,6 +776,80 @@ class QQSource(Source):
         if found:
             self._groups = found
 
+    # ------------------------------------------------------------------ 开机补收
+    def _catch_targets(self) -> list[tuple[str, int]]:
+        """刚连上要补哪些会话：勾的群 + 勾的私聊 + 小号收件箱。
+
+        **"收所有私聊"不算**（receive_private_all）：那等于给所有好友各发一次
+        历史请求 —— 动作太多，也太像扫号。只补用户明确勾过的。
+        """
+        pairs: list[tuple[str, int]] = [("group", g) for g in self.settings.group_ids]
+        pairs += [("private", p) for p in self.settings.private_ids]
+        pairs += [("private", i) for i in self.settings.inbox_ids]
+        seen: set[tuple[str, int]] = set()
+        out: list[tuple[str, int]] = []
+        for kind, target in pairs:
+            try:
+                key = (kind, int(target))
+            except (TypeError, ValueError):
+                continue
+            if key not in seen:
+                seen.add(key)
+                out.append(key)
+        return out
+
+    async def _catch_up(self) -> None:
+        """把"程序关着那段时间"的消息补回来（用户问：能不能读开机前的消息）。
+
+        怎么补：问 NapCat 要每个会话的**最近几条历史**，转成事件后走同一条管线。
+        重复的不用怕 —— 库里按消息编号去重，之前收过的不会再变成第二条待办。
+
+        ⚠️ 只能补到 QQ 愿意给的那一小段（一般每个会话最近几十条）。
+        指望着"补回昨天一整天"是不现实的，所以这里必须设上限：
+        太老的不要、每个会话最多几条、总共最多几条 ——
+        开着 AI 的时候每条都要过一次模型，一次灌 200 条会让开机卡很久。
+        """
+        if not bool(config.get("qq", "catch_up", True)):
+            return
+        per_chat = _as_int(config.get("qq", "catch_up_count", 20), 20)
+        hours = _as_int(config.get("qq", "catch_up_hours", 12), 12)
+        total = _as_int(config.get("qq", "catch_up_total", 60), 60)
+        targets = self._catch_targets()
+        if not targets or per_chat <= 0 or total <= 0:
+            return
+        cutoff = time.time() - max(1, hours) * 3600
+        added = 0
+        for kind, target in targets:
+            if added >= total:
+                break
+            if kind == "group":
+                action, params = "get_group_msg_history", {"group_id": target}
+            else:
+                action, params = "get_friend_msg_history", {"user_id": target}
+            params["count"] = min(per_chat, total - added)
+            reply = await self.call_api(action, params, timeout=8.0)
+            for event in history_events(reply, kind, target):
+                if added >= total:
+                    break
+                if float(event.get("time") or 0) < cutoff:
+                    continue            # 太老的别补：那只会把待办列表淹掉
+                await self._prepare_event(event)
+                self.feed_event(event)
+                added += 1
+        if added:
+            print(f"  [补收] 开机前最近 {added} 条消息补进来了"
+                  f"（上限：每个会话 {per_chat} 条、共 {total} 条、{hours} 小时内）")
+            print("         补收也走同一条识别管线；和已收过的重复的会被自动去掉。")
+
+    async def _catch_up_later(self) -> None:
+        """等几秒再补：让登录事件先落定（self_id 有了才认得出发件人是不是自己）。"""
+        await asyncio.sleep(3)
+        try:
+            await self._catch_up()
+        except Exception as exc:                      # noqa: BLE001
+            # 补收只是锦上添花，失败绝不能影响正常收消息
+            self._set(error=f"补收失败：{type(exc).__name__}: {exc}")
+
     # ------------------------------------------------------------------ 生命周期
     def start(self) -> bool:
         """起一个后台线程跑事件循环。返回是否成功起线程。"""
@@ -927,6 +1030,9 @@ class QQSource(Source):
         # 它永远读不到自己的回执，只能干等到超时。表现就是
         # 「读取我加的群」永远是空的（而 NapCat 那边其实答得好好的，实测 29 个群）。
         self._group_task = asyncio.get_running_loop().create_task(self._refresh_groups())
+        # 再补一次"程序关着那会儿"的消息（问 NapCat 要最近几条历史）。
+        # 同样**必须扔成后台任务**：在这儿 await 就收不到自己的回执了（同一个坑）。
+        self._catch_task = asyncio.get_running_loop().create_task(self._catch_up_later())
         try:
             async for raw in connection:
                 if isinstance(raw, bytes):
