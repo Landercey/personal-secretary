@@ -153,6 +153,44 @@ class TestFastLoginFallback(unittest.TestCase):
         self.assertFalse(deploy.fast_login_failed(None, False))
 
 
+class TestAutoRestartForLogin(unittest.TestCase):
+    """掉线自救：NapCat 进程还活着、但一直连不上，等够时间就带号重启一次。
+
+    2026-10-16 用户报："早上还要点一次重新启动 QQ 才行"。
+    现场是早上 06:30 网络抖了一下、登录态掉了，NapCat 退回要二维码、
+    每 2 分钟报一次 Login Error，**可是进程一直活着** —— 上面那条
+    `fast_login_failed()` 要求"进程已退出"，所以判不出来，程序只能干等。
+    这里补的就是那一步。
+    """
+
+    def ask(self, seconds: float, **over) -> bool:
+        args = dict(minutes=5, used=0, cap=3, proc_alive=True, connected=False)
+        args.update(over)
+        return deploy.should_restart_for_login(seconds, **args)
+
+    def test_not_yet(self):
+        self.assertFalse(self.ask(4 * 60))
+
+    def test_due_after_the_wait(self):
+        self.assertTrue(self.ask(5 * 60))
+        self.assertTrue(self.ask(9 * 60))
+
+    def test_connected_never_restarts(self):
+        self.assertFalse(self.ask(30 * 60, connected=True))
+
+    def test_dead_process_is_left_to_the_other_rule(self):
+        """进程已经退出 → 交给 fast_login_failed 那条（退回扫码），别抢着重启。"""
+        self.assertFalse(self.ask(30 * 60, proc_alive=False))
+
+    def test_switch_off_means_never(self):
+        self.assertFalse(self.ask(999 * 60, minutes=0))
+
+    def test_cap_stops_the_loop(self):
+        """上限到了就不许再重启 —— 反复登录既没用又招风控。"""
+        self.assertFalse(self.ask(999 * 60, used=3))
+        self.assertTrue(self.ask(999 * 60, used=2))
+
+
 class TestDownloadFallback(unittest.TestCase):
     def test_tries_every_mirror_before_giving_up(self):
         """直连下不动要换镜像 —— 实测 GitHub 在国内很慢。"""

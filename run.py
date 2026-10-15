@@ -83,6 +83,11 @@ ROOT = default_root()
 # 源码运行 = 项目根目录；打包后 = PyInstaller 解出来的 _internal。
 RESOURCE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 
+# 掉线自救最多重启几次。为什么要上限（2026-10-16 加的这道闸）：
+# 它会**带号重新登录**，反复来既是无用功，又更像"异常登录"。
+# 用完就停手，改成在界面上和日志里告诉用户去手动点。
+AUTO_RESTART_MAX = 3
+
 
 def ensure_bundled_files() -> int:
     """第一次运行时，把随包发的插件补到用户的 plugins/ 里。返回补了几个。
@@ -633,6 +638,9 @@ def run_deploy(store, pipeline, account: int) -> int:
     last_line = ""
     repaired = 0
     qr_fallback = False
+    # 掉线自救用的两个状态：从什么时候开始连不上、已经自动重启过几次
+    offline_since: float | None = None
+    auto_restarts = 0
     try:
         while True:
             time.sleep(2)
@@ -676,6 +684,42 @@ def run_deploy(store, pipeline, account: int) -> int:
                 napcat = deploy.start_shell(shell)      # 不带号 = 出二维码
                 time.sleep(3)
                 continue
+
+            # ⑤ 掉线自救（2026-10-16 用户报："早上还要点一次重新启动 QQ 才行"）。
+            #    06:30 网络抖了一下 → 登录态掉了 → NapCat 退回要二维码、每 2 分钟报
+            #    `Login Error, ErrType 1 ErrCode 3`，**但进程一直活着** ——
+            #    所以第 ④ 条那个判据（进程已退出）永远不成立，程序只能干等。
+            #    有效的动作只有一个：带号重启（= 用户手点「重新启动 QQ」那下，
+            #    它会拿本机存的登录态再登一次，不用扫码）。次数有上限，见那条注释。
+            if state.get("connected"):
+                offline_since = None
+                auto_restarts = 0            # 连上过就重新给满额
+            else:
+                if offline_since is None:
+                    offline_since = time.time()
+                minutes = int(config.get("qq", "auto_restart_minutes", 5) or 0)
+                cap = AUTO_RESTART_MAX
+                if deploy.should_restart_for_login(
+                        time.time() - offline_since, minutes=minutes,
+                        used=auto_restarts, cap=cap,
+                        proc_alive=napcat is not None and napcat.poll() is None,
+                        connected=False):
+                    auto_restarts += 1
+                    print(f"  ⚠️ 已经 {minutes} 分钟没连上（NapCat 还活着，多半是掉登录态了），"
+                          f"自动带号重启一次重试快速登录"
+                          f"（第 {auto_restarts}/{cap} 次）")
+                    deploy.report("掉线了，正在自动重连", active=False)
+                    deploy.stop_shell(napcat)
+                    napcat = deploy.start_shell(shell, account)
+                    offline_since = time.time()      # 重新开始计时，别连环重启
+                    time.sleep(3)
+                    continue
+                if auto_restarts >= cap and time.time() - offline_since > 30 * 60:
+                    # 自动那几下都用完了：把话说清楚，让用户自己接手
+                    # （半小时提一次就够，别把日志刷满）
+                    print("  ⚠️ 自动重连试完了还是没连上 —— 在「📱 QQ 接收」里点"
+                          "「重新启动 QQ」，或者扫一次码。")
+                    offline_since = time.time()      # 一小时后再提醒一次就行
 
             if state.get("connected"):
                 line = (f"  [已连接] 登录号 {state.get('self_id') or '?'}｜"

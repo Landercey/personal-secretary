@@ -435,6 +435,25 @@ def fast_login_failed(proc, connected: bool) -> bool:
     return not connected and proc is not None and proc.poll() is not None
 
 
+def should_restart_for_login(offline_seconds: float, *, minutes: int,
+                             used: int, cap: int, proc_alive: bool,
+                             connected: bool) -> bool:
+    """连不上这么久、但 NapCat 进程还活着 —— 该带号重启一次吗？
+
+    2026-10-16 真事：早上 06:30 网络抖了一下，登录态掉了，NapCat 退回要二维码、
+    每 2 分钟报一次 `Login Error, ErrType 1 ErrCode 3`，可是**它进程没退** ——
+    所以 `fast_login_failed()` 判不出来（那条要求进程已退出），程序就一直干等，
+    非要用户手动点「重新启动 QQ」才恢复（用户原话："早上还要点一次重新启动 QQ"）。
+
+    这里补的就是那一步：等够时间自己重启一次（重启会重试快速登录，不用扫码）。
+    三个闸缺一不可 —— 连上了不重启、进程死了不管（交给 fast_login_failed）、
+    `minutes <= 0` 表示用户关了这功能、**重启次数有上限**（反复登录既没用又招风控）。
+    """
+    if connected or not proc_alive or minutes <= 0 or used >= cap:
+        return False
+    return offline_seconds >= minutes * 60
+
+
 def start_shell(shell_dir: Path, qq: int | None = None,
                 log_path: Path | None = None):
     """起 NapCat。**返回 Popen**。窗口藏起来，但输出写进日志文件。

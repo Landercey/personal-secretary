@@ -197,6 +197,11 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "catch_up_count": 20,             # 每个会话最多补几条
         "catch_up_hours": 12,             # 太老的不要（超过这么多小时的不补）
         "catch_up_total": 60,             # 一次总共最多补几条（开 AI 时每条都要过一遍模型）
+        # 掉线自救：连着这么多分钟没连上、而 NapCat 进程还活着，就自动带号重启一次
+        # （等于用户手点「重新启动 QQ」）。填 0 = 关掉，掉线了就等你自己点。
+        # ⚠️ 为什么进程活着也要重启：2026-10-16 那天早上网络抖了一下，登录态掉了，
+        # NapCat 退回要二维码、每 2 分钟报一次错，但进程一直没退 —— 用户只能手动点。
+        "auto_restart_minutes": 5,
         # ===== 安全阀 =====
         "max_text_chars": 3000,           # 单条消息最多留多少字，防超长轰炸
     },
@@ -407,6 +412,10 @@ KEY_COMMENTS: dict[str, str] = {
                          "一晚上的刷屏全灌进来只会把待办列表淹掉。",
     "qq.catch_up_total": "一次总共最多补几条，默认 60。\n"
                          "#   开了 AI 的话每条都要过一次模型，别设太大（开机时会卡）。",
+    "qq.auto_restart_minutes": "连着这么多分钟没连上（而 NapCat 进程还活着）就自动\n"
+                               "#   带号重启一次，重试快速登录（等于你手点「重新启动 QQ」）。\n"
+                               "#   默认 5 分钟；填 0 = 关掉，掉线了就等你自己点。\n"
+                               "#   最多自动试 3 次，之后只在界面上提醒你手动来。",
     "qq.max_text_chars": "单条消息最多保留多少字，防超长内容刷屏。",
     # [timetable] 课表插件
     "timetable.url": "课表订阅地址（iCal / .ics）。留空 = 不用这个。\n"
@@ -499,6 +508,8 @@ ADVANCED_KEYS: frozenset[str] = frozenset({
     "mail.port", "mail.folder", "mail.keep_days", "mail.max_per_sync",
     # 补收的三个上限一般不用动（补几条、多久内、一次总共几条）。
     "qq.catch_up_count", "qq.catch_up_hours", "qq.catch_up_total",
+    # 掉线自救的等待时长（默认 5 分钟）也不用动。
+    "qq.auto_restart_minutes",
     "title.max_len", "title.min_meaningful_chars",
 })
 
