@@ -15,7 +15,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.contracts.models import SOURCE_MANUAL, Message, TaskDraft        # noqa: E402
+from app.contracts.models import (                                        # noqa: E402
+    SOURCE_MANUAL,
+    SOURCE_QQ_GROUP,
+    Message,
+    TaskDraft,
+)
 from app.store.repository import SqliteStore, dedup_key_for, open_database  # noqa: E402
 
 
@@ -85,6 +90,75 @@ class TestDedupInStore(unittest.TestCase):
         row = self.store.conn.execute(
             "SELECT COUNT(*) n FROM task_events WHERE kind='merged'").fetchone()
         self.assertEqual(int(row["n"]), 1)
+
+
+class TestCompletedNoticeRepeat(unittest.TestCase):
+    """同一条通知，点过完成之后又发一遍 —— 不许再收一条、再推一次。
+
+    2026-10-16 用户的原话："待办做完了他还推"。查库确认：营长把同一段话
+    （"现要求四营的同学明天务必互相提醒穿着统一军训服参加军训！"）连着两天重发，
+    解析出来的截止时间跟着往后挪一天 —— 去重键是"标题+时刻"，于是每天都是一条
+    新待办、每天推一次（#37/#38 前一天点过完成，#40/#41 第二天又来了）。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = SqliteStore(open_database(Path(self.tmp.name) / "r.db"))
+        self.message = Message(msg_id="qq:7", source_kind=SOURCE_QQ_GROUP,
+                               source_name="某班群", text="x")
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def _only(self):
+        return self.store.list_tasks("all")[0]
+
+    def _notice(self, title, due):
+        """群里来的草稿：source_kind 要写对，否则会被当成"手动录入"。"""
+        return TaskDraft(title=title, due_at=due, source_kind=SOURCE_QQ_GROUP)
+
+    def _merged_events(self) -> int:
+        row = self.store.conn.execute(
+            "SELECT COUNT(*) n FROM task_events WHERE kind='merged'").fetchone()
+        return int(row["n"])
+
+    def test_same_notice_after_completing_is_not_re_added(self):
+        notice = "现要求四营的同学务必互相提醒穿着统一军训服参加军训"
+        self.store.save_drafts(self.message, [self._notice(notice, "2026-10-16 23:59:00")])
+        self.store.set_status(self._only().task_id, "done")
+        # 第二天原样又发一遍：字一样，只是"明天"变成了新的一天
+        self.store.save_drafts(self.message, [self._notice(notice, "2026-10-17 23:59:00")])
+        self.assertEqual(self.store.count_tasks("open"), 0)
+        self.assertEqual(self.store.count_tasks("done"), 1)
+        self.assertEqual(self._merged_events(), 1)
+
+    def test_a_notice_with_different_words_is_still_added(self):
+        """措辞变了一点就是新通知，宁可多收一条。"""
+        self.store.save_drafts(self.message, [
+            self._notice("现要求四营的同学务必互相提醒穿着统一军训服参加军训",
+                         "2026-10-16 23:59:00")])
+        self.store.set_status(self._only().task_id, "done")
+        self.store.save_drafts(self.message, [
+            self._notice("现要求四营的同学务必互相提醒穿着统一军训服参加军训，另带腰带",
+                         "2026-10-17 23:59:00")])
+        self.assertEqual(self.store.count_tasks("open"), 1)
+
+    def test_short_title_is_not_swallowed(self):
+        """"拿快递"这种短标题又来一次，是真的又要做一遍。"""
+        self.store.save_drafts(self.message, [self._notice("拿快递", "2026-10-16 20:00:00")])
+        self.store.set_status(self._only().task_id, "done")
+        self.store.save_drafts(self.message, [self._notice("拿快递", "2026-10-17 20:00:00")])
+        self.assertEqual(self.store.count_tasks("open"), 1)
+
+    def test_manual_re_entry_is_not_swallowed(self):
+        """自己手敲的说明是特意又记一次，不能吞。"""
+        manual = Message(msg_id="m:1", source_kind=SOURCE_MANUAL, text="x")
+        title = "把志愿活动的报名表交到教务处"
+        self.store.save_drafts(manual, [draft(title, "2026-10-16 20:00:00")])
+        self.store.set_status(self._only().task_id, "done")
+        self.store.save_drafts(manual, [draft(title, "2026-10-17 20:00:00")])
+        self.assertEqual(self.store.count_tasks("open"), 1)
 
 
 class TestDuplicateMerge(unittest.TestCase):

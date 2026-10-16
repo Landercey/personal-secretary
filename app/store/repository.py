@@ -168,6 +168,13 @@ def _synchronized(method):
     return wrapper
 
 
+# 同一条通知"做完之后又来"的宽限天数：这几天内点过完成的、标题一模一样的，
+# 当作同一条（不新建、不推送）。想更宽松就把它调大。
+DONE_REPEAT_DAYS = 3
+# 太短的标题（"交作业"）不套这条规则 —— 那更像用户真的又要做一次。
+DONE_REPEAT_MIN_CHARS = 6
+
+
 def dedup_key_for(draft: TaskDraft) -> str:
     """去重键：同一个标题 + 同一个时刻 + 同一个地点 → 同一条。
 
@@ -287,6 +294,20 @@ class SqliteStore(Store):
                     #   第二条被静默丢掉，用户看到的是"我发的那条没反应"。）
                     self._merge_into(int(row["task_id"]), message, draft)
                     return None
+                # 同一条通知，点过完成之后又发一遍 —— 用户的原话是
+                # "待办做完了他还推"（2026-10-16）。
+                #
+                # 为什么精确去重挡不住：营长每天把同一段话重发一遍，里面写着
+                # "明天务必…"，解析出来的截止时间跟着往后挪一天 —— 去重键是
+                # "标题 + 时刻"，于是每天都是一条新待办，每天推你一次。
+                # 近几天点过完成、标题一模一样的，并进那条（记一笔事件），
+                # 不新建、也不再推。
+                done = self._recent_done_by_title(draft, message)
+                if done:
+                    self._merge_into(done, message, draft, note=(
+                        "重复出现（这条之前已点过完成，没有再收一条新的）"
+                        f"（来源 {message.source_name or draft.source_name}）"))
+                    return None
             cursor = self.conn.execute(
                 """INSERT INTO tasks
                    (title, detail, due_at, location, remind_level, remind_leads,
@@ -317,7 +338,28 @@ class SqliteStore(Store):
             self._event(task_id, "created", f"来自 {draft.source_name or message.source_name}")
         return self.get_task(task_id)
 
-    def _merge_into(self, task_id: int, message: Message, draft: TaskDraft) -> None:
+    def _recent_done_by_title(self, draft: TaskDraft, message: Message) -> int | None:
+        """近几天点过完成的、标题一模一样的待办 id（没有就 None）。
+
+        只认"完全一样的字"：措辞变了一点就是新通知，宁可多收一条。
+        只对群里/收件箱来的算（手动录入的说明用户是特意又记一次，别吞）。
+        """
+        body = re.sub(r"\s+", "", draft.title or "").lower()
+        if len(body) < DONE_REPEAT_MIN_CHARS:
+            return None
+        if (draft.source_kind or message.source_kind or SOURCE_MANUAL) == SOURCE_MANUAL:
+            return None
+        since = (datetime.now() - timedelta(days=DONE_REPEAT_DAYS)
+                 ).strftime(TIME_FORMAT)
+        for row in self.conn.execute(
+                "SELECT task_id, title FROM tasks WHERE status='done'"
+                " AND completed_at >= ? AND completed_at <> ''", (since,)):
+            if re.sub(r"\s+", "", str(row["title"] or "")).lower() == body:
+                return int(row["task_id"])
+        return None
+
+    def _merge_into(self, task_id: int, message: Message, draft: TaskDraft,
+                    note: str | None = None) -> None:
         """把一条重复的草稿合并进已存在的待办。
 
         补什么、不补什么，都是有理由的：
@@ -345,7 +387,7 @@ class SqliteStore(Store):
             )
             for attachment in draft.attachments:
                 self._insert_attachment(task_id, message.msg_id, attachment)
-            self._event(task_id, "merged",
+            self._event(task_id, "merged", note or
                         f"重复出现，已合并（来源 {message.source_name or draft.source_name}）")
 
     def _insert_attachment(self, task_id: int, msg_id: str, item: Attachment) -> None:
