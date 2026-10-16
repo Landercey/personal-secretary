@@ -28,6 +28,15 @@ from ..runtime.scheduler import (describe_leads, describe_remind, remind_options
 from ..sinks.router import channel_status, push_help_section, push_ready
 
 
+JUNK_LIST_MAX = 500
+"""废件箱清单两边各取多少条。
+
+以前是 100 —— 用户库里"被拦下的原文"有 374 条，于是更早的 274 条**在界面里
+根本翻不到**（他报的是"费件箱有107，他只显示7"，107 = 7 条误判 + 100 条原文）。
+500 够装下正常用量；真堆到 500 以上说明该清理了（保留策略在 [store] 里）。
+"""
+
+
 def tracked(fn):
     """把一次界面调用记进 `data/ui.log`（开始/耗时/出错）。
 
@@ -291,7 +300,10 @@ class Api:
             "overdue": self.store.count_tasks("overdue"),
             "done": self.store.count_tasks("done"),
             "archive": self.store.count_tasks("archive"),
-            "junk": self.store.count_tasks("junk"),
+            # 废件箱这个数字**必须等于清单里有几条**。清单是"你标成误判的待办"
+            # + "被规则拦下的原文"两样合起来的，只算前者就会写成 7、里面躺着 107
+            # （用户 2026-10-16："费件箱有107，他只显示7"）。两样相加才是真的。
+            "junk": self.store.count_tasks("junk") + self.store.count_dropped(),
         }
 
     def stats(self) -> dict:
@@ -308,13 +320,13 @@ class Api:
         合在一起之后还能点「恢复」把它放回主列表。
         """
         items: list[dict] = []
-        for task in self.store.list_tasks("junk", limit=100):
+        for task in self.store.list_tasks("junk", limit=JUNK_LIST_MAX):
             items.append({
                 "kind": "task", "id": task.task_id, "text": task.title,
                 "reason": task.drop_reason or "你标成了「不是待办」",
                 "source": task.source_name or "", "at": task.updated_at or "",
             })
-        for row in self.store.list_dropped(limit=100):
+        for row in self.store.list_dropped(limit=JUNK_LIST_MAX):
             items.append({
                 "kind": "text", "id": int(row.get("drop_id") or 0),
                 "text": str(row.get("text") or ""),
@@ -324,7 +336,7 @@ class Api:
             })
         # 谁新谁排前面。两边的字段名不一样，但都是 "YYYY-MM-DD HH:MM:SS"，能直接比。
         items.sort(key=lambda item: item["at"], reverse=True)
-        return {"items": items[:200]}
+        return {"items": items[:JUNK_LIST_MAX]}
 
     def dropped_detail(self, drop_id: int) -> dict:
         """废件箱里一条"被规则拦下的原文"：**当时到底收到了什么**。

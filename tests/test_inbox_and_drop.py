@@ -193,6 +193,23 @@ class TestJunkBoxCanBeRecovered(unittest.TestCase):
         target.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
         return target
 
+    def test_badge_count_equals_what_the_list_shows(self):
+        """左边那个数字必须等于清单里实际有几条。
+
+        2026-10-16 用户报："费件箱有107，他只显示7"。查下来：数字（7）只算了
+        "你标成误判的待办"，清单却是"误判 + 被规则拦下的原文"合起来的（7 + 100
+        = 107）—— 而且两边各被砍到 100 条（他库里原文有 374 条，更早的根本翻不到）。
+        两个数对不上，用户只会以为"东西丢了"。
+        """
+        for index in range(3):
+            self.store.log_dropped_text(f"哈哈哈哈这也太离谱了{index}", "闲聊",
+                                        "qq_group", "某个群", f"m:{index}")
+        self.assertEqual(self.store.count_dropped(), 3)
+
+        listed = self.api.dropped()["items"]
+        self.assertEqual(self.api.counts()["junk"], len(listed),
+                         "左边数字和清单条数必须一致")
+
     def test_promote_turns_a_dropped_line_into_a_todo(self):
         drop_id = self.drop("交到 3 号楼下", "qq:1001")
 

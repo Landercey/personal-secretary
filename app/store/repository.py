@@ -393,6 +393,19 @@ class SqliteStore(Store):
         ).fetchone()
         return int(row["n"] if row else 0)
 
+    @_synchronized
+    def count_dropped(self) -> int:
+        """废件箱里"被规则拦下的原文"有多少条。
+
+        为什么要单独数：界面上废件箱那个数字以前只算"你标成误判的待办"
+        （tasks 表），而清单是把两样合起来的 —— 于是左边写 7、里面躺着 107 条
+        （用户 2026-10-16 的原话："费件箱有107，他只显示7"）。
+        两边对不上，用户只会以为"东西丢了"。
+        """
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM dropped_items").fetchone()
+        return int(row["n"] if row else 0)
+
     def _view_filter(self, view: str) -> tuple[str, tuple[Any, ...]]:
         """把界面上的分组名翻译成 SQL 条件。
 
