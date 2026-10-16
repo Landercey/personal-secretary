@@ -96,6 +96,14 @@ class TestWriteConfig(unittest.TestCase):
         self.assertEqual(client["token"], "abc-123")
         self.assertTrue(client["enable"])
 
+    def test_merged_forward_is_parsed(self):
+        """合并转发必须是 True：班群里"班长把通知合并转发"最常见，
+        开关关着就只拿到一个 [合并转发] 占位符，整包通知会被判成闲聊扔进
+        废件箱（2026-10-16 用户看到的一大堆 '[合并转发]' 就是它）。"""
+        path = deploy.write_onebot_config(self.shell, 12345, "tok", 18080)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        self.assertIs(data.get("parseMultMsg"), True)
+
     def test_report_self_message_on(self):
         """必须收自己发的消息 —— 小号收件箱（微信/短信截图转发）靠它。"""
         path = deploy.write_onebot_config(self.shell, 12345, "t", 18080)

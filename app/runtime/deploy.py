@@ -352,7 +352,11 @@ def write_onebot_config(shell_dir: Path, qq: int, token: str,
         },
         "musicSignUrl": "",
         "enableLocalFile2Url": False,
-        "parseMultMsg": False,
+        # ⚠️ 必须 True（2026-10-16 改）：班群里"班长把通知合并转发"是最常见的形态，
+        # 而这个开关关着的时候，NapCat 只给一个 [合并转发] 占位符 —— 里面的字
+        # 一个字都拿不到，整包通知被判成闲聊扔进废件箱（用户看到的正是这个）。
+        # 打开之后节点内容会一起带下来，程序那边 `forward_text()` 负责认。
+        "parseMultMsg": True,
         "imageDownloadProxy": "",
     }
     text = json.dumps(payload, ensure_ascii=False, indent=2)

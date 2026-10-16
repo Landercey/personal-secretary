@@ -125,6 +125,39 @@ class TestFlattenMessage(unittest.TestCase):
         text, _m, _i, _v = flatten_message(event, SELF)
         self.assertIn("学生守则", text)
 
+    def test_merged_forward_is_read_out(self):
+        """合并转发要把里面的字读出来（2026-10-16）。
+
+        以前一律写成 "[合并转发]"，里面的通知一个字都拿不到 —— 用户库里的废件箱
+        堆了几百条 '[合并转发]'，全是这么丢的。NapCat 打开 parseMultMsg 之后
+        节点内容会带下来，字段名各版本不一样，所以这里把两种写法都验一遍。
+        """
+        nodes = {"content": [{"message": [{"type": "text",
+                                          "data": {"text": "12月20日前交论文"}}]},
+                             {"text": "地点：学习通"}]}
+        text, _m, _i, _v = flatten_message({"message": [
+            {"type": "forward", "data": nodes}]}, SELF)
+        self.assertIn("12月20日前交论文", text)
+        self.assertIn("学习通", text)
+
+        other_shape = {"messages": [{"content": [{"type": "text",
+                                                 "data": {"text": "明天体检"}}]}]}
+        text2, *_ = flatten_message({"message": [
+            {"type": "forward", "data": other_shape}]}, SELF)
+        self.assertIn("明天体检", text2)
+
+    def test_merged_forward_without_content_stays_a_placeholder(self):
+        """读不到内容就老实写 [合并转发] —— 别装懂编一段出来。"""
+        text, _m, _i, _v = flatten_message(
+            {"message": [{"type": "forward", "data": {"id": "abc"}}]}, SELF)
+        self.assertEqual(text, "[合并转发]")
+
+    def test_nested_forward_does_not_recurse_forever(self):
+        """套娃的合并转发只展开一层（防递归）。"""
+        inner = {"message": [{"type": "forward", "data": {"id": "x"}}]}
+        text, *_ = flatten_message({"message": [
+            {"type": "forward", "data": {"content": [inner]}}]}, SELF)
+        self.assertIn("[合并转发]", text)
 
 class TestChatIdentity(unittest.TestCase):
     def test_group(self):

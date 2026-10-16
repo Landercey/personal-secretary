@@ -144,6 +144,7 @@ def host_file(raw: str) -> Path | None:
 # 消息段拍平：OneBot 的 message 数组 → 一段人话
 # ===========================================================================
 def flatten_message(event: dict[str, Any], self_id: str
+                    , *, expand_forward: bool = True
                     ) -> tuple[str, bool, list[str], list[str]]:
     """把 OneBot 的消息段拼成纯文本。
 
@@ -202,7 +203,10 @@ def flatten_message(event: dict[str, Any], self_id: str
                     voices.append(value)
                     break
         elif kind == "forward":
-            parts.append("[合并转发]")
+            # 合并转发 —— 班群里"班长把通知合并转发"最常见的形态。
+            # 以前一律写成 "[合并转发]"：整包内容等于丢了，全被判成闲聊进废件箱。
+            # 现在 NapCat 打开 parseMultMsg 会把节点内容一起带下来，这里认它。
+            parts.append(forward_text(data) if expand_forward else "[合并转发]")
     text = "".join(parts).strip()
 
     if not text:
@@ -213,6 +217,42 @@ def flatten_message(event: dict[str, Any], self_id: str
         if raw:
             text = re.sub(r"\[CQ:[^\]]*\]", " ", raw).strip()
     return text, mentioned, images, voices
+
+
+# 合并转发的节点内容可能挂在这几个字段上（各版本叫法不一样）。
+_FORWARD_KEYS = ("content", "messages", "nodes", "nodeList")
+# 整包通知可能很长，而这是"当一条消息用"的摘要（正文另有上限），截一刀。
+_FORWARD_KEEP = 500
+
+
+def forward_text(data: dict[str, Any]) -> str:
+    """合并转发段 → 人话。真读不到内容才退回 "[合并转发]"（不装懂）。
+
+    为什么要挨个字段找：NapCat 不同版本给的字段名不一样，而"读不到就当没有"
+    的代价很大 —— 班群里整份通知都是这么转发的，丢掉等于漏掉一次作业。
+    只展开一层：套娃的合并转发再往里点没必要（也防递归）。
+    """
+    found: list[str] = []
+    for key in _FORWARD_KEYS:
+        value = data.get(key)
+        if not isinstance(value, list):
+            continue
+        for node in value:
+            if not isinstance(node, dict):
+                continue
+            inner = node.get("message") or node.get("content") or node.get("text")
+            if isinstance(inner, list):
+                text, _mentioned, _images, _voices = flatten_message(
+                    {"message": inner}, "", expand_forward=False)
+                found.append(text)
+            elif inner:
+                found.append(str(inner))
+        if found:
+            break                      # 找到一个能读的字段就够了
+    joined = " ".join(part.strip() for part in found if part and part.strip())
+    if not joined:
+        return "[合并转发]"
+    return "[合并转发] " + joined[:_FORWARD_KEEP]
 
 
 def card_text(data: dict[str, Any]) -> str:
