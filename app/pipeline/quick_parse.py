@@ -49,7 +49,9 @@ _URL = re.compile(r"https?://\S+")
 # 第二段是 QQ 协议的原始代码（[CQ:at,qq=123] / [CQ:flashtransfer,...]）——
 # 旧库 170 条里就有一条待办的标题是一整串 CQ 代码，手机上看就是天书。
 _PLACEHOLDER = re.compile(
-    r"\[CQ:[^\]]*\]|\[(?:回复|图片|表情|文件[^\]]*)\]|@(?:我|全体|某人)"
+    # "全体成员"要排在"全体"前面：@全体成员 是完整称呼，漏掉"成员"会留下
+    # 一个孤零零的"成员"头（2026-10-16 用户看到的 #44 标题就是"成员同学们好！…"）。
+    r"\[CQ:[^\]]*\]|\[(?:回复|图片|表情|文件[^\]]*)\]|@(?:我|全体成员|全体|某人)"
 )
 
 # ---- 日期 ----
@@ -360,7 +362,10 @@ def is_noise(line: str) -> bool:
             return True
     # 短句 + 标题类词 + 不含任何时间信息 → 判为标题/寒暄
     if len(text) <= _NOISE_MAX_LEN and any(word in text for word in _NOISE_WORDS):
-        if resolve_date(text)[0] is None and resolve_time(text) is None:
+        # 先转阿拉伯数字再判时间：不然"十点半"认不出来，这行就会被当寒暄扔掉
+        # （2026-10-16：「接营长通知，军训时间暂时推迟到十点半」整条丢了）。
+        normalized = cn_time_to_digits(text)
+        if resolve_date(normalized)[0] is None and resolve_time(normalized) is None:
             return True
     return False
 
@@ -416,6 +421,24 @@ def _clean_title(text: str) -> str:
     return text.strip(" ，,。、；;：:-—·*|\t")
 
 
+# 时间词前面只剩一个光杆介词：「推迟到10点」。这种时间**不摘** ——
+# 摘掉会留下「推迟到，」这种半截话（2026-10-16 用户看到的标题就长这样）。
+# 不摘的代价只是标题里留着时间，而截止时间照样算得出来，信息一个字不丢。
+# 反过来做（把"到"删掉）就得维护一张"哪些词以'到'结尾"的词表：直到/签到/收到…
+_DANGLING_PREPOSITIONS = "到于在为是从至"
+
+
+def _strip_soft(text: str, pattern: re.Pattern) -> str:
+    """摘掉一类时间片段，但"摘完会留下光杆介词"的那一处不摘。"""
+    def _replace(match: "re.Match[str]") -> str:
+        head = text[: match.start()].rstrip()
+        if head and head[-1] in _DANGLING_PREPOSITIONS:
+            return match.group(0)
+        return " "
+
+    return pattern.sub(_replace, text)
+
+
 def _build_title(raw: str) -> str:
     """从原文里摘出标题。摘完全是空的，就说明这行没有实质内容。
 
@@ -425,8 +448,8 @@ def _build_title(raw: str) -> str:
       标题就是它自己 —— 用户看到的就是"只有时间"。
       改成：摘完什么都不剩 → 返回空字符串，由调用方判为碎片丢弃。
     """
-    title = _DATE_STRIP.sub(" ", raw)
-    title = _TIME_STRIP.sub(" ", title)
+    title = _strip_soft(raw, _DATE_STRIP)
+    title = _strip_soft(title, _TIME_STRIP)
     _location, location_raw = resolve_location(raw)
     if location_raw:
         title = title.replace(location_raw, " ")

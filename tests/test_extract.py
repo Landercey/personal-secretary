@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app.pipeline.extract import extract_text, is_supported, job_type_for   # noqa: E402
+from app.pipeline.extract import service                                     # noqa: E402
 from app.pipeline.extract.ooxml import read_plain                          # noqa: E402
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -107,6 +108,55 @@ class TestOfficeFiles(unittest.TestCase):
         result = extract_text(self.dir / "不存在.docx")
         self.assertFalse(result.ok)
         self.assertIn("不存在", result.note)
+
+
+class TestUnfoldOcrLines(unittest.TestCase):
+    """OCR 的"视觉换行"要接回句子。
+
+    2026-10-16 用户报："分行也有问题" —— 海报截图读出来是
+    `陪…迷茫与焦` / `虑，走到…`，"焦/虑"被切成两行，看着像乱码。
+    但**聊天记录里的换行不能碰**：排班表、课表正是靠"一行一条"活的。
+    """
+
+    def test_sentence_split_by_the_layout_is_joined(self):
+        text = "陪你从刚开始的迷茫与焦\n虑，走到找到属于自己的方向。"
+        self.assertEqual(
+            service.unfold_lines(text),
+            "陪你从刚开始的迷茫与焦虑，走到找到属于自己的方向。")
+
+    def test_a_finished_sentence_starts_a_new_line(self):
+        self.assertEqual(service.unfold_lines("今天下雨。\n记得带伞"),
+                         "今天下雨。\n记得带伞")
+
+    def test_schedule_lines_are_left_alone(self):
+        """有时刻的行按表格处理，一行都不许合并。"""
+        text = "下周值班表\n张三 周一 8:00-12:00\n李四 周二 8:00-12:00"
+        self.assertEqual(service.unfold_lines(text), text)
+
+    def test_numbered_items_are_left_alone(self):
+        text = "注意：\n1. 带身份证\n2. 带学生证"
+        self.assertEqual(service.unfold_lines(text), text)
+
+    def test_a_mention_line_is_not_glued_to_the_poster_noise(self):
+        """截图 OCR 的乱码尾巴不许粘到下一段正文上。
+
+        2026-10-16 用户那条（#44）就是：海报截图读出一堆乱码，紧接着一句
+        "@全体成员 同学们好！…"。粘起来的话标题会变成一整串乱码。
+        """
+        text = "丨山开始学习MNIST - YOLO\n@全体成员   同学们好！今天给大家分享一份指南。"
+        self.assertIn("\n@全体成员", service.unfold_lines(text))
+
+    def test_a_short_header_is_not_glued_to_its_body(self):
+        text = "入口\nAI 社：https://wiki.uestcai.top/zh/"
+        self.assertEqual(service.unfold_lines(text), text)
+
+    def test_the_unfold_is_wired_into_image_extraction(self):
+        """接线也要验：图片 OCR 的结果会走这一步。"""
+        from app.pipeline.extract.types import ExtractResult
+
+        result = service._unfold_result(
+            ExtractResult(text="从迷茫与焦\n虑，走到方向。", method="win_ocr", ok=True))
+        self.assertEqual(result.text, "从迷茫与焦虑，走到方向。")
 
 
 class TestPlainText(unittest.TestCase):

@@ -156,6 +156,9 @@ def flatten_message(event: dict[str, Any], self_id: str
       后面的规则才能一套走到底。
     """
     mentioned = False
+    # QQ 发"@全体成员"时是 @段("全体") + 文字"成员"两截 —— 不去掉的话
+    # 标题尾巴会挂个孤零零的"成员"（2026-10-16 用户报的：#40 标题末尾）。
+    eat_member = False
     parts: list[str] = []
     images: list[str] = []
     voices: list[str] = []
@@ -167,8 +170,15 @@ def flatten_message(event: dict[str, Any], self_id: str
             continue
         kind = segment.get("type")
         data = segment.get("data") or {}
+        if kind != "text":
+            eat_member = False        # 只吃紧跟着 @全体 的那一截文字
         if kind == "text":
-            parts.append(str(data.get("text") or ""))
+            chunk = str(data.get("text") or "")
+            if eat_member:
+                eat_member = False
+                if chunk.startswith("成员"):
+                    chunk = chunk[2:]
+            parts.append(chunk)
         elif kind == "at":
             qq = str(data.get("qq") or "")
             if qq == self_id and self_id:
@@ -176,6 +186,7 @@ def flatten_message(event: dict[str, Any], self_id: str
                 parts.append("@我 ")
             elif qq == "all":
                 parts.append("@全体 ")
+                eat_member = True
             else:
                 parts.append("@某人 ")
         elif kind == "image":

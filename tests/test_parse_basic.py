@@ -56,11 +56,38 @@ class TestFragments(unittest.TestCase):
         """
         self.assertEqual(quick_parse._build_title("10月9日-10月21日 12:20-13:50"), "")
 
+    def test_dangling_connective_left_by_the_removed_time(self):
+        """时间词被摘走后，不许留半截「推迟到，」。
+
+        2026-10-16 用户看到的标题："军训时间暂时推迟到，到时候看天气…" ——
+        原话是"推迟到**十点**"，十点被摘走后只剩个光杆"到"。
+        修法：紧挨着介词的这种时间干脆不摘，标题保留原句，截止时间照算。
+        """
+        draft = quick_parse.parse_line("军训时间暂时推迟到十点，到时候看天气再具体通知")
+        self.assertIsNotNone(draft)
+        self.assertNotIn("到，", draft.title)
+        self.assertIn("推迟到10点，", draft.title)
+        self.assertIn("10:00:00", draft.due_at)
+
+    def test_a_real_word_ending_in_dao_is_kept(self):
+        """反例："签到"是真词，不能因为末尾有个"到"就砍掉那个字。"""
+        self.assertEqual(quick_parse._build_title("每天签到"), "每天签到")
+
     def test_cq_code_inside_a_real_message_is_stripped(self):
         """CQ 代码夹在真消息里时要剥掉，不能污染标题。"""
         draft = quick_parse.parse_line("[CQ:at,qq=123456] 明天下午三点交作业")
         self.assertIsNotNone(draft)
         self.assertEqual(draft.title, "交作业")
+
+    def test_at_all_member_leaves_no_stray_member(self):
+        """「@全体成员」是完整称呼，标题里不许剩一个孤零零的"成员"。
+
+        2026-10-16 用户报的那条（#44：截图 OCR + 正文一起解析）：标题原来是
+        "成员同学们好！…" —— "@全体"被当占位符摘掉，"成员"留下了。
+        """
+        draft = quick_parse.parse_line("@全体成员   同学们好！今天分享一份《AI科研入门指南》。")
+        self.assertIsNotNone(draft)
+        self.assertTrue(draft.title.startswith("同学们好"), draft.title)
 
 
 class TestShortTodosPreserved(unittest.TestCase):
@@ -228,6 +255,16 @@ class TestNoise(unittest.TestCase):
         draft = quick_parse.parse_line("各位同学：明天下午3点交作业")
         self.assertIsNotNone(draft)
         self.assertEqual(draft.title, "交作业")
+
+    def test_chinese_clock_keeps_a_short_notice_alive(self):
+        """「接营长通知，军训时间暂时推迟到十点半」不能被当寒暄扔掉。
+
+        2026-10-16：这句整条丢了（别人的阿拉伯数字写法却进得来）—— 噪声判定
+        看的是中文数字原文，认不出"十点半"是时间，就当成标题类寒暄。
+        """
+        draft = quick_parse.parse_line("接营长通知，军训时间暂时推迟到十点半")
+        self.assertIsNotNone(draft)
+        self.assertIn("10:30:00", draft.due_at)
 
 
 class TestProseDetection(unittest.TestCase):

@@ -97,6 +97,19 @@ class TestFlattenMessage(unittest.TestCase):
         self.assertIn("@某人", text)
         self.assertFalse(mentioned)
 
+    def test_at_all_does_not_leave_a_stray_member(self):
+        """QQ 把"@全体成员"拆成 @段 + 文字"成员"两截，别让标题尾巴挂个孤零零的"成员"。
+
+        2026-10-16 用户报的：#40 标题末尾"…参加军训！成员"。
+        """
+        event = {"message": [
+            {"type": "text", "data": {"text": "明天记得穿军训服"}},
+            {"type": "at", "data": {"qq": "all"}},
+            {"type": "text", "data": {"text": "成员"}}]}
+        text, *_ = flatten_message(event, SELF)
+        self.assertIn("@全体", text)
+        self.assertNotIn("成员", text.replace("@全体", ""))
+
     def test_media_becomes_placeholder(self):
         event = {"message": [
             {"type": "image", "data": {"url": "http://x/a.jpg"}},
