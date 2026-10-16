@@ -48,15 +48,29 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# 打包成 exe 之后，输出可能按系统代码页（中文 Windows 是 GBK）编码 ——
-# 自检里那几个 ✓/✗ 会直接把程序打死（UnicodeEncodeError）。窗口模式下
-# 这种死法还特别隐蔽：只在屏幕上弹一个报错框。这里统一改成 UTF-8，坏字符
-# 用 ? 代替，**任何情况下打印都不会把程序弄崩**。
-for _stream in (sys.stdout, sys.stderr):
-    try:
-        _stream.reconfigure(encoding="utf-8", errors="replace")
-    except (AttributeError, ValueError):
-        pass                      # 窗口模式下这两个是 None，跳过就行
+def _make_output_safe() -> None:
+    """让 stdout/stderr 变成"打印永远不会抛异常"。
+
+    ⚠️ 必须在**两个**地方调，少一个都会踩坑（2026-10-16 用户报的那次）：
+      · 模块加载时调一次 —— 命令行那条路（`--serve` 被重定向到文件）默认按
+        系统代码页 GBK 编码，一句带 `✓/✗/⚠️` 的提示就抛 UnicodeEncodeError；
+      · `import webview` **之后**再调一次 —— pywebview 的 http.py 顶部发现
+        stdout 是 None（窗口模式下就是这样）就自己塞一个
+        `open(os.devnull, "w")` 进去，那个文件对象是 GBK + errors="strict"，
+        把我们上面设好的 utf-8 顶掉了。
+
+    后果不是"少显示一行"，而是**把整个动作带崩**：用户看到的是
+    "sync_now 出错：'gbk' codec can't encode character '\\u2717'" ——
+    课表拉取失败本来要报一句原因，报错那句话自己先崩了，真正的原因反而没了。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass                      # 窗口模式下这两个是 None，跳过就行
+
+
+_make_output_safe()
 
 from app.contracts.models import STATUS_DONE, STATUS_DROPPED     # noqa: E402
 from app.pipeline.chain import Pipeline                          # noqa: E402
@@ -803,6 +817,10 @@ def open_ui(store, source, pipeline, sink, registry) -> int:
         print("    pip install pywebview pythonnet")
         return 1
 
+    # 刚才那个 import 把 stdout 换成了 GBK 的 os.devnull（见 _make_output_safe），
+    # 这里再兜一次 —— 之后界面这条路上的每一句 print 才真的不会崩。
+    _make_output_safe()
+
     from app.ui.bridge import Api
 
     actions = {
@@ -898,6 +916,10 @@ def sync_sources(store, pipeline, sources) -> dict:
         try:
             messages = source.fetch() or []
         except Exception as exc:
+            # 这句要**同时**进 notes：界面上的"同步"只看得见 notes，
+            # 打印在窗口模式下是写到 os.devnull 的（用户等于什么都没看到，
+            # 只会觉得"点了没反应"）。
+            notes.append(f"{label} 拉取失败：{type(exc).__name__}: {exc}")
             print(f"  ✗ {label} 拉取失败：{type(exc).__name__}: {exc}")
             continue
         notes.extend(list(getattr(source, "notes", None) or []))
