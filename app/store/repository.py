@@ -628,6 +628,28 @@ class SqliteStore(Store):
             return int(cursor.rowcount or 0)
 
     @_synchronized
+    def today_stats(self) -> dict:
+        """今天的"战报"：收到多少、收下多少、拦下多少、推了几次。
+
+        为什么要它：用户只看到列表里多了几条，**看不见你替他挡掉了多少**。
+        "57 条群消息 → 6 条待办"这件事本身，就是这工具的价值证明（也是宣传素材）。
+        """
+        day = datetime.now().strftime("%Y-%m-%d")
+        like = f"{day}%"
+        def one(sql: str) -> int:
+            row = self.conn.execute(sql, (like,)).fetchone()
+            return int(row[0]) if row else 0
+
+        return {
+            "received": one("SELECT COUNT(*) FROM messages WHERE created_at LIKE ?"),
+            "kept": one("SELECT COUNT(*) FROM tasks WHERE created_at LIKE ?"),
+            "junk": one("SELECT COUNT(*) FROM dropped_items WHERE dropped_at LIKE ?"),
+            "merged": one("SELECT COUNT(*) FROM task_events WHERE kind='merged'"
+                          " AND created_at LIKE ?"),
+            "pushed": one("SELECT COUNT(*) FROM push_records WHERE pushed_at LIKE ?"),
+        }
+
+    @_synchronized
     def restore_from(self, source: Path) -> None:
         """用一份备份**覆盖**当前库。
 

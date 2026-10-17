@@ -157,6 +157,16 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
            margin: 0 0 6px; background: var(--panel); border-radius: 10px;
            border: 1px solid var(--line); font-size: 12.5px }
 .bulkbar span { flex: 1; color: var(--text-2) }
+/* 撤销浮条：底部居中，8 秒后自己消失 */
+.undobar { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(10px);
+           display: none; align-items: center; gap: 12px; padding: 9px 12px 9px 16px;
+           background: #1f2937; color: #fff; border-radius: 999px; font-size: 12.5px;
+           box-shadow: 0 8px 24px rgba(0,0,0,.25); z-index: 60; opacity: 0;
+           transition: opacity .15s ease, transform .15s ease }
+.undobar.on { display: flex; opacity: 1; transform: translateX(-50%) translateY(0) }
+.undobar button { background: rgba(255,255,255,.16); color: #fff; border: 0;
+                  padding: 5px 12px; border-radius: 999px; cursor: pointer; font-size: 12.5px }
+.undobar button:hover { background: rgba(255,255,255,.28) }
 /* 原始消息搜索结果：跟待办列表分开，标一下"这是原话" */
 #msgResults .row { opacity: .92 }
 #msgResults .msgtext { font-size: 12.5px; color: var(--text-2);
@@ -468,6 +478,7 @@ details.adv[open] > summary::before { content: "▾ " }
 </div>
 
 <div class="toast" id="toast"></div>
+<div class="undobar" id="undoBar"></div>
 <div class="dropmask" id="dropHint"><span>松手就放进来了</span></div>
 
 <script>
@@ -685,6 +696,7 @@ async function bulkAct(action, ids) {
   const res = await call('bulk', action, ids);
   if (!res || !res.ok) { toast((res && res.message) || '没成功'); return; }
   toast(action === 'archive_done' ? `归档了 ${res.count} 条` : `处理了 ${res.count} 条`);
+  if (action !== 'archive_done') showUndo(`已处理 ${res.count} 条`);
   bulkMode = false;
   bulkChosen.clear();
   selected = null;
@@ -1002,9 +1014,30 @@ async function act(kind, id) {
   if (!res) return;                       // 失败了就别假装成功、也别清空选中
   toast({ complete: '已完成', archive: '已归档', drop: '已记为误判',
           restore: '已放回列表' }[kind] || '好了');
+  // 完成/归档/误判都能一键撤回（后端只留最后一次，浮条 8 秒后自己消失）
+  if (kind === 'complete' || kind === 'archive' || kind === 'drop') {
+    showUndo({ complete: '已完成 1 条', archive: '已归档 1 条',
+               drop: '已记为误判 1 条' }[kind]);
+  }
   selected = null;
   setPanel(null);
   refresh();
+}
+
+/* 撤销浮条：点错了不用去废件箱里一条条找回来 */
+let undoTimer = null;
+function showUndo(label) {
+  const bar = $('undoBar');
+  bar.innerHTML = `<span>${esc(label)}</span><button id="undoNow">撤销</button>`;
+  bar.classList.add('on');
+  $('undoNow').onclick = async () => {
+    const res = await call('undo');
+    bar.classList.remove('on');
+    toast(res && res.ok ? `已撤销 ${res.count} 条` : '没有可撤销的了');
+    refresh();
+  };
+  clearTimeout(undoTimer);
+  undoTimer = setTimeout(() => bar.classList.remove('on'), 8000);
 }
 
 /* ---------- 新建待办 ---------- */
@@ -2161,6 +2194,17 @@ async function renderGuide() {
   }
 
   const parts = [];
+
+  // 今天的战报：让用户看见"过滤真的在干活"（57 条群消息 → 6 条待办）。
+  const stats = await call('today_stats');
+  if (stats && (stats.received || stats.kept || stats.junk)) {
+    parts.push(`<div class="guide tip">
+        <span>今天收到 <b>${stats.received || 0}</b> 条 ·
+          留下 <b>${stats.kept || 0}</b> 条待办 ·
+          拦下 <b>${stats.junk || 0}</b> 条（闲聊/碎片）${
+          stats.merged ? ` · 合并重复 <b>${stats.merged}</b> 条` : ''}${
+          stats.pushed ? ` · 推送 <b>${stats.pushed}</b> 次` : ''}</span></div>`);
+  }
 
   // 启动自检的结果：库坏了/盘满了/进了安全模式/配置读坏了。
   // 不说出来的话，用户看到的就是"设置怎么全没了""怎么打不开了"。

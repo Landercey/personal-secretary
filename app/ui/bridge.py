@@ -350,7 +350,9 @@ class Api:
         一条条点太慢。`archive_done` 是"把已完成的全部归档"。
         """
         if action == "archive_done":
-            return {"ok": True, "count": self.store.archive_all_done()}
+            count = self.store.archive_all_done()
+            self._last_action = None            # 这一下没法一条条撤销，别给假希望
+            return {"ok": True, "count": count}
         clean = [int(i) for i in (ids or []) if str(i).isdigit()]
         if not clean:
             return {"ok": False, "message": "没有选中任何一条"}
@@ -363,6 +365,7 @@ class Api:
                 self.store.set_status(task_id, "dropped", "批量判成误判")
             else:
                 return {"ok": False, "message": f"不认识的操作：{action}"}
+        self._remember(action, clean)
         self._revision += 1
         return {"ok": True, "count": len(clean)}
 
@@ -382,6 +385,11 @@ class Api:
             # （用户 2026-10-16："费件箱有107，他只显示7"）。两样相加才是真的。
             "junk": self.store.count_tasks("junk") + self.store.count_dropped(),
         }
+
+    @tracked
+    def today_stats(self) -> dict:
+        """今天的战报：收到多少、收下多少、拦下多少。界面拿它证明"过滤真的在干活"。"""
+        return self.store.today_stats()
 
     def stats(self) -> dict:
         return self.store.stats()
@@ -468,17 +476,45 @@ class Api:
             return []
 
     # ------------------------------------------------------------------ 写
+    def _remember(self, kind: str, ids) -> None:
+        """记下"刚才改了什么"，给 6 秒内的「撤销」用。只留最后一次。"""
+        self._last_action = {"kind": kind,
+                             "ids": [int(i) for i in (ids or [])]}
+
+    @tracked
+    def undo(self) -> dict:
+        """撤销上一次完成/归档/误判（界面只在那几秒内给按钮）。
+
+        为什么要有：批量归档点错了，现在只能去废件箱/归档里一条条找回来 ——
+        一次回到原样才配得上"批量"。
+        """
+        action = getattr(self, "_last_action", None)
+        if not action:
+            return {"ok": False, "message": "没有可撤销的操作"}
+        ids = list(action.get("ids") or [])
+        for task_id in ids:
+            if action["kind"] == "archive":
+                self.store.unarchive(task_id)
+            else:
+                self.store.set_status(task_id, "open", "撤销上一次操作")
+        self._last_action = None
+        self._revision += 1
+        return {"ok": True, "count": len(ids)}
+
     def complete(self, task_id: int) -> dict:
         self.store.set_status(int(task_id), STATUS_DONE, "界面里标记完成")
+        self._remember("done", [task_id])
         return {"ok": True}
 
     def drop(self, task_id: int) -> dict:
         """标记误判。留一笔记录，以后调规则用得上。"""
         self.store.set_status(int(task_id), STATUS_DROPPED, "界面里判定为误判")
+        self._remember("drop", [task_id])
         return {"ok": True}
 
     def archive(self, task_id: int) -> dict:
         self.store.archive(int(task_id), "界面里归档")
+        self._remember("archive", [task_id])
         return {"ok": True}
 
     def restore(self, task_id: int) -> dict:
