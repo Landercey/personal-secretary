@@ -462,6 +462,15 @@ def main() -> int:
     write_build_info()
     patch = make_patch_zip()
     full = make_patch_zip(full=True)
+    # 一键升级包：把补丁塞进一个 exe，用户双击就升 —— 不用自己找文件夹解压。
+    # 每个版本都出（用户要的"以后都这样"）。失败了不影响两个 zip，照常发版。
+    upgrader = None
+    try:
+        subprocess.run([sys.executable, str(ROOT / "tools" / "build_upgrader.py"),
+                        str(patch), str(_OUT_ROOT)], cwd=str(ROOT), check=True)
+        upgrader = next(_OUT_ROOT.glob(f"私人秘书-一键升级-v{VERSION}*.exe"), None)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"（一键升级包没打出来：{type(exc).__name__}；两个 zip 不影响）")
     print()
     print("打包完成。软件就在这儿：")
     print(f"    {DIST}")
@@ -470,6 +479,9 @@ def main() -> int:
     print("    别人升级：把补丁包解压到软件文件夹里覆盖，配置和待办都不动。")
     print(f"第一次用的整包（~{full.stat().st_size / 1048576:.0f} MB）：{full.name}")
     print("    新用户下载这个。两个包都不含你的配置、待办和下好的 QQ。")
+    if upgrader is not None:
+        print(f"一键升级（~{upgrader.stat().st_size // 1048576} MB）：{upgrader.name}")
+        print("    老用户双击它就行：关旧版 → 覆盖 → 重开，配置和待办不动。")
     return 0
 
 
