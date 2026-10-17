@@ -406,6 +406,9 @@ def make_patch_zip(dist: Path | None = None, full: bool = False) -> Path:
     name = f"完整版-v{VERSION}.zip" if full else f"补丁包-v{VERSION}-{stamp}.zip"
     target = dist.parent / name
     items = [dist / f"{APP_NAME}.exe", dist / "build-info.txt"]
+    # 图标也要进包：快捷方式指着 exe 旁边那个带指纹的 .ico，
+    # 补丁包里没有它 → 升完图标还是旧的（或者干脆空白）。
+    items += [dist / "icon.json"] + sorted(dist.glob("app-*.ico"))
     if full:
         items.append(dist / "用前必看.txt")
     internal = dist / "_internal"
