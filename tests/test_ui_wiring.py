@@ -92,6 +92,11 @@ class TestWiring(unittest.TestCase):
                        "ingest_drop", "peek_drop", "discard_drop", "dropmask"):
             self.assertTrue(anchor in self.html, f"界面里找不到：{anchor}")
 
+    def test_the_detail_panel_can_copy_a_task_out(self):
+        """详情里那个「复制这条」：标题+时间+原话+来源，贴到清单软件里能直接用。"""
+        for anchor in ("btnCopyTask", "taskText", "copyText", "execCommand"):
+            self.assertTrue(anchor in self.html, f"界面里找不到：{anchor}")
+
     def test_suggestions_and_sync_notes_have_a_place_to_show(self):
         """「等时机到了才出现」的建议、和同步带回来的提醒，都得有地方显示。
 

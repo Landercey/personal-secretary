@@ -37,31 +37,33 @@ class ConsoleSink(Sink):
 
 
 def format_task_line(task: Task, index: int = 0) -> str:
-    """一条待办 → **一行**，手机上要能一眼扫过去。
+    """一条待办 → **一行** `标题｜时间｜群名`，手机上要能一眼扫过去、也能整段复制。
 
     2026-10-13 用户原话："推送的太繁琐了，改改"。以前那一行长这样：
         1. 交作业 — 2026-10-30 18:30:00（私聊 987654321（我发的））
                   ↳ 10 月 30 号 18:30 交作业
     猜都猜得到问题在哪：秒也写、来源里套括号、原话又跟标题重复一遍。
-    现在：
-        1. 交作业（10-30 18:30）
+    2026-10-17 用户要的形态（照抄到滴答清单/Notion 里能直接用）：
+        1. 交作业｜10-30 18:30｜某班群
 
     · 时间说人话（今天/明天/周几，超过一周才写月-日）；
     · 来源只给**群消息**加，而且是群名 —— 私聊/自己发的不加
       （"（私聊 987654321（我发的））"这种纯属噪音）；
+    · 分隔符用全角竖线而不是括号：括号里的时间会被某些清单软件的文本识别吞掉，
+      竖线一眼能看出"这是三块"，复制出去也好切；
     · 原话不再每条都附：它是从消息里抄出来的，跟标题基本重复。
       真要看原话，界面的详情里一直有（AI 归纳的那些除外，见 build_digest）。
     """
     when = human_due(task.due_at)[0]
     where = f" · {task.location}" if task.location else ""
     head = f"{index}. " if index else ""
-    origin = ""
-    if task.source_kind == SOURCE_QQ_GROUP and task.source_name:
-        origin = f"（{_short_source(str(task.source_name))}）"
     # confidence < 1 = 这条是 AI 归纳出来的，不是规则算出来的。
     # 必须让用户在推送里就看得出来，不然他没法判断"这是原文说的还是模型补的"。
     ai = "【AI】" if float(getattr(task, "confidence", 1.0) or 1.0) < 1 else ""
-    return f"{head}{task.title}{ai}（{when}{where}）{origin}"
+    parts = [f"{head}{task.title}{ai}", f"{when}{where}"]
+    if task.source_kind == SOURCE_QQ_GROUP and task.source_name:
+        parts.append(_short_source(str(task.source_name)))
+    return "｜".join(parts)
 
 
 def _short_source(name: str) -> str:
@@ -107,6 +109,10 @@ def build_digest(tasks: list[Task], title: str = "待办汇总",
                          "原文和附件都留在本地，点开详情能看到。"]
         if rest:
             tail += ["", f"（更远的还有 {rest} 条，界面里能看到）"]
+        # 早报末尾提醒一句"能整段复制"：手机上把这条复制进滴答清单/Notion 是最顺的路。
+        # 只给早报加 —— 一天三次都挂这句就是噪音了（用户嫌过推送繁琐）。
+        if title.startswith("今天要做的"):
+            tail += ["", "（长按这条消息可以整段复制）"]
         body = "\n".join(lines + tail)
 
     # 附件：只带前面几条的，且只带真实存在的文件。

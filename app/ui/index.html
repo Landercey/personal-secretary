@@ -696,9 +696,12 @@ function drawDetail() {
     ${t.quoted ? `<div class="quote"><em>原始消息（判错了你能看出为什么）</em>${esc(t.quoted)}</div>` : ''}
     ${t.detail ? `<div class="quote">${esc(t.detail).slice(0, 800)}</div>` : ''}
     ${(t.files && t.files.length) ? '<div class="files" id="files"></div>' : ''}
+    <button class="block" id="btnCopyTask">复制这条（标题 + 时间 + 原话 + 来源）</button>
     ${detailActions(t)}`;
   const back = $('btnRestore');
   if (back) back.onclick = () => act('restore', t.id);
+  const copy = $('btnCopyTask');
+  if (copy) copy.onclick = () => copyText(taskText(t));
   // 提醒力度：点一下就存，**可以勾好几个**（"要能实现多次提醒，不是只能选一个"）
   const chips = $('remindChips');
   if (chips) chips.onclick = async (event) => {
@@ -780,6 +783,40 @@ function remindBox(t) {
 /* 已完成 / 已归档的不在主列表里，所以动作只有一个：**移出**。
    界面上必须说清楚"移到哪"，不然用户点完不知道它去哪了。
    答案：目标只有一个（全部未完成），剩下的分组由截止时间自己决定。 */
+// 复制这条待办：标题 + 截止 + 地点 + 来源 + 原话。
+// 为什么要有：往滴答清单/Notion 里贴的时候，电脑上复制比手机上长按顺手得多。
+// 截止用 due_raw（2026-10-23 23:59）而不是"明天 23:59" —— 清单软件的文本识别
+// 只认完整日期。
+function taskText(t) {
+  const lines = [String(t.title || '')];
+  const due = String(t.due_raw || t.due || '').replace('T', ' ');
+  if (due) lines.push('截止：' + due);
+  if (t.location) lines.push('地点：' + t.location);
+  if (t.source) lines.push('来源：' + t.source + (t.sender ? ' · ' + t.sender : ''));
+  if (t.quoted) lines.push('原话：' + t.quoted);
+  return lines.join('\n');
+}
+
+// WebView2 里 navigator.clipboard 要权限、还可能被策略挡掉；
+// 老办法（隐藏 textarea + execCommand）哪个版本都能用，所以先试它。
+function copyText(text) {
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  area.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+  document.body.appendChild(area);
+  area.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+  document.body.removeChild(area);
+  if (!ok && navigator.clipboard) {
+    navigator.clipboard.writeText(text)
+      .then(() => toast('复制好了'), () => toast('复制失败，手动选中试试'));
+    return;
+  }
+  toast(ok ? '复制好了，去粘到别处吧' : '复制失败，手动选中试试');
+}
+
 function detailActions(t) {
   if (!t.done && !t.archived) {
     return `<div class="acts">

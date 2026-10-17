@@ -185,6 +185,47 @@ class TestAnswerParsing(Base):
         # 原文片段留着，用户能看出它为什么这么归纳
         self.assertTrue(made[0].quoted)
 
+    def test_the_quote_is_the_sentence_from_the_original(self):
+        """模型指出的那句原话，逐字在原文里才用 —— 用户要拿它往别处贴。
+
+        长文档里"消息开头 80 字"多半是抬头（"各位同学，本学期…"），
+        真正有用的是"12 月 20 日前提交课程论文"这一句。
+        """
+        self.turn_on()
+        FakeModel.answers = [json.dumps([{
+            "title": "交军事理论论文", "due": "2026-12-20 23:59",
+            "location": "学习通", "quote": "12 月 20 日前提交课程论文",
+        }], ensure_ascii=False)]
+
+        made = AI.AiEnricher().process(self.message, self.rules)
+
+        self.assertEqual(made[0].quoted, "12 月 20 日前提交课程论文")
+
+    def test_a_made_up_quote_is_never_stored(self):
+        """模型改写过的"原话"不能进库 —— 那就没法核对是不是群里说的。"""
+        self.turn_on()
+        FakeModel.answers = [json.dumps([{
+            "title": "交军事理论论文", "due": "2026-12-20 23:59",
+            "quote": "老师要求交一篇论文",
+        }], ensure_ascii=False)]
+
+        made = AI.AiEnricher().process(self.message, self.rules)
+
+        self.assertNotIn("老师要求交一篇论文", made[0].quoted)
+        self.assertIn("各位同学", made[0].quoted)      # 退回消息开头那段
+
+    def test_whitespace_in_the_quote_is_tolerated(self):
+        """"12月20日"和"12 月 20 日"是同一个人打的 —— 比对前把空白抹掉。"""
+        self.turn_on()
+        FakeModel.answers = [json.dumps([{
+            "title": "交军事理论论文", "due": "2026-12-20 23:59",
+            "quote": "12月20日前提交课程论文",
+        }], ensure_ascii=False)]
+
+        made = AI.AiEnricher().process(self.message, self.rules)
+
+        self.assertEqual(made[0].quoted, "12月20日前提交课程论文")
+
     def test_request_goes_to_the_right_url_and_carries_the_key(self):
         self.turn_on()
         FakeModel.answers = ["[]"]

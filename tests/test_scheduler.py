@@ -309,6 +309,29 @@ class TestScheduler(unittest.TestCase):
         self.assertNotIn(":00:00", body)                       # 没有秒
         self.assertNotIn("手动录入", body)                      # 自己记的不写来源
 
+    def test_line_is_three_chunks_so_it_can_be_copied_out(self):
+        """一行的形状固定成「标题｜时间｜群名」——
+
+        用户要往滴答清单/Notion 里贴，括号里的时间会被某些清单软件的文本识别吞掉，
+        竖线一眼能看出这是三块。
+        """
+        from app.sinks.console import format_task_line
+        from app.contracts.models import SOURCE_QQ_GROUP, Task
+
+        task = Task(task_id=1, title="交作业", due_at="2026-10-09 15:00:00",
+                    source_kind=SOURCE_QQ_GROUP, source_name="某班群")
+        line = format_task_line(task, 1)
+        self.assertEqual(line, "1. 交作业｜已逾期 · 10-09 15:00｜某班群")
+        self.assertNotIn("（", line)
+
+    def test_the_copy_hint_only_rides_on_the_morning_digest(self):
+        """一天三次都挂"长按能复制"就是噪音 —— 只给早报。"""
+        self.scheduler.run_once(at("2026-10-08 07:31"))
+        self.scheduler.run_once(at("2026-10-08 21:31"))
+
+        self.assertIn("长按这条消息可以整段复制", self.sink.sent[0].body)
+        self.assertNotIn("长按这条消息可以整段复制", self.sink.sent[1].body)
+
     def test_does_not_deliver_twice(self):
         """同一份早报只推一次 —— 重启一次就重发一遍是最招人烦的。"""
         self.scheduler.run_once(at("2026-10-08 07:31"))

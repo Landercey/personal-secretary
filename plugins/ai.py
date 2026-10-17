@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import urllib.request
 
 from app.contracts.interfaces import DraftEnricher
@@ -79,10 +80,12 @@ _SYSTEM = """你是一个待办抽取器。只做一件事：从用户给的中�
    - 算不出来、拿不准，填 null。不要猜。
    今天的日期是 {today}。
 3. 不要把闲聊、吐槽、纯提醒（比如"记得带伞"这类不是任务的）当成待办。
-4. 每条给：title（不超过 20 字，动词开头）、due（或 null）、location（或 null）。
+4. 每条给：title（不超过 20 字，动词开头）、due（或 null）、location（或 null）、
+   quote（原文里最相关的那一句，不超过 40 字，**必须一字不改地抄**；没有就填 null）。
 5. 一条都没有，返回空数组 []。
 
-只输出 JSON，形如 [{{"title":"交军事理论论文","due":"2026-12-20 23:59","location":"学习通"}}]。
+只输出 JSON，形如 [{{"title":"交军事理论论文","due":"2026-12-20 23:59",
+"location":"学习通","quote":"12 月 20 日前提交课程论文"}}]。
 不要解释、不要代码块、不要多余的字。"""
 
 _AGGRESSIVE = """
@@ -101,6 +104,23 @@ def _endpoint() -> str:
 
 def _today() -> str:
     return dt.datetime.now().strftime("%Y-%m-%d")
+
+
+def _verbatim_quote(quote, text: str, limit: int) -> str:
+    """模型给的那句"原话"，只有**原文里真有**才用，否则返回空串。
+
+    为什么不直接信它：模型会把"精简"写成自己的话（换个说法、顺手改个错别字），
+    那就没法核对这句话到底是不是群里说的 —— 用户要的是"能贴到别处的原话"，
+    不是"模型的转述"。所以比对时必须逐字命中：两边都去掉空白再比
+    （模型经常把换行和空格抹平）。
+    """
+    candidate = " ".join(str(quote or "").split())[:limit]
+    if not candidate:
+        return ""
+    plain = re.sub(r"\s+", "", candidate)
+    if plain and plain in re.sub(r"\s+", "", text or ""):
+        return candidate
+    return ""
 
 
 def _parse_due(text) -> str | None:
@@ -282,7 +302,10 @@ class AiEnricher(DraftEnricher):
                 origin_msg_id=message.msg_id,
                 attachments=list(message.attachments),
                 confidence=AI_CONFIDENCE,
-                quoted=message.quote(quotes),
+                # 优先用模型指出的那句原文（逐字校验过），校验不过才退回消息开头。
+                # 长文档里"消息开头 80 字"多半是抬头，用户复制到别处没有意义。
+                quoted=(_verbatim_quote(item.get("quote"), text, quotes)
+                        or message.quote(quotes)),
             ))
         note_problem("")
         return made or drafts
