@@ -483,7 +483,85 @@ def start_shell(shell_dir: Path, qq: int | None = None,
         sink.close()          # 父进程这边关掉，子进程自己留着那个句柄
 
 
-def stop_shell(proc) -> None:
+def _image_paths() -> list[tuple[int, str]]:
+    """这台机器上每个进程的 (PID, exe 路径)。只用 Windows 自带接口，不引第三方库。"""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    psapi = ctypes.WinDLL("psapi", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.QueryFullProcessImageNameW.argtypes = (
+        wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD))
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+
+    capacity = 8192
+    pids = (wintypes.DWORD * capacity)()
+    needed = wintypes.DWORD()
+    if not psapi.EnumProcesses(pids, ctypes.sizeof(pids), ctypes.byref(needed)):
+        return []
+    buf = ctypes.create_unicode_buffer(32768)
+    out: list[tuple[int, str]] = []
+    for pid in pids[:needed.value // ctypes.sizeof(wintypes.DWORD)]:
+        if not pid:
+            continue
+        handle = kernel32.OpenProcess(0x1000, False, pid)      # QUERY_LIMITED_INFORMATION
+        if not handle:
+            continue
+        try:
+            size = wintypes.DWORD(len(buf))
+            if kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                out.append((int(pid), buf.value))
+        finally:
+            kernel32.CloseHandle(handle)
+    return out
+
+
+def stray_processes(shell_dir: Path) -> list[int]:
+    """还活着、但**属于这个 NapCat 目录**的进程。
+
+    为什么不能只靠 `stop_shell(proc)`：那个启动器把 QQ 拉起来之后自己会退出，
+    于是 `proc.poll() is not None` → 直接 return，底下那一窝 QQ 全成了孤儿。
+    这台机器上实测堆到 23 个启动器 + 92 个 QQ.exe —— 每个都在抢同一个号的登录，
+    表现就是"启动很久没反应""扫了码还是没登上""后台连不上"。
+
+    只按**路径**认（`<shell_dir>\...`），绝不按进程名杀：
+    用户电脑上自己的 QQ 也叫 QQ.exe，按名字杀等于把人家的聊天软件关了。
+    """
+    try:
+        root = str(Path(shell_dir).resolve()).lower().rstrip("\\")
+    except OSError:
+        return []
+    if not root:
+        return []
+    import os
+
+    me = os.getpid()
+    return [pid for pid, path in _image_paths()
+            if pid != me and path.lower().startswith(root + "\\")]
+
+
+def stop_all(shell_dir: Path) -> int:
+    """把这个目录下的 NapCat / QQ 全部收掉，返回清掉了几个。"""
+    killed = 0
+    for _ in range(3):                       # 有的 QQ 会 fork 出新进程，来两轮才干净
+        pids = stray_processes(shell_dir)
+        if not pids:
+            break
+        for pid in pids:
+            try:
+                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                               capture_output=True, timeout=20,
+                               creationflags=no_window_flags())
+                killed += 1
+            except Exception:
+                pass
+        time.sleep(0.4)
+    return killed
+
+
+def stop_shell(proc, shell_dir: Path | None = None) -> None:
     """把 NapCat **连着它的子进程**一起收掉。
 
     ⚠️ 只 terminate 那个启动器是不够的（2026-10-13 实测）：真正的 QQ 是它的
@@ -492,21 +570,23 @@ def stop_shell(proc) -> None:
     而且**锁着 napcat/ 目录**（打包时要挪它，挪不动就会半路删掉一半文件）。
     用 taskkill /T 连整棵树一起收。
     """
-    if proc is None or proc.poll() is not None:
-        return
-    try:
-        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-                       capture_output=True, timeout=20,
-                       creationflags=no_window_flags())
-    except Exception:
-        pass
-    try:
-        proc.wait(timeout=10)
-    except Exception:
+    if proc is not None and proc.poll() is None:
         try:
-            proc.kill()
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                           capture_output=True, timeout=20,
+                           creationflags=no_window_flags())
         except Exception:
             pass
+        try:
+            proc.wait(timeout=10)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    # 启动器早就退了也一样要扫一遍：它的子进程还在（见 stray_processes 的注释）。
+    if shell_dir is not None:
+        stop_all(shell_dir)
 
 
 def is_installed(onekey_dir: Path) -> bool:

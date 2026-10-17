@@ -782,6 +782,12 @@ def run_deploy(store, pipeline, account: int) -> int:
 
     shell = deploy.find_shell_dir(onekey_dir)
     assert shell is not None
+    # 先把上次没退干净的收掉，再起新的。
+    # 启动器把 QQ 拉起来之后自己会退出，所以"停止后台"经常清不掉那一窝 QQ；
+    # 它们留在后台抢同一个号的登录，表现就是"启动很久没反应/扫了码还是登不上"。
+    strays = deploy.stop_all(shell)
+    if strays:
+        print(f"  清掉了 {strays} 个上次残留的 QQ/NapCat 进程")
     deploy.write_onebot_config(shell, account, token, port)
 
     # ① 先起我们的接收端
@@ -871,7 +877,7 @@ def run_deploy(store, pipeline, account: int) -> int:
                 deploy.write_onebot_config(shell, account, token, port)
                 deploy.report("NapCat 重建了配置，已自动补好并重启一次", active=False)
                 if napcat.poll() is None:
-                    deploy.stop_shell(napcat)          # 连子进程一起收（否则每修一次漏一窝 QQ）
+                    deploy.stop_shell(napcat, shell)   # 连子进程一起收（否则每修一次漏一窝 QQ）
                 napcat = deploy.start_shell(shell, account)
                 time.sleep(3)                  # 让它先起来，别立刻又判一次
                 continue
@@ -883,7 +889,7 @@ def run_deploy(store, pipeline, account: int) -> int:
                 why = deploy.napcat_error_hint() or "自动登录没成"
                 print(f"  ⚠️ {why}\n     改用扫码登录，二维码：{deploy.qr_path(shell)}")
                 deploy.report(f"自动登录没成（{why[:40]}），改用扫码", active=False)
-                deploy.stop_shell(napcat)
+                deploy.stop_shell(napcat, shell)
                 napcat = deploy.start_shell(shell)      # 不带号 = 出二维码
                 time.sleep(3)
                 continue
@@ -954,7 +960,7 @@ def run_deploy(store, pipeline, account: int) -> int:
                           f"自动带号重启一次重试快速登录"
                           f"（第 {auto_restarts}/{cap} 次）")
                     deploy.report("掉线了，正在自动重连", active=False)
-                    deploy.stop_shell(napcat)
+                    deploy.stop_shell(napcat, shell)
                     napcat = deploy.start_shell(shell, account)
                     offline_since = time.time()      # 重新开始计时，别连环重启
                     time.sleep(3)
@@ -985,7 +991,7 @@ def run_deploy(store, pipeline, account: int) -> int:
         # 连子进程一起收：真正的 QQ 是 NapCat 的子进程，光 terminate 启动器
         # 会留下一堆 QQ 在跑（占内存 + 锁着 napcat/ 目录）—— 见 deploy.stop_shell。
         if napcat is not None:
-            deploy.stop_shell(napcat)
+            deploy.stop_shell(napcat, shell)
     return 0
 
 

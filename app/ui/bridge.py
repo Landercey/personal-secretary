@@ -853,12 +853,19 @@ class Api:
         查错了就是误杀别人的程序。写文件让它自己看，简单也安全。
         """
         from ..runtime import heartbeat
+        from ..runtime import deploy
 
         if not heartbeat.proc_alive():
             # 本来就没在跑：顺手把上次留下的停止请求清掉。不清的话，
             # 下次启动后台会被那个旧文件一上来就劝退（这个坑记过两次了）。
             heartbeat.clear_stop()
-            return {"ok": True, "stopped": True, "message": "后台本来就没在跑"}
+            # 后台没了、QQ 可能还活着（启动器退出后它就成了孤儿）——
+            # 既然用户按了「停止」，就连它们一起收掉，别在后台占内存。
+            shell = deploy.find_shell_dir(deploy.default_dir())
+            killed = deploy.stop_all(shell) if shell is not None else 0
+            tail = f"，顺手清掉了 {killed} 个残留 QQ 进程" if killed else ""
+            return {"ok": True, "stopped": True,
+                    "message": "后台本来就没在跑" + tail}
         heartbeat.request_stop()
         return {"ok": True, "message": "已经让它收工，几秒钟后停"}
 
