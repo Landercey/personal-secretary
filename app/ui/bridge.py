@@ -287,6 +287,8 @@ class Api:
             "status": task.status,
             "done": task.status == STATUS_DONE,
             "archived": bool(task.is_archived),
+            # 后台 AI 正在精修这条（规则版先入库，AI 回来再改写标题）
+            "ai": bool(getattr(task, "ai_pending", False)),
         }
 
     def search(self, keyword: str, view: str = "all") -> dict:

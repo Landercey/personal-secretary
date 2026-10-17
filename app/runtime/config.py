@@ -131,6 +131,9 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         # 短消息不值当问 AI（又慢又花钱），规则解析已经够用。
         "min_chars": 80,
         "timeout_seconds": 60,
+        # 后台精修排队的上限：AI 慢的时候堆太多，后面每条都在等它。
+        # 超过这个数就"这条先按规则版本用"（任务照常在列表里，只是不精修）。
+        "queue_max": 6,
         # 0 = 不限制。
         "token_budget_per_day": 0,
     },
@@ -363,6 +366,7 @@ KEY_COMMENTS: dict[str, str] = {
                "#   默认保守：宁可少收一条，也不要给你编一条出来。",
     "ai.min_chars": "短于这么多字的正文不麻烦 AI（规则解析够用了，AI 又慢又花钱）。",
     "ai.timeout_seconds": "等接口多少秒算失败。超时就退回规则解析，不会卡住收消息。",
+    "ai.queue_max": "后台精修最多排几条；再多就这条先按规则版本用（AI 慢时不至于排长队）。",
     "ai.token_budget_per_day": "每天最多用多少 token，0 = 不限制。超了这天就不再用 AI。",
     # [resource]
     "resource.mem_critical_percent": "内存占用超过这个百分比时，只记待办不分析不推送（别在打游戏时抢资源）。",
@@ -503,7 +507,7 @@ ADVANCED_KEYS: frozenset[str] = frozenset({
     "parse.merge_window_seconds", "parse.due_default_hour",
     "extract.ocr_engine", "extract.max_pages", "extract.render_scale",
     # AI 这两项一般不用动：短于多少字才问 AI、等多久算超时。
-    "ai.token_budget_per_day", "ai.min_chars", "ai.timeout_seconds",
+    "ai.token_budget_per_day", "ai.min_chars", "ai.timeout_seconds", "ai.queue_max",
     # 邮箱这四项一般不用动：端口、看哪个文件夹、第一次看几天、一次拉几封。
     "mail.port", "mail.folder", "mail.keep_days", "mail.max_per_sync",
     # 补收的三个上限一般不用动（补几条、多久内、一次总共几条）。

@@ -264,25 +264,42 @@ class AiEnricher(DraftEnricher):
         if not self.enabled():
             return drafts
         text = str(getattr(message, "text", "") or "")
-        if not should_ask(text):
+        if not self.wants(text):
             return drafts
         try:
-            answer = call_model(text)
+            answer = self.answer(text)
         except Exception as exc:
             # 退回规则解析 —— 而且要把原因记下来："AI 连不上了"必须能被看见，
             # 不能变成"我这条怎么没收到"。
             why = f"{type(exc).__name__}: {exc}"
             message.raw.setdefault("ai_error", why)
             note_problem(f"AI 用不了，这次走了规则解析：{why}")
-            return drafts or [self._fallback(message, text)]
+            return drafts or [self.fallback(message, text)]
 
-        items = _json_array(answer)
-        if not items:
+        made = self.drafts_from(answer, message, text)
+        if not made:
             # 模型说"这里面没有明确要做的事"。保守起见**保留规则的结果**：
             # 它漏了会漏掉真待办，那比多一条更糟。
             note_problem("")
             return drafts
+        note_problem("")
+        return made
 
+    # ------------------------------------------------------------------ 拆开的三步
+    # 后台精修（runtime/ai_refine.py）要单独用这三步：先问、再解析、失败时兜底。
+    # 拆开之后，"同步替换"和"后台精修"用的是同一套解析，不会两处走偏。
+
+    def wants(self, text: str) -> bool:
+        """这条值得问 AI 吗（短消息规则够用，又慢又花钱）。"""
+        return should_ask(text)
+
+    def answer(self, text: str) -> str:
+        """问一次模型，返回它说的原文。失败**抛异常**，由调用方决定怎么兜。"""
+        return call_model(text)
+
+    def drafts_from(self, answer: str, message, text: str) -> list[TaskDraft]:
+        """模型的回答 → 草稿。解析不出东西就返回空列表（调用方据此保留规则结果）。"""
+        items = _json_array(answer)
         quotes = int(config.get("push", "quote_max_chars", 80) or 80)
         title_max = int(config.get("title", "max_len", 200) or 200)
         made: list[TaskDraft] = []
@@ -307,10 +324,9 @@ class AiEnricher(DraftEnricher):
                 quoted=(_verbatim_quote(item.get("quote"), text, quotes)
                         or message.quote(quotes)),
             ))
-        note_problem("")
-        return made or drafts
+        return made
 
-    def _fallback(self, message, text: str) -> TaskDraft:
+    def fallback(self, message, text: str) -> TaskDraft:
         """AI 用不了、规则又一条都没产出时的**保底**。
 
         契约里写着"不能让 AI 出错变成什么都没收到"：一条长通知既没被规则读懂、

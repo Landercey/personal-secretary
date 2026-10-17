@@ -60,7 +60,10 @@ CREATE TABLE IF NOT EXISTS tasks (
     updated_at    TEXT NOT NULL DEFAULT '',
     completed_at  TEXT NOT NULL DEFAULT '',
     archive_reason TEXT NOT NULL DEFAULT '',
-    drop_reason   TEXT NOT NULL DEFAULT ''
+    drop_reason   TEXT NOT NULL DEFAULT '',
+    -- 1 = 后台 AI 正在精修这条（界面显示「AI 整理中…」）。规则版先入库，
+    -- AI 回来再改写标题；改完清零。
+    ai_pending    INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, is_archived);
 CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_at);

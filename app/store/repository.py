@@ -118,6 +118,9 @@ def _add_missing_columns(conn: sqlite3.Connection) -> None:
         conn.execute(
             "UPDATE tasks SET remind_leads = CAST(remind_level AS TEXT) "
             "WHERE remind_level > 0")
+    if "ai_pending" not in columns:
+        # "AI 正在后台精修这条"的标记（界面上的「AI 整理中…」）。
+        conn.execute("ALTER TABLE tasks ADD COLUMN ai_pending INTEGER NOT NULL DEFAULT 0")
 
 
 def _normalize_remind_unit(conn: sqlite3.Connection) -> None:
@@ -640,9 +643,69 @@ class SqliteStore(Store):
             completed_at=row["completed_at"],
             archive_reason=row["archive_reason"],
             drop_reason=row["drop_reason"],
+            ai_pending=bool(row["ai_pending"]),
         )
 
     # ------------------------------------------------------------------ 状态
+    @_synchronized
+    def mark_ai_pending(self, task_ids: Iterable[int], pending: bool = True) -> None:
+        """把这批待办标成"AI 正在精修"（界面显示「AI 整理中…」）。"""
+        ids = [(1 if pending else 0, int(i)) for i in task_ids or [] if int(i) > 0]
+        if not ids:
+            return
+        with self.conn:
+            self.conn.executemany(
+                "UPDATE tasks SET ai_pending=? WHERE task_id=?", ids)
+
+    @_synchronized
+    def refine_task(self, task_id: int, *, title: str, expect_title: str,
+                    due_at: str | None = None, location: str | None = None,
+                    quoted: str = "", confidence: float = 1.0) -> bool:
+        """后台 AI 回来改写一条待办。**只有在"这条还跟插入时一样"时才改。**
+
+        三道闸（任何一条不满足就放弃，返回 False —— 宁可保留用户看到的那版）：
+          · 还开着、没归档：已经完成/删掉的别改；
+          · 标题还是插入时那个：用户手动改过就以他为准；
+          · 新的去重键不撞别的任务。
+
+        为什么要锁：AI 线程在改的同时，用户可能在界面上点完成、或者新消息正在入库。
+        `_synchronized` + `with self.conn` 把"检查 + 改写"包成一个不可分割的动作。
+        """
+        stamp = now_text()
+        with self.conn:
+            row = self.conn.execute(
+                "SELECT * FROM tasks WHERE task_id=?", (task_id,)).fetchone()
+            if row is None:
+                return False
+            if row["status"] != STATUS_OPEN or int(row["is_archived"] or 0):
+                return False
+            if str(row["title"]) != str(expect_title):
+                return False
+            new_title = str(title or "").strip()
+            if not new_title:
+                return False
+            draft = TaskDraft(title=new_title,
+                              due_at=due_at or row["due_at"],
+                              location=location or row["location"])
+            key = dedup_key_for(draft) or row["dedup_key"]
+            if key != row["dedup_key"]:
+                clash = self.conn.execute(
+                    "SELECT task_id FROM tasks WHERE dedup_key=? AND task_id<>?",
+                    (key, task_id)).fetchone()
+                if clash:
+                    return False
+            changed = (new_title != row["title"]
+                       or (draft.due_at or "") != (row["due_at"] or "")
+                       or (draft.location or "") != (row["location"] or ""))
+            self.conn.execute(
+                """UPDATE tasks SET title=?, due_at=?, location=?, quoted=?,
+                   confidence=?, dedup_key=?, updated_at=? WHERE task_id=?""",
+                (new_title, draft.due_at, draft.location,
+                 quoted or row["quoted"], float(confidence), key, stamp, task_id))
+            if changed:
+                self._event(task_id, "ai", f"AI 精修：{row['title']} → {new_title}")
+        return True
+
     @_synchronized
     def set_status(self, task_id: int, status: str, reason: str = "") -> None:
         """改状态（完成 / 误判）。

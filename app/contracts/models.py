@@ -165,6 +165,9 @@ class Task:
     completed_at: str = ""
     archive_reason: str = ""                    # 为什么归档（用户手删会写这里）
     drop_reason: str = ""                       # 为什么判成误判
+    # AI 正在后台精修这条（界面上显示「AI 整理中…」）。
+    # 规则版先入库让用户马上看到，AI 回来再改写标题 —— 这期间它是 True。
+    ai_pending: bool = False
 
 
 @dataclass(slots=True)

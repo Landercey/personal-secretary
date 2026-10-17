@@ -202,7 +202,7 @@ def build(database: str | Path | None = None):
     return store, source, pipeline, sink, registry
 
 
-def ingest_message(store, pipeline, message) -> int:
+def ingest_message(store, pipeline, message, refiner=None) -> int:
     """一条标准消息 → 待办。返回新入库的条数。
 
     整条流水线一共五步（QQ 和手动录入走的是同一条）：
@@ -211,15 +211,23 @@ def ingest_message(store, pipeline, message) -> int:
       3. 草稿入库（重复的会被自动挡掉）
       4. 被判为闲聊/碎片的，记进废件箱（不推送，但留证据）
       5. 顺手清掉过期记录
+
+    `refiner`：群消息走的那条路会把 AI 插件**跳过**（`skip={"ai"}`），
+    规则版先入库让用户马上看到；AI 交给后台线程回来精修（见 runtime/ai_refine.py）。
+    手动录入/拖文件不传它 —— 那是用户正等着结果的动作，同步跑完更直观。
     """
     store.save_message(message)
-    prepared, drafts = pipeline.run(message)
+    prepared, drafts = pipeline.run(message, skip={"ai"} if refiner else ())
     # 再存一次。第一次存的是"还没读附件"的原样消息，跑完管线才有正文 ——
     # 只存第一次的话，文件类消息在库里永远是空的，
     # "这条为什么没收下"就查不出来了。save_message 是 INSERT OR REPLACE，
     # 重复调用没副作用。
     store.save_message(prepared)
     stored = store.save_drafts(prepared, drafts)
+    if refiner is not None:
+        # 交给后台：问模型 → 回来核对"这条还没被用户动过" → 只改标题/时间/地点。
+        # 不 await、不 wait —— 收消息那条线程一秒都不等它。
+        refiner.submit(prepared, stored)
 
     # 合并窗口：这条自己没解析出待办，但带着附件 ——
     # 大概率是"上一条的补充材料"（先发一句"明天要交作业"，
@@ -372,6 +380,21 @@ def read_file(path: str) -> int:
     return 0 if result.ok else 1
 
 
+def start_refiner(store, pipeline):
+    """起一个 AI 精修线程（没有 AI 插件就返回 None）。
+
+    接收端只跑规则，AI 在后台补 —— 见 app/runtime/ai_refine.py 的说明。
+    """
+    enricher = next((e for e in pipeline.draft_enrichers
+                     if getattr(e, "name", "") == "ai"), None)
+    if enricher is None:
+        return None
+    from app.runtime.ai_refine import Refiner
+
+    return Refiner(store, enricher,
+                   on_event=lambda text: print(f"  [AI] {text}")).start()
+
+
 def run_qq(store, pipeline) -> int:
     """启动 QQ 接收，一直跑到用户按 Ctrl+C。
 
@@ -398,8 +421,10 @@ def run_qq(store, pipeline) -> int:
         print("   把上面这行贴进 config.toml 的 [qq] 段，再重启一次。")
         return 1
 
+    refiner = start_refiner(store, pipeline)
+
     def on_message(message) -> None:
-        added = ingest_message(store, pipeline, message)
+        added = ingest_message(store, pipeline, message, refiner=refiner)
         mark = "✓ 入待办" if added else "· 已看过"
         print(f"  {mark}│ {message.source_name}│ {message.text[:40]}")
 
@@ -474,6 +499,8 @@ def run_qq(store, pipeline) -> int:
         print("\n  停止中…")
     finally:
         source.stop()
+        if refiner is not None:
+            refiner.stop()
     print("  已停止。")
     return 0
 
@@ -644,8 +671,10 @@ def run_deploy(store, pipeline, account: int) -> int:
     if not settings.enabled:
         print("QQ 接入没启用（config.toml 的 [qq] enabled）。")
         return 1
+    refiner = start_refiner(store, pipeline)
     source = QQSource(settings=settings,
-                      on_message=lambda m: ingest_message(store, pipeline, m),
+                      on_message=lambda m: ingest_message(store, pipeline, m,
+                                                          refiner=refiner),
                       on_status=lambda s: s.get("error") and print(f"  ⚠️ {s['error']}"))
     if not source.start():
         print("接收端没起来，先别启动 NapCat。")
@@ -799,6 +828,8 @@ def run_deploy(store, pipeline, account: int) -> int:
         print("\n  停止中…")
     finally:
         source.stop()
+        if refiner is not None:
+            refiner.stop()
         # 连子进程一起收：真正的 QQ 是 NapCat 的子进程，光 terminate 启动器
         # 会留下一堆 QQ 在跑（占内存 + 锁着 napcat/ 目录）—— 见 deploy.stop_shell。
         if napcat is not None:

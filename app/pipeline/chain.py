@@ -99,14 +99,21 @@ class Pipeline:
                 break            # 被否决了，后面的零件不用跑
         return current
 
-    def extract(self, message: Message, drafts: list[TaskDraft] | None = None) -> list[TaskDraft]:
+    def extract(self, message: Message, drafts: list[TaskDraft] | None = None,
+                skip: Iterable[str] = ()) -> list[TaskDraft]:
         """跑草稿级零件：切分 → 时间识别 → 去重 → AI 增强。
 
         传入 drafts 可以接着别人已经产出的草稿往下加工
         （插件先切好、再由规则去重，这种组合是允许的）。
+
+        `skip` 按零件名跳过："ai" 就是"只跑规则、AI 留给后台精修"
+        （见 runtime/ai_refine.py）。
         """
+        skipped = {str(name) for name in skip}
         current = list(drafts or [])
         for enricher in self.draft_enrichers:
+            if getattr(enricher, "name", "") in skipped:
+                continue
             if not _safe_enabled(enricher):
                 continue
             try:
@@ -119,10 +126,11 @@ class Pipeline:
                 break            # 被否决了，后面的零件不用跑
         return current
 
-    def run(self, message: Message) -> tuple[Message, list[TaskDraft]]:
+    def run(self, message: Message,
+            skip: Iterable[str] = ()) -> tuple[Message, list[TaskDraft]]:
         """完整跑一遍：消息进去，草稿出来。"""
         prepared = self.prepare(message)
-        return prepared, self.extract(prepared)
+        return prepared, self.extract(prepared, skip=skip)
 
 
 def _safe_enabled(enricher) -> bool:
