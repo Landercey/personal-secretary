@@ -68,3 +68,42 @@ class TestPaperwork(unittest.TestCase):
         text = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("关于\"倒卖\"和二手渠道", text)
         self.assertIn("NOTICE", text)
+
+
+class TestSupportEntry(unittest.TestCase):
+    """打赏入口：**收到过推送之后**才出现，绝不弹窗。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name)
+        self._old = os.environ.get("SECRETARY_HOME")
+        os.environ["SECRETARY_HOME"] = str(self.home)
+        (self.home / "data").mkdir()
+        from app.store.repository import SqliteStore, open_database
+
+        self.store = SqliteStore(open_database(self.home / "data" / "secretary.db"))
+
+    def tearDown(self):
+        self.store.close()
+        if self._old is None:
+            os.environ.pop("SECRETARY_HOME", None)
+        else:
+            os.environ["SECRETARY_HOME"] = self._old
+        self.tmp.cleanup()
+
+    def test_it_stays_hidden_until_a_push_has_succeeded(self):
+        from app.ui.bridge import Api
+
+        api = Api(self.store, [], {}, notices=[])
+        self.assertFalse(api.support()["ready"], "还没推成功过就先别露面")
+        self.store.log_push("2026-10-17 07:30", "wecom_bot", True, "ok")
+        self.assertTrue(api.support()["ready"])
+        self.assertIn("afdian.com", api.support()["url"])
+
+    def test_open_url_only_allows_the_two_known_hosts(self):
+        from app.ui.bridge import Api
+
+        api = Api(self.store, [], {}, notices=[])
+        # 不真的开浏览器：只验白名单判断
+        self.assertFalse(api.open_url("https://example.com/x")["ok"])
+        self.assertFalse(api.open_url("file:///C:/Windows")["ok"])

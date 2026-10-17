@@ -157,6 +157,10 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
            margin: 0 0 6px; background: var(--panel); border-radius: 10px;
            border: 1px solid var(--line); font-size: 12.5px }
 .bulkbar span { flex: 1; color: var(--text-2) }
+/* 打赏入口：一格很小的字，点了用系统浏览器打开爱发电 */
+.support { margin: 6px 2px 0; font-size: 11.5px; color: var(--text-3); cursor: pointer;
+           opacity: .75; user-select: none }
+.support:hover { opacity: 1; color: var(--accent) }
 /* 撤销浮条：底部居中，8 秒后自己消失 */
 .undobar { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(10px);
            display: none; align-items: center; gap: 12px; padding: 9px 12px 9px 16px;
@@ -423,6 +427,8 @@ details.adv[open] > summary::before { content: "▾ " }
       <button id="btnQq" title="启动/停止 QQ 接收、扫登录码、开机自启">📱 QQ 接收</button>
     </div>
     <div class="foot" id="foot">正在连接…</div>
+    <!-- 打赏：只收到过推送之后才出现（见 bridge.support），安静的一行小字 -->
+    <div class="support" id="support" style="display:none">🍐 请作者喝瓶冰糖雪梨</div>
   </aside>
 
   <main>
@@ -1554,9 +1560,16 @@ function drawSettings() {
           <b>本软件免费开源</b>；花钱从别人那里买到的，都是别人在卖免费的代码。</span></div>
         <div class="kv"><b>数据</b><span style="word-break:break-all">${esc(info.data)}</span></div>
         <div class="kv"><b>程序</b><span style="word-break:break-all">${esc(info.root)}</span></div>
-        <div class="acts"><button class="block" id="btnBackSettings">返回设置</button></div>
+        <div class="acts">
+          <button class="block" id="btnSupport">🍐 请作者喝瓶冰糖雪梨</button>
+          <button class="block" id="btnBackSettings">返回设置</button>
+        </div>
+        <p class="hint">一句话来历：本项目的作者是个学生，之前被"AI 自动挖漏洞"的课
+          忽悠了 580 块，后来想明白了 —— 与其追那种躺赚，不如写个自己天天用的小工具。
+          打赏不解锁任何功能，只是让他少喝一瓶自来水。</p>
         <p class="hint">待办库、配置、备份都在「数据」那个文件夹里 ——
           换电脑时把整个文件夹拷走就行。</p>`;
+      $('btnSupport').onclick = () => call('open_url', 'https://afdian.com/a/landercey');
       $('btnBackSettings').onclick = () => { setPanel('settings'); renderPanel(true); };
     };
   });
@@ -2473,6 +2486,14 @@ window.addEventListener('pywebviewready', () => {
     renderPanel(true);
   };
   $('btnClose').onclick = closePanel;
+  // 打赏入口：收到过推送之后才出现（bridge.support 判断），点了开系统浏览器
+  (async () => {
+    const info = await call('support');
+    if (!info || !info.ready) return;
+    const link = $('support');
+    link.style.display = '';
+    link.onclick = () => call('open_url', info.url);
+  })();
   // 批量模式：点一下进"多选"，选完点完成/归档/误判；再点一下退出
   $('btnBulk').onclick = () => {
     bulkMode = !bulkMode;

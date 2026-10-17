@@ -1563,10 +1563,22 @@ class Api:
         import webbrowser
 
         target = str(url or "").strip()
-        if not target.startswith("https://github.com/"):
-            return {"ok": False, "message": "只允许打开 GitHub 上的页面"}
+        # 白名单：项目地址 + 爱发电（打赏页）。多一个都不放。
+        if not target.startswith(("https://github.com/", "https://afdian.com/")):
+            return {"ok": False, "message": "只允许打开项目地址或打赏页"}
         webbrowser.open(target)
         return {"ok": True, "url": target}
+
+    SUPPORT_URL = "https://afdian.com/a/landercey"
+
+    @tracked
+    def support(self) -> dict:
+        """要不要显示"请作者喝瓶冰糖雪梨"。
+
+        时机：**推成功过至少一次之后**才显示（`_pushed_once`）。
+        还没收到过任何推送的人，先让他把东西用起来 —— 这时候提打赏只会招人烦。
+        """
+        return {"ready": self._pushed_once(), "url": self.SUPPORT_URL}
 
     # ------------------------------------------------------------------ 意见反馈
     @tracked
