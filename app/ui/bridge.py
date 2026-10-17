@@ -146,6 +146,16 @@ def _preview_of(target: Path) -> str:
     return f"data:{mime};base64,{blob}"
 
 
+def _mask_user(path: str) -> str:
+    """路径里的 Windows 用户名打掉（C:\\Users\\张三\\… → C:\\Users\\…）。
+
+    反馈会被贴到群里 / Issue 上，而 Windows 用户名经常就是真名。
+    只动 `\\Users\\` 后面那一段，盘符和后面几层保留 —— 排查"装了两份"
+    "从临时目录跑"靠的正是这几层。
+    """
+    return re.sub(r"\\Users\\[^\\]+", r"\\Users\\…", str(path or ""))
+
+
 def _redact(text: str) -> str:
     """把反馈文本里的号码和密钥打掉。
 
@@ -1461,6 +1471,11 @@ class Api:
             # 版本号放最前面：用户报问题时我第一眼要看的就是"他是哪一版"
             f"版本：{version_text(root)}",
             f"构建日期：{built}",
+            # 这两行是给"两份程序 / 在压缩包里跑"这类问题准备的：
+            # 路径里有 \Temp\ 就是压缩包直接双击；两个路径不一样说明装了两份。
+            # 用户名要打掉 —— 反馈多半会贴到群里或 Issue 上。
+            f"程序位置：{_redact(_mask_user(str(Path(sys.executable).parent if getattr(sys, 'frozen', False) else root)))}",
+            f"数据目录：{_redact(_mask_user(str(default_data_dir())))}",
             f"系统：{platform.platform()}｜Python {platform.python_version()}",
             f"内存：系统 {system.get('percent', '?')}%｜本程序约 {round(own_mb)} MB",
             "",

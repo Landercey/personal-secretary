@@ -43,10 +43,30 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+def _running_from_archive() -> bool:
+    """是不是"在压缩包里双击"跑起来的（exe 位于 %TEMP% 下面）。
+
+    WinRAR / 7-Zip / Bandizip 双击压缩包里的 exe 时，会先把整包解到临时目录
+    再运行 —— 于是程序以为自己"装"在那儿。三个后果都是真实反馈：
+      · 配置和待办写进临时目录，关掉（或清理临时文件）就没了；
+      · 再解压一份出来，两份程序抢同一个端口 → "端口 18080 被占用"；
+      · 杀软对临时目录里的 exe 格外敏感（隔离、拦启动）。
+    """
+    if not getattr(sys, "frozen", False):
+        return False                  # 源码运行（python run.py）不算
+    try:
+        exe = Path(sys.executable).resolve()
+        temp = Path(tempfile.gettempdir()).resolve()
+    except OSError:
+        return False
+    return temp == exe.parent or temp in exe.parents
+
 
 def _make_output_safe() -> None:
     """让 stdout/stderr 变成"打印永远不会抛异常"。
@@ -1015,6 +1035,21 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.selftest:
         return _selftest()
+
+    # 在压缩包里双击 exe = WinRAR / 7-Zip 把整包解到 %TEMP% 再跑。后果三连，
+    # 每一条都有人踩过：配置和待办写在临时目录（关掉就没了）；再解压一份出来
+    # 就变成"两份程序抢同一个 18080"；杀软还特别爱拦临时目录里的 exe。
+    # 与其让用户对着"端口被占用"猜半天，不如一开始就把话说死。
+    if _running_from_archive():
+        from app.runtime.desktop import alert
+
+        alert("先解压，再用", (
+            "你是在压缩包里直接双击运行的。\n\n"
+            "请把整个 zip 解压成一个文件夹，再双击文件夹里的「私人秘书.exe」。\n\n"
+            "从压缩包里跑会有三个毛病：配置和待办存在临时目录、关掉就没了；\n"
+            "再解压一份出来还会变成两份程序抢同一个端口（就是\"端口被占用\"那个毛病）；\n"
+            "杀毒软件也特别喜欢拦临时目录里的程序。"))
+        return 1
 
     # 关键文件缺了（多半被杀软吃了）：**弹框说清楚**，别让用户对着"双击没反应"发呆。
     # 放在自检后面：`--selftest` 自己会把缺什么列出来，命令行用户不需要弹框。
