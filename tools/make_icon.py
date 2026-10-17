@@ -1,18 +1,15 @@
 """生成应用图标（assets/app.ico）。
 
-两种来源：
-  1. `assets/logo.png` 存在 → 用它（把白底抠成透明，生成多尺寸图标）
-  2. 不存在 → 代码画一只鲸鱼兜底
+代码画的：**一只贪吃豆正咬住一只小企鹅的嘴** ——
+"群消息被一口吃掉，只留下待办"。
+
+⚠️ 企鹅是腾讯的注册商标。这里画的是**简笔的小企鹅**（不是照抄 QQ 那只），
+但形状仍然容易让人想到它。自己用没问题；要公开发布/商用，最好换成
+"消息气泡"或纯贪吃豆版本（`--plain` 一键切回没有企鹅的版本）。
 
 跑法：
-    python tools/make_icon.py                 # 用 assets/logo.png，没有就画兜底
-    python tools/make_icon.py --source 某图.png   # 换个源图
-
-`assets/logo.png` 是**为本项目专门做的图**（2026-10-12 换成蓝色对话框 + 对勾），
-随 MIT 许可证一起授权，随便用。
-
-（历史提醒：更早的版本用过网上找的同人作品，2026-10-12 换掉了 —— 自己电脑上
-用没事，公开分发是侵权。所以这个文件的默认源图**必须**是自制或已授权的。）
+    python tools/make_icon.py                  # 画贪吃豆（默认）
+    python tools/make_icon.py --source 某图.png  # 换成自己的图（要自制/已授权）
 
 生成完要重跑一次 `python run.py --shortcut`，快捷方式的图标才会更新
 （Windows 会缓存图标）。
@@ -29,8 +26,12 @@ from PIL import Image, ImageDraw
 # 背景用界面主色（index.html 里的 --accent）
 ACCENT = (79, 70, 229, 255)
 WHITE = (255, 255, 255, 255)
-BODY = (250, 250, 252, 255)      # 鲸鱼身体：近白，比纯白柔和一点
+GOLD = (255, 197, 61, 255)       # 贪吃豆：暖黄，深色背景上最扎眼
+BODY = (250, 250, 252, 255)      # 备用身体色（旧图沿用）
 EYE = (37, 34, 90, 255)          # 眼睛：深靛蓝，不用纯黑
+PENGUIN = (38, 40, 46, 255)      # 企鹅身子：近黑（纯黑在深色任务栏上会糊成一块）
+BEAK = (243, 146, 55, 255)       # 嘴和脚
+SCARF = (222, 60, 60, 255)       # 围巾：一点红，小尺寸下也认得出是"那只企鹅"
 
 # 多尺寸一起塞进 .ico，Windows 按需要挑
 SIZES = (16, 24, 32, 48, 64, 128, 256)
@@ -143,7 +144,42 @@ def from_image(source: Path) -> Image.Image:
     return trim_and_pad(drop_white_background(cut_watermark(image)))
 
 
-def draw(size: int, background: bool = True) -> Image.Image:
+def draw_pac(size: int) -> Image.Image:
+    """贪吃豆咬消息气泡。全部是几何图形，缩到 16×16 还认得出。
+
+    为什么是"气泡"不是 QQ 那只企鹅：见文件开头。同一个梗，不碰别人商标。
+    """
+    # 先在大图上画再缩小，圆角和嘴边的弧度才有抗锯齿（PIL 本身不做）
+    ss = 4 if size < 96 else 2
+    big = size * ss
+    image = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    artist = ImageDraw.Draw(image)
+    k = big / 256
+
+    def B(x0, y0, x1, y1):
+        return [x0 * k, y0 * k, x1 * k, y1 * k]
+
+    def P(*xy):
+        return [(x * k, y * k) for x, y in zip(xy[0::2], xy[1::2])]
+
+    radius = (58 if size >= 48 else 28) * k
+    artist.rounded_rectangle(B(6, 6, 250, 250), radius=radius, fill=ACCENT)
+
+    # 气泡先画：让它有一截压在嘴巴里 = "正在被咬"
+    artist.rounded_rectangle(B(136, 88, 234, 168), radius=18 * k, fill=WHITE)
+    artist.polygon(P(150, 160, 130, 192, 178, 166), fill=WHITE)   # 小尾巴
+    if size >= 24:                                                 # 三个点，太小会糊成一坨
+        for cx in (166, 186, 206):
+            artist.ellipse(B(cx - 6, 122, cx + 6, 134), fill=ACCENT)
+
+    # 贪吃豆：整圆挖掉右边一块 64° 的楔形（start/end 是"剩下的那段"）
+    artist.pieslice(B(18, 52, 178, 212), start=32, end=328, fill=GOLD)
+    # 眼睛：16px 下只剩它还看得清，所以够大、位置偏上
+    artist.ellipse(B(76, 92, 100, 116), fill=EYE)
+    return image.resize((size, size), Image.LANCZOS)
+
+
+def draw(size: int, background: bool = True, penguin: bool = True) -> Image.Image:
     """画一张 size×size 的图。
 
     统一按 256 的坐标画再缩小 —— 直接用小数坐标画小图会糊得更厉害。
@@ -176,45 +212,49 @@ def draw(size: int, background: bool = True) -> Image.Image:
         radius = (58 if size >= 48 else 28) * k
         artist.rounded_rectangle(B(6, 6, 250, 250), radius=radius, fill=ACCENT)
 
-    # ---- 鲸鱼 ----
-    # 所有坐标按"内容区 36..224 水平、56..200 垂直"摆，视觉重心才不会偏。
-    #
-    # 身体：胖胖的圆角矩形。比椭圆更像"小肥鱼"，小尺寸下也更容易看清。
-    artist.rounded_rectangle(B(36, 96, 180, 178), radius=42 * k, fill=BODY)
-    # 尾鳍：身体右侧一个上扬的三角
-    artist.polygon(P(170, 110, 220, 82, 220, 160, 170, 138), fill=BODY)
-    # 前鳍：肚子下面一小片
-    artist.polygon(P(84, 156, 116, 156, 96, 194), fill=BODY)
-    # 眼睛：唯一的脸部特征。16px 下只有它还看得见，所以它必须够大够黑
-    artist.ellipse(B(66, 118, 90, 142), fill=EYE)
+    # ---- 企鹅（先画，贪吃豆后盖上去 = 被咬住）----
+    if penguin:
+        artist.ellipse(B(150, 62, 228, 202), fill=PENGUIN)
+        artist.ellipse(B(163, 104, 215, 192), fill=WHITE)          # 肚子
+        artist.ellipse(B(158, 190, 182, 206), fill=BEAK)           # 脚
+        artist.ellipse(B(196, 190, 220, 206), fill=BEAK)
+        artist.polygon(P(156, 118, 176, 112, 176, 134), fill=BEAK)  # 嘴（伸进贪吃豆嘴里）
+        artist.rectangle(B(150, 138, 226, 152), fill=SCARF)         # 围巾
+        artist.polygon(P(150, 138, 130, 156, 150, 164), fill=SCARF)  # 围巾尾巴
+        if size >= 32:                                              # 小图不画，会糊成一坨
+            artist.ellipse(B(178, 84, 194, 100), fill=WHITE)
+            artist.ellipse(B(202, 84, 218, 100), fill=WHITE)
+            artist.ellipse(B(180, 88, 189, 97), fill=EYE)
+            artist.ellipse(B(204, 88, 213, 97), fill=EYE)
 
-    # 喷水：三颗小水珠。
-    # 32px 以下不画 —— 缩下去会三颗糊成一坨，反而像脏点。
-    if size >= 32:
-        for cx, cy, r in ((88, 74, 8), (110, 58, 6), (132, 72, 5)):
-            artist.ellipse(B(cx - r, cy - r, cx + r, cy + r), fill=BODY)
+    # ---- 贪吃豆：整圆挖掉右边一块 60° 的楔形 ----
+    artist.pieslice(B(24, 54, 176, 206), start=30, end=330, fill=GOLD)
+    if size >= 24:
+        artist.ellipse(B(84, 92, 102, 110), fill=EYE)
 
     return image.resize((size, size), Image.LANCZOS)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="生成应用图标")
-    parser.add_argument("--source", help="源图（默认 assets/logo.png）")
+    parser.add_argument("--source", help="源图（不给就代码画）")
+    parser.add_argument("--plain", action="store_true",
+                        help="不画企鹅，只留贪吃豆（要公开发布时用这个，避开商标）")
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
-    source = Path(args.source) if args.source else root / "assets" / "logo.png"
+    source = Path(args.source) if args.source else None
 
     target = root / "assets" / "app.ico"
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    if source.is_file():
+    if source is not None and source.is_file():
         print(f"用源图：{source}")
         base = from_image(source)
         frames = [base.resize((size, size), Image.LANCZOS) for size in SIZES]
     else:
-        print("没找到源图，用代码画一只鲸鱼兜底")
-        frames = [draw(size) for size in SIZES]
+        print("代码画：贪吃豆咬企鹅" if not args.plain else "代码画：只有贪吃豆")
+        frames = [draw(size, penguin=not args.plain) for size in SIZES]
 
     # ⚠️ 必须拿**最大**的那张存，让 PIL 自己往下缩。
     # 第一版写成 frames[0].save(...)（frames[0] 是 16px），
