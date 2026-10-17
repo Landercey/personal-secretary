@@ -1,0 +1,37 @@
+# 每次 push / PR 都跑一遍测试。
+#
+# 为什么要它：项目已经有 700+ 条测试，但**只有在本机想起来才跑**。
+# 社区提 PR 时没人替你跑，坏掉的东西会悄悄进主干。
+# 跑在 Windows 上是因为代码里有大量 Windows 专属行为（端口、锁、批处理、OCR 脚本）。
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unittest:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # 只装"跑测试需要的"：界面库（pywebview/pythonnet）在 CI 里不需要，
+      # 但 app/ui 的静态接线检查会 import 到它，所以还是装上（纯 pip，不编译）。
+      - name: 装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 跑全部测试
+        env:
+          # 让测试里那些"读用户目录"的路径落到临时目录，别碰 runner 上的真实环境
+          PYTHONIOENCODING: utf-8
+        run: python -m unittest discover -s tests -t . -v

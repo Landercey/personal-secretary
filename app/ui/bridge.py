@@ -193,7 +193,7 @@ def _ai_why(config) -> str:
 class Api:
     """网页能调到的全部方法。加方法不用改别的，网页那边直接调。"""
 
-    def __init__(self, store, plugins=(), actions=None) -> None:
+    def __init__(self, store, plugins=(), actions=None, notices=None) -> None:
         self.store = store
         # 插件加载结果由 run.py 装配时递进来。界面不自己扫文件夹 ——
         # 扫一遍等于把插件又 import 一次，副作用会来两遍。
@@ -201,6 +201,9 @@ class Api:
         # 要用到理解层的活（手动录入、拉课表）也由 run.py 装好再递进来。
         # 界面不自己 import 那些模块：全项目只有 run.py 一个装配点。
         self._actions = dict(actions or {})
+        # 启动自检发现的问题（库坏了/盘满了/进了安全模式）——
+        # 由 run.py 在启动时算好递进来，界面当提示条显示。
+        self._notices = list(notices or [])
         # 网页轮询用：每次返回一个自增号，界面上"数据变了没"靠它判断
         self._revision = 0
         # 托盘图标：界面每 5 秒调一次 tray()，第一次建、之后只更新提示文字。
@@ -1246,6 +1249,12 @@ class Api:
         ]
         return {"checks": checks,
                 "done": all(item["ok"] for item in checks if not item.get("optional")),
+                # 启动自检的问题（库坏了/盘满了/安全模式）+ 配置读坏了的说明。
+                # 界面把它们当提示条显示 —— 不然用户只会觉得"设置怎么全没了"。
+                "notes": (list(self._notices)
+                          + ([{"code": "CONFIG.LOAD.FAILED", "level": "warn",
+                               "message": config.load_error}]
+                             if getattr(config, "load_error", "") else [])),
                 "suggestion": self._suggestion()}
 
     def _suggestion(self) -> dict | None:

@@ -2106,6 +2106,14 @@ async function renderGuide() {
 
   const parts = [];
 
+  // 启动自检的结果：库坏了/盘满了/进了安全模式/配置读坏了。
+  // 不说出来的话，用户看到的就是"设置怎么全没了""怎么打不开了"。
+  if ((state.notes || []).length) {
+    parts.push(`<div class="guide warn">${
+      state.notes.map(n => `<p>${n.level === 'error' ? '⛔' : '⚠️'} ${esc(n.message)}</p>`)
+        .join('')}</div>`);
+  }
+
   // 拉课表时冒出来的提醒。不说出来的话，用户永远不知道有节课时间排错了，
   // 只会觉得"这软件算得不准"。
   if (syncNotes.length) {

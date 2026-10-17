@@ -122,6 +122,10 @@ RESOURCE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 # 用完就停手，改成在界面上和日志里告诉用户去手动点。
 AUTO_RESTART_MAX = 3
 
+# 启动自检发现的问题（库坏了/盘满了/安全模式），界面读它当提示条。
+# 用列表原地改（`STARTUP_NOTES[:] = ...`）而不是重新赋值：别的模块 import 的是同一个对象。
+STARTUP_NOTES: list[dict] = []
+
 
 def ensure_bundled_files() -> int:
     """第一次运行时，把随包发的插件补到用户的 plugins/ 里。返回补了几个。
@@ -166,7 +170,7 @@ def alert_missing_files(missing: list[str]) -> None:
           f"程序目录：{ROOT}")
 
 
-def build(database: str | Path | None = None):
+def build(database: str | Path | None = None, safe_mode: bool = False):
     """把零件装配起来。换数据库路径主要是为了测试。
 
     加一个新零件/插件的标准动作就是改这里（下面四行）：
@@ -183,7 +187,10 @@ def build(database: str | Path | None = None):
     source = ManualSource()
 
     registry = Registry()
-    load_plugins(ROOT, registry)     # 加载结果记在 registry.status 上
+    if not safe_mode:
+        load_plugins(ROOT, registry)     # 加载结果记在 registry.status 上
+    # 安全模式：一个插件都不加载。它只在"连续几次没起来"时自动触发，
+    # 目的是让用户至少能进界面把配置改回来。
 
     # 理解层的零件分两组，管线保证「消息级」整组先跑：
     #   ① 文件解析（把附件读成文字拼进正文）
@@ -516,9 +523,13 @@ def run_qq(store, pipeline) -> int:
     print("=" * 62)
     print(f"  监听：       {settings.bind_host}:{settings.bind_port}{settings.path}")
     print(f"  接收范围：   {settings.summary()}")
-    print(f"  NapCat 需要填的地址：")
+    # ⚠️ token 打码再打印：这段输出会进 data/background.log，而用户经常把日志
+    # 整段贴到群里求助（真实发生过）。NapCat 那边程序会自动写好，用不着抄。
+    print(f"  NapCat 需要填的地址（token 已打码）：")
     print(f"      ws://{settings.bind_host}:{settings.bind_port}{settings.path}"
-          f"?access_token={settings.token}")
+          f"?access_token={'***' if settings.token else '（没设）'}")
+    print("      （完整地址程序会自动写进 NapCat 的配置；要手动填，"
+          "在 config.toml 的 [qq] token 里看）")
     print()
     print("  现在去 NapCat 里把上面这个地址配好，然后等它连上来。")
     print("  按 Ctrl+C 停止。")
@@ -1030,7 +1041,7 @@ def open_ui(store, source, pipeline, sink, registry) -> int:
 
     # 标题栏/任务栏图标。打包后 exe 自己也带着同一个图标（打包时嵌进去的）。
     icon = RESOURCE / "assets" / "app.ico"
-    api = Api(store, registry.status, actions)
+    api = Api(store, registry.status, actions, notices=STARTUP_NOTES)
     window = webview.create_window("私人秘书", str(page), width=1040, height=680,
                                    min_size=(820, 520), js_api=api)
     # 一键更新要把界面关掉（更新脚本在等这个进程消失）。桥自己拿不到窗口，
@@ -1040,6 +1051,11 @@ def open_ui(store, source, pipeline, sink, registry) -> int:
     # 对象），那一步要跨公寓 COM 往返、还握着 GIL —— 界面就"未响应"了，
     # 页面永远停在"正在连接…"（2026-10-14 实锤，py-spy 抓到栈在 util.py:196）。
     api._window = window
+    # 走到这儿 = 窗口建出来了，算"能用了"：清掉启动计数，
+    # 以后再崩（打游戏被杀、手动结束）不该被当成"打不开"。
+    from app.runtime import startup
+
+    startup.mark_ready()
     # 标题栏图标。pywebview 的 create_window 不收这个参数，只有 start 收。
     webview.start(icon=str(icon) if icon.is_file() else None)
     return 0
@@ -1165,9 +1181,23 @@ def main(argv: list[str] | None = None) -> int:
             "杀毒软件也特别喜欢拦临时目录里的程序。"))
         return 1
 
+    # 启动自检 + 安全模式（M0）：
+    #   ① 连续 3 次没走到"能用了"，下一次自动跳过插件（至少进得去）；
+    #   ② 库坏了就把坏文件改名留档、用新库起来，并告诉用户去备份恢复；
+    #   ③ 盘快满了、数据目录写不进去，提前说。
+    from app.runtime import preflight, startup
+
+    STARTUP_NOTES[:] = preflight.check(default_data_dir() / "secretary.db")
+    SAFE_MODE = ("--safe-mode" in (argv or sys.argv)) or \
+        startup.note_attempt() >= startup.LIMIT
+    if SAFE_MODE:
+        STARTUP_NOTES.insert(0, {
+            "code": "APP.SAFE_MODE", "level": "warn",
+            "message": "上次启动没走完，这次先进安全模式（暂时不加载插件）。"
+                       "配置和待办都在，界面里能正常改设置。"})
+
     # 每天第一次启动顺手备一份库和配置（用户丢过配置、丢过待办）。
-    # 放在这儿：所有入口都会经过 —— 界面、--serve、命令行都算。
-    # run_daily 自己吞异常，备份失败绝不拦启动。
+    # 放在自检**之后**：库坏了就不能拿坏库去覆盖今天的备份。
     from app.runtime import backup
 
     backup.run_daily()
@@ -1182,7 +1212,7 @@ def main(argv: list[str] | None = None) -> int:
     # 第一次运行（exe 第一次被双击）：把随包发的插件补到他的 plugins/ 里。
     ensure_bundled_files()
 
-    store, source, pipeline, sink, registry = build(args.db)
+    store, source, pipeline, sink, registry = build(args.db, safe_mode=SAFE_MODE)
 
     if args.plugins:
         return list_plugins(registry.status)
