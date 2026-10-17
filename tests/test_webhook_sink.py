@@ -90,6 +90,8 @@ class Base(unittest.TestCase):
 class TestVendorDetection(unittest.TestCase):
     def test_known_hosts(self):
         cases = {
+            # 企业微信的地址填进通用地址也得认 —— 用户手里先拿到的往往是它
+            f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={FAKE}": "企业微信机器人",
             "https://oapi.dingtalk.com/robot/send?access_token=x": "钉钉机器人",
             "https://open.feishu.cn/open-apis/bot/v2/hook/abc": "飞书机器人",
             # 这家后来收费了，不再推荐；识别能力留着只是为了不让老配置直接失效
@@ -103,6 +105,12 @@ class TestVendorDetection(unittest.TestCase):
 
     def test_shapes_match_the_docs(self):
         """每家的报文形状：照官方文档写，改这里之前先回文档看一眼。"""
+        build = vendor_of("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=x")[1]
+        payload, field, good = build("标题", "正文")
+        self.assertEqual(payload["msgtype"], "text")
+        self.assertIn("正文", payload["text"]["content"])
+        self.assertEqual((field, good), ("errcode", ("0",)))
+
         build = vendor_of("https://oapi.dingtalk.com/robot/send?access_token=x")[1]
         payload, field, good = build("标题", "正文")
         # 钉钉的「自定义关键词」安全设置要求报文里出现那个词，否则直接被拒

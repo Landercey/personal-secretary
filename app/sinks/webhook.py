@@ -91,12 +91,24 @@ def _bark(title: str, body: str) -> tuple[dict[str, Any], str, tuple[str, ...]]:
     return {"title": title, "body": body}, "code", ("200",)
 
 
+def _wecom(title: str, body: str) -> tuple[dict[str, Any], str, tuple[str, ...]]:
+    """企业微信群机器人。
+
+    本来有单独的「企业微信机器人」配置段，但很多人手里先拿到的是那条 webhook 地址，
+    会顺手粘进通用地址里 —— 以前会走"自定义地址"，发出去的报文形状不对，
+    企业微信直接拒（errcode 93000），用户只看到"推送失败"。
+    """
+    text = f"{title}\n{body}" if title else body
+    return {"msgtype": "text", "text": {"content": text}}, "errcode", ("0",)
+
+
 def _generic(title: str, body: str) -> tuple[dict[str, Any], str, tuple[str, ...]]:
     """认不出的地址：发一个最普通的形状，不猜成败（HTTP 200 就算发到了）。"""
     return {"title": title, "text": body}, "", ()
 
 
 VENDORS: tuple[tuple[str, str, Build], ...] = (
+    ("qyapi.weixin.qq.com", "企业微信机器人", _wecom),
     ("dingtalk.com", "钉钉机器人", _dingtalk),
     ("feishu.cn", "飞书机器人", _feishu),
     ("pushplus.plus", "PushPlus（收费，不再推荐）", _pushplus),

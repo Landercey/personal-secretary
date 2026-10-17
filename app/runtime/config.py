@@ -392,7 +392,10 @@ KEY_COMMENTS: dict[str, str] = {
     "wecom_bot.send_attachments": "推送时要不要连图片/文件原件一起发到手机。嫌手机响得勤就改 false。",
     # [push_webhook] —— 不用企业微信的人填这一段
     "push_webhook.enabled": "改成 true 才会真的推送。两个通道都开着时走企业微信（它能发附件）。",
-    "push_webhook.url": "整条地址粘进来就行：钉钉 / 飞书群机器人、Bark 都认。\n"
+    "push_webhook.url": "整条地址粘进来就行：企业微信 / 钉钉 / 飞书群机器人、Bark 都认。\n"
+                        "#   企业微信的地址（qyapi.weixin.qq.com 开头）填这儿也照样能发，\n"
+                        "#   区别只有一个：这里发的**不带附件**，要连图片文件一起发到手机，\n"
+                        "#   用上面那段「企业微信机器人」。\n"
                         "怎么拿地址见 README 的「不用企业微信也能收」。",
     "push_webhook.retry_times": "网络抖动时重试几次。",
     "push_webhook.timeout": "单次请求等多久算超时（秒）。",
@@ -487,7 +490,7 @@ KEY_COMMENTS: dict[str, str] = {
 SECTION_GROUPS: tuple[tuple[str, str, str, tuple[tuple[str, str, str], ...]], ...] = (
     ("group_push", "推送到手机", "待办怎么发到你手机上", (
         ("wecom_bot", "企业微信机器人", "不想注册企业微信？看下面「通用推送地址」"),
-        ("push_webhook", "通用推送地址", "钉钉 / 飞书 / Bark，填一个就行"),
+        ("push_webhook", "通用推送地址", "企业微信 / 钉钉 / 飞书 / Bark，填一个就行"),
         ("push", "什么时候推", "一天推几次、错过了补不补"),
         ("remind", "提醒强度", "哪些事要在截止前单独提醒一次"),
     )),
