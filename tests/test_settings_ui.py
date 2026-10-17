@@ -183,6 +183,14 @@ class TestSchema(unittest.TestCase):
         for name in ("wecom_bot", "push_webhook", "push", "qq", "parse", "ai", "store"):
             self.assertFalse(by_name[name].get("advanced"), name)
 
+    def test_listening_port_and_token_are_advanced(self):
+        """监听地址/端口/路径/令牌在小白模式下不显示 —— 改了只会让 QQ 静默收不到。"""
+        qq = next(s for g in self.groups for s in g["sections"] if s["name"] == "qq")
+        levels = {k["key"]: k["level"] for k in qq["keys"]}
+        for key in ("bind_host", "bind_port", "path", "token"):
+            self.assertEqual(levels[key], "advanced", key)
+        self.assertEqual(levels["group_ids"], "common")
+
     def test_kind_matches_the_default_value(self):
         self.assertEqual(self.fields["push.times"]["kind"], "list")
         self.assertEqual(self.fields["qq.group_ids"]["kind"], "list")

@@ -539,6 +539,10 @@ def register_plugin_section(section: str, title: str = "", desc: str = "",
 
 ADVANCED_KEYS: frozenset[str] = frozenset({
     "qq.max_text_chars",
+    # 监听地址 / 端口 / 路径 / 令牌：程序自己写进 NapCat 的配置，单方面改了两边
+    # 就对不上（QQ 会静默收不到消息）。小白模式干脆不显示 —— 用户的原话是
+    # "还有一些监听接口啥的怕被用户弄坏"。
+    "qq.bind_host", "qq.bind_port", "qq.path", "qq.token",
     "parse.merge_window_seconds", "parse.due_default_hour",
     "extract.ocr_engine", "extract.max_pages", "extract.render_scale",
     # AI 这两项一般不用动：短于多少字才问 AI、等多久算超时。
