@@ -37,7 +37,10 @@ Windows 上**正在运行的 exe 覆盖不了**，所以只能：
 from __future__ import annotations
 
 import subprocess
+import time
+import urllib.error
 import urllib.request
+from http.client import HTTPException
 from pathlib import Path
 
 ZIP_NAME = "update.zip"
@@ -64,14 +67,34 @@ def patch_url(repo: str, version: str) -> str:
     return PATCH_URL.format(repo=repo, version=clean)
 
 
-def download(url: str, dest: Path, timeout: float = 300.0) -> Path:
-    """把包下到 dest。太大、下不动都抛异常（调用方负责告诉用户）。"""
-    request = urllib.request.Request(url, headers={"User-Agent": "personal-secretary"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        declared = int(response.headers.get("Content-Length") or 0)
-        if declared > MAX_BYTES:
-            raise ValueError(f"文件太大（{declared // 1048576} MB），不像是个补丁包")
-        blob = response.read(MAX_BYTES + 1)
+def download(url: str, dest: Path, timeout: float = 300.0,
+             tries: int = 3) -> Path:
+    """把包下到 dest。太大、下不动都抛异常（调用方负责告诉用户）。
+
+    断一次要重试：37 MB 走代理传到一半断掉是常态（我自己发版时撞过好几次 EOF）。
+    让用户点一下就得重头再来，体验比"慢 3 秒"差得多。
+    只有"太大"这种明确的错不重试 —— 那说明地址不对，重试也是白搭。
+    """
+    last: Exception | None = None
+    blob = b""
+    for attempt in range(1, max(1, tries) + 1):
+        try:
+            request = urllib.request.Request(
+                url, headers={"User-Agent": "personal-secretary"})
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                declared = int(response.headers.get("Content-Length") or 0)
+                if declared > MAX_BYTES:
+                    raise ValueError(
+                        f"文件太大（{declared // 1048576} MB），不像是个补丁包")
+                blob = response.read(MAX_BYTES + 1)
+            break
+        except ValueError:
+            raise
+        except (urllib.error.URLError, HTTPException, OSError) as exc:
+            last = exc
+            if attempt >= tries:
+                raise
+            time.sleep(2 * attempt)
     if len(blob) > MAX_BYTES:
         raise ValueError("下载的东西太大，不像是个补丁包")
     dest.write_bytes(blob)

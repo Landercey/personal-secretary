@@ -21,6 +21,63 @@ sys.path.insert(0, str(ROOT))
 from app.runtime import selfupdate                                 # noqa: E402
 
 
+class TestDownloadRetries(unittest.TestCase):
+    """下到一半断了要自己重试。
+
+    37 MB 走代理传到一半断掉是常态（作者发版时自己撞过好几次 EOF）。
+    断一次就报"下载失败"、让用户从头点一遍，体验比多等两秒差得多。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dest = Path(self.tmp.name) / "update.zip"
+        self._real = selfupdate.urllib.request.urlopen
+        self._sleep = selfupdate.time.sleep
+        selfupdate.time.sleep = lambda _s: None      # 别真等 2+4 秒
+
+    def tearDown(self):
+        selfupdate.urllib.request.urlopen = self._real
+        selfupdate.time.sleep = self._sleep
+        self.tmp.cleanup()
+
+    def _fake(self, failures: int, payload: bytes = b"payload"):
+        calls = {"n": 0}
+
+        class Response:
+            def __init__(self):
+                self.headers = {"Content-Length": str(len(payload))}
+
+            def read(self, _limit):
+                return payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+        def urlopen(_request, timeout=0):
+            calls["n"] += 1
+            if calls["n"] <= failures:
+                raise OSError("Connection reset by peer")
+            return Response()
+
+        selfupdate.urllib.request.urlopen = urlopen
+        return calls
+
+    def test_a_dropped_connection_is_retried(self):
+        calls = self._fake(failures=2)
+        selfupdate.download("https://example.invalid/x.zip", self.dest)
+        self.assertEqual(calls["n"], 3)
+        self.assertEqual(self.dest.read_bytes(), b"payload")
+
+    def test_giving_up_after_three_tries(self):
+        calls = self._fake(failures=99)
+        with self.assertRaises(OSError):
+            selfupdate.download("https://example.invalid/x.zip", self.dest)
+        self.assertEqual(calls["n"], 3)
+
+
 class TestPatchUrl(unittest.TestCase):
     """下载地址按版本号拼，**不问接口**。
 

@@ -958,8 +958,9 @@ class Api:
         if not latest:
             return {"ok": False,
                     "message": "问不到 GitHub。可能是断网，也可能是 GitHub 临时限流"
-                               "（未登录的接口每小时只给 60 次）—— 过一会儿再试，"
-                               "不影响你现在用。"}
+                               "（未登录的接口每小时只给 60 次）。"
+                               "如果你用代理/加速器，确认它开着（要开「系统代理」）。"
+                               "过一会儿再试，不影响你现在用。"}
         update.write_cache(latest)
         has_new = update.is_newer(latest, VERSION)
         return {"ok": True, "current": VERSION, "latest": latest, "has_new": has_new,
@@ -986,7 +987,9 @@ class Api:
             return {"ok": False, "message": "没配更新源（设置 → 界面与更新）"}
         latest = update.fetch_latest(repo)
         if not latest:
-            return {"ok": False, "message": "问不到 GitHub（断网或临时限流），过会儿再试"}
+            return {"ok": False,
+                    "message": "问不到 GitHub（断网或临时限流）。"
+                               "如果你用代理/加速器，确认它开着；过会儿再试。"}
         # 地址按版本号拼，不问接口 —— 见 selfupdate.patch_url 的注释
         url = selfupdate.patch_url(repo, latest)
 
