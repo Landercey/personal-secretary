@@ -1553,6 +1553,28 @@ class Api:
         os.startfile(str(folder))
         return {"ok": True, "path": str(folder)}
 
+    @tracked
+    def export_ical(self) -> dict:
+        """把写了时间的待办导出成 .ics，手机日历双击就能导入。
+
+        为什么不自动同步：那要接每个平台的账号，还要处理冲突，
+        对一个本地小工具来说代价太大 —— 导出一次、导进手机，够用了。
+        """
+        import datetime as dt
+
+        from ..runtime.config import default_data_dir
+        from ..sinks.ical import build
+
+        rows = [t for t in self.store.list_tasks("open", limit=2000)
+                if (t.due_at or "").strip()]
+        if not rows:
+            return {"ok": False, "message": "还没有写了时间的待办 —— 日历里放不下「没时间」的事"}
+        path = default_data_dir() / f"待办-{dt.date.today():%Y%m%d}.ics"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(build(rows), encoding="utf-8")
+        return {"ok": True, "path": str(path), "count": len(rows),
+                "message": f"已导出 {len(rows)} 条"}
+
     def open_url(self, url: str) -> dict:
         """用系统浏览器打开一个链接（目前只给「有新版本」那一行用）。
 

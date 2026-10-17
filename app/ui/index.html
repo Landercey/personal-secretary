@@ -1392,6 +1392,9 @@ function renderSection(sec, first) {
          <button class="block" data-restore>从这份备份恢复</button>
          <p class="hint" data-restoreresult>恢复会<b>替换现在的待办</b>（消息、废件箱、推送记录一起），
            但会先把现在这份另存一份；<b>config.toml 不动</b>。</p>
+         <button class="block" style="margin-top:10px" data-exportical>导出到手机日历（.ics）</button>
+         <p class="hint" data-icalresult>只导出<b>写了时间</b>的待办。
+           导完去「数据」文件夹双击那个 .ics，手机日历 / Outlook 会问你要不要导入。</p>
        </div>`
     : '';
   return `<details class="sec" data-section="${sec.name}"${open ? ' open' : ''}>
@@ -1611,6 +1614,23 @@ function drawSettings() {
         box.style.color = ok ? '' : 'var(--overdue)';
       }
       if (ok) refresh();
+    };
+  });
+  $('detailInner').querySelectorAll('[data-exportical]').forEach(b => {
+    b.onclick = async () => {
+      const box = b.parentElement.querySelector('[data-icalresult]');
+      b.disabled = true;
+      b.textContent = '正在导出…';
+      const res = await call('export_ical');
+      b.disabled = false;
+      b.textContent = '导出到手机日历（.ics）';
+      const ok = res && res.ok;
+      if (box) {
+        box.innerHTML = ok
+          ? `✅ ${esc(res.message)}：<b>${esc(res.path)}</b>`
+          : `⚠️ ${esc((res && res.message) || '没成功')}`;
+        box.style.color = ok ? '' : 'var(--overdue)';
+      }
     };
   });
   $('detailInner').querySelectorAll('[data-loadgroups]').forEach(b => {
