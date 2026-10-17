@@ -31,6 +31,18 @@ def allow(store, cap: int) -> bool:
     return used(store) < cap
 
 
+def blocked_by_quiet(now: datetime | None = None) -> bool:
+    """现在是不是免打扰时段（默认 23:00–07:30）—— 这时候别自动重启 QQ。
+
+    为什么单独拦一道：半夜掉线时自动重连，用户既看不见、也帮不上忙，
+    却实实在在多了一次登录（风控看的就是"这个号一天登几次"）。
+    天亮以后主循环还在转，会自己接上，不用谁去点。
+    """
+    from .scheduler import in_quiet_hours
+
+    return in_quiet_hours(now or datetime.now())
+
+
 def note(store) -> int:
     """记一次，返回今天一共用了几次。"""
     count = used(store) + 1

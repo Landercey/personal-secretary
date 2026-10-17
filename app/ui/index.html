@@ -151,6 +151,8 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
    别让人以为这条出错了。 */
 .meta .aipending { margin-left: 6px; font-size: 11px; color: var(--accent);
                    opacity: .85; animation: aipulse 1.6s ease-in-out infinite }
+.meta .conflict { margin-left: 6px; font-size: 11px; padding: 0 5px; border-radius: 4px;
+                  color: var(--overdue); border: 1px solid var(--overdue); opacity: .8 }
 @keyframes aipulse { 0%, 100% { opacity: .45 } 50% { opacity: 1 } }
 /* 批量条：选中几条之后浮在列表上方，处理完自动消失 */
 .bulkbar { display: flex; align-items: center; gap: 8px; padding: 8px 14px;
@@ -624,6 +626,7 @@ function renderList() {
         <div class="title">${esc(t.title)}</div>
         <div class="meta">
           <span class="due ${t.urgency}">${esc(t.due)}</span>
+          ${t.conflict ? '<span class="conflict" title="同一时间还有别的待办">时间撞车</span>' : ''}
           ${t.location ? `<i class="sep"></i><span>${esc(t.location)}</span>` : ''}
           ${t.source ? `<i class="sep"></i><span>${esc(t.source)}</span>` : ''}
           ${t.attachments ? `<span class="clip">📎${t.attachments}</span>` : ''}

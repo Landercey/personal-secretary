@@ -61,6 +61,14 @@ class TestTodayStats(Base):
 
 
 class TestUndo(Base):
+    def test_two_tasks_at_the_same_minute_are_flagged_as_a_clash(self):
+        """同一分钟排了两件事 —— 列表上要提醒一句，不然只能自己发现撞车。"""
+        self.store.save_drafts(self.message, [TaskDraft(title="开会", due_at="2026-10-18 13:30")])
+        self.store.save_drafts(self.message, [TaskDraft(title="交表", due_at="2026-10-18 13:30")])
+        self.store.save_drafts(self.message, [TaskDraft(title="跑步", due_at="2026-10-18 15:00")])
+        flags = {i["title"]: i["conflict"] for i in self.api().tasks("open")["items"]}
+        self.assertEqual(flags, {"开会": True, "交表": True, "跑步": False})
+
     def test_completing_one_can_be_undone(self):
         task = self.add("交作业")
         api = self.api()

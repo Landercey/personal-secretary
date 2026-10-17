@@ -136,6 +136,13 @@ class TestRestartBudget(Base):
             restart_budget.note(self.store)
         self.assertTrue(restart_budget.allow(self.store, 0))
 
+    def test_night_hours_block_auto_restart(self):
+        """半夜掉线不要自动重连：没人看，还白白多登一次（风控看的就是这个）。"""
+        from app.runtime import restart_budget
+
+        self.assertTrue(restart_budget.blocked_by_quiet(datetime(2026, 10, 17, 2, 0)))
+        self.assertFalse(restart_budget.blocked_by_quiet(datetime(2026, 10, 17, 12, 0)))
+
 
 class TestQuietHours(unittest.TestCase):
     def test_the_default_window_wraps_past_midnight(self):

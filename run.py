@@ -922,6 +922,16 @@ def run_deploy(store, pipeline, account: int) -> int:
                 from app.runtime import restart_budget
 
                 day_cap = int(config.get("qq", "restart_cap_per_day", 6) or 0)
+                # 夜里不自动重连：半夜没人看推送，多登一次只是多一分被风控的形状。
+                if restart_budget.blocked_by_quiet():
+                    if last_port_hint != "quiet":
+                        last_port_hint = "quiet"
+                        print("  · 现在是免打扰时段，先不自动重连 QQ ——"
+                              "天亮了会自己接上（想现在接就点「启动 QQ」）。")
+                        deploy.report("夜里先不自动重连，早上会自己接上", active=False)
+                    offline_since = time.time()
+                    time.sleep(2)
+                    continue
                 if not restart_budget.allow(store, day_cap):
                     if last_port_hint != "budget":
                         last_port_hint = "budget"

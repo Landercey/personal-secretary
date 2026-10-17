@@ -256,7 +256,17 @@ class Api:
         """
         rows = self.store.list_tasks(view, limit=500)
         self._revision += 1
-        return {"items": [self._task_dict(t) for t in rows], "revision": self._revision}
+        items = [self._task_dict(t) for t in rows]
+        # 「时间撞车」：同一天同一分钟有好几条 —— 多半是两件事排到一起了。
+        # 在这里算而不是每条查一次库：500 条 × 1 次查询会让列表卡住。
+        seen: dict[str, int] = {}
+        for item in items:
+            key = item["due_raw"]
+            if key:
+                seen[key] = seen.get(key, 0) + 1
+        for item in items:
+            item["conflict"] = bool(item["due_raw"]) and seen[item["due_raw"]] > 1
+        return {"items": items, "revision": self._revision}
 
     @staticmethod
     def _task_dict(task) -> dict:
