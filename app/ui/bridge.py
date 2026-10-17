@@ -311,6 +311,35 @@ class Api:
                 "keyword": str(keyword or ""), "view": view or "all"}
 
     @tracked
+    def backups(self) -> dict:
+        """有哪些自动备份可用（设置 → 数据保留 里那个下拉框）。"""
+        from ..runtime import backup
+
+        return {"items": backup.list_backups()}
+
+    @tracked
+    def restore_backup(self, name: str) -> dict:
+        """用一份自动备份覆盖现在的库。
+
+        恢复前**先把现在这份另存**（`before-restore-*.db`）—— 恢复本身也要能反悔。
+        只恢复数据库（待办/消息/废件箱/推送记录），**不动 config.toml**：
+        用户的密钥、群号、推送时间这些是"现在的配置"，拿旧备份盖掉才是帮倒忙。
+        """
+        from ..runtime import backup
+
+        path = backup.find(name)
+        if path is None:
+            return {"ok": False, "message": "没有这份备份（可能已经被清理了）"}
+        keep = backup.save_before_restore()
+        try:
+            self.store.restore_from(path)
+        except Exception as exc:
+            return {"ok": False, "message": f"恢复失败：{type(exc).__name__}: {exc}"}
+        self._revision += 1
+        where = f"，恢复前那份另存为 {keep.name}" if keep else ""
+        return {"ok": True, "message": f"已恢复到 {name}{where}。列表已经刷新。"}
+
+    @tracked
     def bulk(self, action: str, ids) -> dict:
         """批量操作：完成 / 归档 / 判误判。
 

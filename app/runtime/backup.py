@@ -73,3 +73,55 @@ def _prune(target_dir: Path) -> None:
                 old.unlink()
             except OSError:
                 pass
+
+
+def list_backups() -> list[dict]:
+    """有哪些备份可用（新的在前）。顺手报一下每份里有多少条待办，方便挑。"""
+    items: list[dict] = []
+    for path in sorted(folder().glob("secretary-*.db"), reverse=True):
+        stamp = path.stem.split("-", 1)[-1]
+        count = None
+        try:
+            con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            try:
+                count = int(con.execute("SELECT COUNT(*) FROM tasks").fetchone()[0])
+            finally:
+                con.close()
+        except sqlite3.Error:
+            count = None                      # 这份坏了，就别让人选它
+        items.append({"name": path.name,
+                      "at": f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}" if len(stamp) == 8 else stamp,
+                      "size_kb": max(1, path.stat().st_size // 1024),
+                      "tasks": count})
+    return items
+
+
+def find(name: str) -> Path | None:
+    """按名字找一份备份。只认 `secretary-YYYYMMDD.db` 这种形状（防路径穿越）。"""
+    text = str(name or "").strip()
+    if not text.startswith("secretary-") or not text.endswith(".db"):
+        return None
+    if "/" in text or "\\" in text or ".." in text:
+        return None
+    path = folder() / text
+    return path if path.is_file() else None
+
+
+def save_before_restore() -> Path | None:
+    """恢复之前先把**现在这份**另存一份 —— 恢复本身也要能反悔。"""
+    db = default_data_dir() / "secretary.db"
+    if not db.is_file():
+        return None
+    target_dir = folder()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    # 前缀不用 secretary-：这样它不会被"只留 7 份"的清理规则扫到
+    target = target_dir / f"before-restore-{stamp}.db"
+    src = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    dst = sqlite3.connect(target)
+    try:
+        src.backup(dst)
+    finally:
+        dst.close()
+        src.close()
+    return target

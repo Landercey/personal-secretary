@@ -1332,9 +1332,18 @@ function renderSection(sec, first) {
          <p class="hint" data-aitestresult>读的是<b>已经保存</b>的配置 —— 刚改完先点下面的「保存」再点这里。</p>
        </div>`
     : '';
+  // 「数据保留」那段多一个恢复入口：每天自动备份已经有，但没入口等于白备。
+  const restore = sec.name === 'store'
+    ? `<div class="acts" style="margin-top:10px">
+         <select class="block" data-backupsel><option>正在读备份列表…</option></select>
+         <button class="block" data-restore>从这份备份恢复</button>
+         <p class="hint" data-restoreresult>恢复会<b>替换现在的待办</b>（消息、废件箱、推送记录一起），
+           但会先把现在这份另存一份；<b>config.toml 不动</b>。</p>
+       </div>`
+    : '';
   return `<details class="sec" data-section="${sec.name}"${open ? ' open' : ''}>
       <summary>${esc(sec.title)}<i>${esc(sec.desc)}</i></summary>${
-      common.map(f => renderField(sec.name, f)).join('')}${tester}${aitest}${picker}${updater}${tail}</details>`;
+      common.map(f => renderField(sec.name, f)).join('')}${tester}${aitest}${restore}${picker}${updater}${tail}</details>`;
 }
 
 function activateTab(name) {
@@ -1482,6 +1491,45 @@ function drawSettings() {
   });
   // 「读取我加的群」：列表是后台问 QQ 要来的（界面开不了那个口子），
   // 这里只负责勾选和把结果写回群号那一格。
+  // 备份列表：画完面板再异步填（和"读取我加的群"一个套路）
+  const backupSel = $('detailInner').querySelector('[data-backupsel]');
+  if (backupSel) {
+    (async () => {
+      const res = await call('backups');
+      const rows = (res && res.items) || [];
+      if (!rows.length) {
+        backupSel.innerHTML = '<option>（还没有备份，明天这个时候再来）</option>';
+        return;
+      }
+      backupSel.innerHTML = rows.map(r =>
+        `<option value="${esc(r.name)}">${esc(r.at)}｜${r.tasks ?? '?'} 条待办｜${r.size_kb} KB</option>`
+      ).join('');
+    })();
+  }
+  $('detailInner').querySelectorAll('[data-restore]').forEach(b => {
+    b.onclick = async () => {
+      const sel = b.parentElement.querySelector('[data-backupsel]');
+      const name = sel && sel.value;
+      if (!name || !name.startsWith('secretary-')) { toast('先选一份备份'); return; }
+      // 这一步是覆盖数据，必须问一句；文案把"会先另存一份"也写上，用户才敢点
+      if (!window.confirm(`用 ${name} 覆盖现在的待办？\n\n` +
+                          '现在的待办/消息/废件箱会被替换成备份里那份。\n' +
+                          '（会先把现在这份另存为 before-restore-*.db，配置不动）')) return;
+      const box = b.parentElement.querySelector('[data-restoreresult]');
+      b.disabled = true;
+      b.textContent = '正在恢复…';
+      const res = await call('restore_backup', name);
+      b.disabled = false;
+      b.textContent = '从这份备份恢复';
+      const ok = res && res.ok;
+      if (box) {
+        box.innerHTML = `${ok ? '✅' : '⚠️'} ${esc((res && res.message) || '没成功')}`;
+        box.className = 'hint';
+        box.style.color = ok ? '' : 'var(--overdue)';
+      }
+      if (ok) refresh();
+    };
+  });
   $('detailInner').querySelectorAll('[data-loadgroups]').forEach(b => {
     b.onclick = async () => {
       const tip = b.parentElement.querySelector('[data-groupstip]');

@@ -72,6 +72,51 @@ class TestBackup(Base):
         self.assertEqual(len(left), backup.KEEP)
         self.assertNotIn("20261001", left[0].name)
 
+    def test_restore_puts_the_old_todos_back(self):
+        """恢复 = 把备份写回正在用的那个库（不换文件、不用重启）。"""
+        from app.runtime import backup
+
+        first = self.add("昨天的待办")
+        backup.run_daily()                       # 这时库里 1 条
+        self.add("今天新加的")
+        self.assertEqual(self.store.count_tasks("open"), 2)
+
+        path = backup.find("secretary-" + first.created_at[:10].replace("-", "") + ".db")
+        self.assertIsNotNone(path)
+        self.store.restore_from(path)
+        self.assertEqual(self.store.count_tasks("open"), 1, "恢复后应该只剩备份里那条")
+        self.assertEqual(self.store.list_tasks("open")[0].title, "昨天的待办")
+
+    def test_restore_never_touches_anything_outside_the_backup_folder(self):
+        """名字要卡死：`../secretary.db` 这种不能让它碰到真库。"""
+        from app.runtime import backup
+
+        for name in ("../secretary.db", "..\\secretary.db",
+                     "/etc/passwd", "config.toml", "secretary-99999999.db"):
+            with self.subTest(name=name):
+                self.assertIsNone(backup.find(name))
+
+    def test_the_list_says_how_many_todos_each_backup_has(self):
+        from app.runtime import backup
+
+        self.add("一条")
+        backup.run_daily()
+        items = backup.list_backups()
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["tasks"], 1)
+        self.assertTrue(items[0]["name"].startswith("secretary-"))
+
+    def test_a_copy_of_the_live_db_is_kept_before_restoring(self):
+        from app.runtime import backup
+
+        self.add("别丢")
+        keep = backup.save_before_restore()
+        self.assertIsNotNone(keep)
+        self.assertTrue(keep.name.startswith("before-restore-"))
+        self.assertGreater(keep.stat().st_size, 0)
+        # 它不该被"只留 7 份"的规则扫到（前缀不同）
+        self.assertNotIn(keep, list(backup.folder().glob("secretary-*.db")))
+
 
 class TestRestartBudget(Base):
     def test_the_daily_cap_holds_and_is_remembered(self):

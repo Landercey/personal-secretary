@@ -103,6 +103,14 @@ class TestWiring(unittest.TestCase):
             self.assertTrue(anchor in self.html, f"界面里找不到：{anchor}")
         self.assertTrue(hasattr(Api, "test_ai"))
 
+    def test_the_data_section_can_restore_a_backup(self):
+        """每天自动备份要有恢复入口 —— 没入口等于白备。"""
+        for anchor in ("data-backupsel", "data-restore", "call('backups')",
+                       "call('restore_backup'", "window.confirm"):
+            self.assertTrue(anchor in self.html, f"界面里找不到：{anchor}")
+        self.assertTrue(hasattr(Api, "backups"))
+        self.assertTrue(hasattr(Api, "restore_backup"))
+
     def test_suggestions_and_sync_notes_have_a_place_to_show(self):
         """「等时机到了才出现」的建议、和同步带回来的提醒，都得有地方显示。
 

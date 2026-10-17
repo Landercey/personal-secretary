@@ -627,6 +627,20 @@ class SqliteStore(Store):
                 " updated_at=? WHERE status='done' AND is_archived=0", (now_text(),))
             return int(cursor.rowcount or 0)
 
+    @_synchronized
+    def restore_from(self, source: Path) -> None:
+        """用一份备份**覆盖**当前库。
+
+        为什么不用"换文件 + 重启"：Windows 上文件被这条连接占着，换文件要退出程序；
+        而 sqlite 的 backup 接口能把备份**写进正在用的这个库**，后台那个进程下一次
+        查询看到的就是恢复后的数据，不用重启、不会因为文件占用失败。
+        """
+        backup = sqlite3.connect(f"file:{Path(source)}?mode=ro", uri=True)
+        try:
+            backup.backup(self.conn)
+        finally:
+            backup.close()
+
     # ------------------------------------------------------------------ meta
     @_synchronized
     def set_meta(self, key: str, value: str) -> None:
