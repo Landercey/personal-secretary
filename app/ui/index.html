@@ -203,14 +203,12 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
 .guide li.ok { color: var(--text-3) }
 .guide li.ok .mk { color: #16a34a }
 .guide li.todo .mk { color: var(--today) }
-/* 战报：累计五个数摆成一排，今天退成一行小字。
-   数字用等宽字形（tabular-nums），不然每次刷新位数一变就左右跳。 */
-.statgrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px }
-.stat { padding: 9px 11px; border-radius: 8px; background: #fafafb; border: 1px solid var(--line) }
-.stat b { display: block; font-size: 19px; font-weight: 600; letter-spacing: -.2px;
-          font-variant-numeric: tabular-nums; line-height: 1.25 }
-.stat i { display: block; font-style: normal; font-size: 11px; color: var(--text-3); margin-top: 2px }
-.statfoot { margin: 9px 0 0; font-size: 11.5px; color: var(--text-3); line-height: 1.7 }
+/* 战报：一行，不许抢待办的位置。累计在后面括号里，主次一眼分得清。
+   数字用等宽字形（tabular-nums），刷新时位数变化不会左右跳。 */
+.statline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px;
+            font-size: 12px; color: var(--text-2) }
+.statline b { font-weight: 600; font-variant-numeric: tabular-nums }
+.statline em { font-style: normal; font-size: 11px; color: var(--text-3) }
 .guide li .go { margin-left: auto; font-size: 11.5px; color: var(--accent) }
 
 /* 「时机到了才出现」的一句话建议：第一次推送成功后提示调推送时间 */
@@ -1406,6 +1404,13 @@ function renderSection(sec, first) {
          <button class="block" style="margin-top:10px" data-exportical>导出到手机日历（.ics）</button>
          <p class="hint" data-icalresult>只导出<b>写了时间</b>的待办。
            导完去「数据」文件夹双击那个 .ics，手机日历 / Outlook 会问你要不要导入。</p>
+         <button class="block" style="margin-top:10px" data-fullbackup>导出完整备份（库 + 配置 + 附件）</button>
+         <p class="hint" data-fullbackupmsg style="margin-bottom:0"></p>
+         <p class="hint" data-fullbackupresult>每天的自动备份<b>只有数据库</b>（待办、消息、废件箱、
+           推送记录、累计数据都在里面）；图片和文档在 <b>data\attachments</b>，要换电脑就点这个，
+           打成一个 zip 放进 <b>data\backups</b>，留最近 3 份。
+           <span data-attinfo></span><br>
+           ⚠️ 里面有 config.toml（推送地址、token），别随手发别人。</p>
        </div>`
     : '';
   return `<details class="sec" data-section="${sec.name}"${open ? ' open' : ''}>
@@ -1593,13 +1598,21 @@ function drawSettings() {
   if (backupSel) {
     (async () => {
       const res = await call('backups');
+      const att = (res && res.attachments) || {};
+      const info = $('detailInner').querySelector('[data-attinfo]');
+      if (info) {
+        info.innerHTML = att.count
+          ? `现在有 <b>${att.count}</b> 个附件（约 ${att.mb} MB）。`
+          : '现在没有附件。';
+      }
       const rows = (res && res.items) || [];
       if (!rows.length) {
         backupSel.innerHTML = '<option>（还没有备份，明天这个时候再来）</option>';
         return;
       }
       backupSel.innerHTML = rows.map(r =>
-        `<option value="${esc(r.name)}">${esc(r.at)}｜${r.tasks ?? '?'} 条待办｜${r.size_kb} KB</option>`
+        `<option value="${esc(r.name)}">${esc(r.at)}｜${r.tasks ?? '?'} 条待办｜${
+          r.messages ?? '?'} 条消息｜${r.size_kb} KB</option>`
       ).join('');
     })();
   }
@@ -1642,6 +1655,22 @@ function drawSettings() {
           : `⚠️ ${esc((res && res.message) || '没成功')}`;
         box.style.color = ok ? '' : 'var(--overdue)';
       }
+    };
+  });
+  $('detailInner').querySelectorAll('[data-fullbackup]').forEach(b => {
+    b.onclick = async () => {
+      const box = b.parentElement.querySelector('[data-fullbackupmsg]');
+      b.disabled = true;
+      b.textContent = '正在打包…（附件多的话要一会儿）';
+      const res = await call('full_backup');
+      b.disabled = false;
+      b.textContent = '导出完整备份（库 + 配置 + 附件）';
+      if (!box) return;
+      const ok = res && res.ok;
+      box.innerHTML = ok
+        ? `✅ ${esc(res.message)}：<b>${esc(res.path)}</b>`
+        : `⚠️ ${esc((res && res.message) || '没成功')}`;
+      box.style.color = ok ? '' : 'var(--overdue)';
     };
   });
   $('detailInner').querySelectorAll('[data-loadgroups]').forEach(b => {
@@ -2239,25 +2268,22 @@ async function renderGuide() {
 
   const parts = [];
 
-  // 战报：累计当主角（"这东西到底替我干了多少"），今天退成一行小字。
+  // 战报：**一行**。用户的原话是"做的太大了，待办才是主角" ——
+  // 这几格数据是旁证，不是主角，别让它占掉第一屏。
   const [stats, total] = await Promise.all([call('today_stats'), call('total_stats')]);
-  if (total && (total.received || total.kept || total.junk)) {
-    const num = n => Number(n || 0).toLocaleString('zh-CN');
-    const tile = (n, label) => `<div class="stat"><b>${num(n)}</b><i>${label}</i></div>`;
-    parts.push(`<div class="guide">
-        <p class="statfoot" style="margin:0 0 8px">累计${total.since ? `（从 ${esc(total.since)} 起）` : ''}${
-          total.merged ? ` · 有 ${num(total.merged)} 条待办被重复提到过` : ''}</p>
-        <div class="statgrid">
-          ${tile(total.received, '收到消息')}
-          ${tile(total.kept, '留下待办')}
-          ${tile(total.junk, '拦下闲聊/碎片')}
-          ${tile(total.done, '完成')}
-          ${tile(total.pushed, '推送次数')}
-        </div>
-        <p class="statfoot">今天：收到 ${num(stats && stats.received)} ·
-          留下 ${num(stats && stats.kept)} · 拦下 ${num(stats && stats.junk)}${
-          stats && stats.pushed ? ` · 推送 ${num(stats.pushed)} 次` : ''}</p>
-      </div>`);
+  const num = n => Number(n || 0).toLocaleString('zh-CN');
+  if ((total && (total.received || total.kept || total.junk))
+      || (stats && (stats.received || stats.kept || stats.junk))) {
+    parts.push(`<div class="guide tip"><div class="statline">
+        <span><em>今天</em> 收到 <b>${num(stats && stats.received)}</b>
+          · 留下 <b>${num(stats && stats.kept)}</b>
+          · 拦下 <b>${num(stats && stats.junk)}</b></span>
+        <span><em>累计</em> 收到 <b>${num(total && total.received)}</b>
+          · 留下 <b>${num(total && total.kept)}</b>
+          · 拦下 <b>${num(total && total.junk)}</b>
+          · 完成 <b>${num(total && total.done)}</b>
+          <em>${total && total.since ? `（${esc(total.since).slice(5)} 起）` : ''}</em></span>
+      </div></div>`);
   }
 
   // 启动自检的结果：库坏了/盘满了/进了安全模式/配置读坏了。

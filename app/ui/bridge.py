@@ -328,7 +328,22 @@ class Api:
         """有哪些自动备份可用（设置 → 数据保留 里那个下拉框）。"""
         from ..runtime import backup
 
-        return {"items": backup.list_backups()}
+        return {"items": backup.list_backups(),
+                # 附件不在每天的库里（在 data/attachments/）—— 摆出来，
+                # 用户才知道"光恢复库、图还在不在"。
+                "attachments": backup.attachments_summary()}
+
+    @tracked
+    def full_backup(self) -> dict:
+        """导出一份完整备份（库 + 配置 + 附件）。返回 zip 在哪。"""
+        from ..runtime import backup
+
+        path = backup.full_backup()
+        if path is None:
+            return {"ok": False, "message": "没能导出（库读不到？看看磁盘还剩多少）"}
+        mb = max(1, round(path.stat().st_size / 1048576))
+        return {"ok": True, "path": str(path), "mb": mb,
+                "message": f"完整备份打好了（{mb} MB）"}
 
     @tracked
     def restore_backup(self, name: str) -> dict:

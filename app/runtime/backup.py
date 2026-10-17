@@ -18,6 +18,7 @@ from pathlib import Path
 from .config import default_data_dir, default_root
 
 KEEP = 7                 # 留最近几份
+FULL_KEEP = 3            # 完整备份（带附件）留最近几份 —— 它可能有几百 MB
 
 
 def folder() -> Path:
@@ -73,6 +74,85 @@ def _prune(target_dir: Path) -> None:
                 old.unlink()
             except OSError:
                 pass
+    for old in sorted(target_dir.glob("完整备份-*.zip"))[:-FULL_KEEP]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+
+
+def attachments_summary() -> dict:
+    """附件有多少个、多大。界面上要能告诉用户"备份里到底包不包括这些图"。
+    """
+    from .config import attachments_dir
+
+    count = 0
+    size = 0
+    root = attachments_dir()
+    if root.is_dir():
+        for path in root.rglob("*"):
+            if path.is_file():
+                count += 1
+                try:
+                    size += path.stat().st_size
+                except OSError:
+                    pass
+    return {"count": count, "mb": round(size / 1048576, 1)}
+
+
+def full_backup() -> Path | None:
+    """把**全部**数据打成一个 zip：库 + 配置 + 附件。
+
+    为什么每天那份不够：那份只有库。图片、Word、PPT 都在 `data/attachments/`，
+    换了电脑或者整个文件夹删了，光有库那些待办点开也是"文件不在了"。
+    这个 zip 能直接拷走，换台机器解压就能用。
+
+    ⚠️ 里面有 config.toml（推送地址、token 都在里面），别随手发给别人。
+    """
+    import zipfile
+
+    from .config import attachments_dir
+
+    db = default_data_dir() / "secretary.db"
+    if not db.is_file():
+        return None
+    target_dir = folder()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    target = target_dir / f"完整备份-{stamp}.zip"
+    # 库先做一份一致快照（WAL 模式下直接读文件会漏掉还没落盘的部分）
+    snapshot = target_dir / f".snapshot-{stamp}.db"
+    try:
+        src = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        dst = sqlite3.connect(snapshot)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+        with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as bundle:
+            bundle.write(snapshot, "secretary.db")
+            config = default_root() / "config.toml"
+            if config.is_file():
+                bundle.write(config, "config.toml")
+            root = attachments_dir()
+            if root.is_dir():
+                for path in root.rglob("*"):
+                    if path.is_file():
+                        bundle.write(path, "attachments/" + str(path.relative_to(root)))
+    except Exception:
+        try:
+            target.unlink()
+        except OSError:
+            pass
+        return None
+    finally:
+        try:
+            snapshot.unlink()
+        except OSError:
+            pass
+    _prune(target_dir)
+    return target
 
 
 def list_backups() -> list[dict]:
@@ -81,10 +161,12 @@ def list_backups() -> list[dict]:
     for path in sorted(folder().glob("secretary-*.db"), reverse=True):
         stamp = path.stem.split("-", 1)[-1]
         count = None
+        messages = None
         try:
             con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
             try:
                 count = int(con.execute("SELECT COUNT(*) FROM tasks").fetchone()[0])
+                messages = int(con.execute("SELECT COUNT(*) FROM messages").fetchone()[0])
             finally:
                 con.close()
         except sqlite3.Error:
@@ -92,7 +174,7 @@ def list_backups() -> list[dict]:
         items.append({"name": path.name,
                       "at": f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}" if len(stamp) == 8 else stamp,
                       "size_kb": max(1, path.stat().st_size // 1024),
-                      "tasks": count})
+                      "tasks": count, "messages": messages})
     return items
 
 

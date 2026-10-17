@@ -182,7 +182,9 @@ class TestTimeParsing(unittest.TestCase):
         spaced = quick_parse.resolve_date("10 月 14 号")
         tight = quick_parse.resolve_date("10月14号")
         self.assertIsNotNone(spaced)
-        self.assertEqual(spaced[0], tight[0])
+        # 只比**日期**：没说几点时返回的是"现在"，两次调用差几微秒，
+        # 比完整时间会在跨微秒时偶尔红一次（2026-10-17 真闪过一次）。
+        self.assertEqual(spaced[0].date(), tight[0].date())
 
     def test_relative_day_and_clock(self):
         draft = quick_parse.parse_line("明天下午三点交作业")
