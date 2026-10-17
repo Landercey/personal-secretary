@@ -335,6 +335,43 @@ class TestQQSource(unittest.TestCase):
         self.assertIn("未启动", source.describe())
 
 
+class TestPortBusy(unittest.TestCase):
+    """端口被人占着时的那套行为（新用户反馈：一串"端口 18080 被占用" +
+    五分钟后又去"自动带号重启 QQ（第 1/3 次）"）。
+
+    两件事必须成立：
+      ① 同一个错误重复报时不要再回调 —— 否则五分钟刷二十行，把有用的日志顶没；
+      ② `port_busy()` 要能被外面看到，好让"掉线自救"闭嘴（重启 NapCat 治不了端口）。
+    """
+
+    def _source(self):
+        seen = []
+        source = QQSource(settings=QQSettings(enabled=True, group_ids=[GROUP]),
+                          on_status=seen.append)
+        return source, seen
+
+    def test_the_same_error_is_reported_once(self):
+        source, seen = self._source()
+        for _ in range(5):
+            source._set(running=False, error="端口 18080 被占用")
+        self.assertEqual(len(seen), 1, f"同一个错误报了 {len(seen)} 次")
+
+    def test_port_busy_flips_and_clears(self):
+        source, _seen = self._source()
+        self.assertFalse(source.port_busy())
+        source._set(running=False, port_busy=True, error="端口 18080 被占用")
+        self.assertTrue(source.port_busy())
+        source._set(running=True, port_busy=False, error="")
+        self.assertFalse(source.port_busy())
+
+    def test_a_changed_state_is_still_reported(self):
+        """去重只去"一模一样"的 —— 状态变了必须报，不然界面就停在旧状态上。"""
+        source, seen = self._source()
+        source._set(running=False, error="端口 18080 被占用")
+        source._set(running=True, error="")
+        self.assertEqual(len(seen), 2)
+
+
 class TestHelpers(unittest.TestCase):
     def test_ensure_token_generates_and_stable(self):
         token = ensure_token("")

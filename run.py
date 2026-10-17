@@ -427,7 +427,10 @@ def run_qq(store, pipeline) -> int:
             # 没有这个，界面左下角那个"11 个群"会一直显示得一切正常。
             heartbeat.beat(store, (
                 f"登录号 {state.get('self_id') or '?'}｜收到 {state.get('received', 0)}"
-                if state.get("connected") else "等 NapCat 连上来"),
+                if state.get("connected") else
+                # 绑不上端口时界面要看得见真正的原因，不能只说"等连上来" ——
+                # 新用户反馈里那句"后台：在跑（等扫码登录）"就是这么误导人的。
+                (state.get("error") or "等 NapCat 连上来")),
                 # 顺手把"加过哪些群"捎给界面 —— 它开不了跟 QQ 说话的口子，
                 # 只能这么把列表带过去（设置页要拿它做勾选）。
                 groups=source.groups())
@@ -627,6 +630,18 @@ def run_deploy(store, pipeline, account: int) -> int:
     if not source.start():
         print("接收端没起来，先别启动 NapCat。")
         return 1
+    # 端口是**异步**绑的：等它一下。绑不上就别去起 NapCat ——
+    # 它连不进来，只会干等五分钟、然后被"掉线自救"反复带号重启
+    # （新用户反馈里那串"端口 18080 被占用"+"自动带号重启（第 1/3 次）"就是这个）。
+    for _ in range(15):                       # 最多等 3 秒，正常情况下第一轮就过
+        if source.status().get("running") or source.port_busy():
+            break
+        time.sleep(0.2)
+    if source.port_busy():
+        print(f"  ⚠️ {source.status().get('error')}")
+        print("     关掉那一份之后再点「启动 QQ」就行（这一下没起 NapCat，不用担心）。")
+        deploy.report("端口被占用：关掉另一份程序再点启动", active=False)
+        return 1
     print(f"  接收端已监听 127.0.0.1:{port}")
 
     # ② 再起 NapCat
@@ -652,6 +667,7 @@ def run_deploy(store, pipeline, account: int) -> int:
     last_line = ""
     repaired = 0
     qr_fallback = False
+    last_port_hint = ""          # "端口被占着"这句只打一次，别每次循环都刷
     # 掉线自救用的两个状态：从什么时候开始连不上、已经自动重启过几次
     offline_since: float | None = None
     auto_restarts = 0
@@ -709,6 +725,21 @@ def run_deploy(store, pipeline, account: int) -> int:
                 offline_since = None
                 auto_restarts = 0            # 连上过就重新给满额
             else:
+                # 端口被别人占着 = 收消息的"耳朵"根本没开，跟登录态一点关系都没有。
+                # 这时候去重启 NapCat 只会白白多登几次（QQ 会风控），而且永远好不了。
+                # 新用户反馈里那一串"端口 18080 被占用"后面跟着"自动带号重启（第 1/3 次）"
+                # 就是这么来的。
+                if source.port_busy():
+                    if last_port_hint != "busy":
+                        last_port_hint = "busy"
+                        print("  ⚠️ 收消息的端口被占着，先不自动重启 QQ ——"
+                              "关掉另一份程序（或上次没退干净的进程）就会自己接上。")
+                        deploy.report("端口被占用：关掉另一份程序就会自己接上",
+                                      active=False)
+                    offline_since = time.time()      # 别让"没连上"的计时继续攒
+                    time.sleep(2)
+                    continue
+                last_port_hint = ""
                 if offline_since is None:
                     offline_since = time.time()
                 minutes = int(config.get("qq", "auto_restart_minutes", 5) or 0)

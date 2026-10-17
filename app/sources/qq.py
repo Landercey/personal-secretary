@@ -786,9 +786,16 @@ class QQSource(Source):
     def status(self) -> dict[str, Any]:
         return dict(self._status)
 
+    def port_busy(self) -> bool:
+        """收消息那个端口是不是被别人占着（占着的话 NapCat 根本连不进来）。"""
+        return bool(self._status.get("port_busy"))
+
     def _set(self, **fields: Any) -> None:
+        before = dict(self._status)
         self._status.update(fields)
-        if self.on_status is not None:
+        # 状态没变就别回调：绑端口失败时每 15 秒重试一次，每次都打一行同样的
+        # "端口被占用"，五分钟就刷出二十行把真正有用的日志顶没了（新用户反馈）。
+        if self.on_status is not None and self._status != before:
             try:
                 self.on_status(self.status())
             except Exception:
@@ -969,18 +976,25 @@ class QQSource(Source):
                 max_queue=1024,
                 process_request=self._reject_early,
             )
-            self._set(running=True, error="")
+            self._set(running=True, error="", port_busy=False)
             return True
         except OSError as exc:
-            self._set(running=False, error=(
-                f"端口 {self.settings.bind_port} 被占用"
-                f"（{exc.strerror or exc}），稍后自动重试"))
+            self._set(running=False, port_busy=True, error=(
+                f"端口 {self.settings.bind_port} 被占用 —— 多半是另开了一份程序"
+                f"（或上次的进程没退干净），关掉那一份就好"))
             return False
 
     async def _retry_bind(self, attempts: int = 20, interval: float = 15.0) -> None:
-        """绑不上就每 15 秒再试，最多 5 分钟。"""
-        for _ in range(attempts):
-            await asyncio.sleep(interval)
+        """绑不上就每 15 秒再试；头 5 分钟后降到每分钟一次，**一直试到成功为止**。
+
+        为什么不设"放弃"：占着端口的那个进程（另一份程序 / 开机自启的旧进程）随时
+        可能被关掉，关掉的下一刻这边就该自己接上 —— 让用户理解"重试五分钟就到了"
+        纯属添乱。日志那边只在状态变化时打一行，不会刷屏。
+        """
+        tries = 0
+        while not self._stopping and self._server is None:
+            await asyncio.sleep(interval if tries < attempts else 60.0)
+            tries += 1
             if self._stopping or self._server is not None:
                 return
             if await self._bind():
