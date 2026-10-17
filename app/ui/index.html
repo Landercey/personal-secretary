@@ -1234,9 +1234,18 @@ function renderSection(sec, first) {
          <p class="hint" data-updateresult>点一下问 GitHub 有没有新版。更新不碰配置和待办，也不用重新扫码。</p>
        </div>`
     : '';
+  // AI 段多一个「试一下」：填完地址/模型/密钥之后没法知道对不对 ——
+  // 要么干等群里来一条 40 字以上的长通知，要么盯着左下角那行状态猜。
+  // 这一下只发一句固定的话，不碰用户的待办，所以不需要先开「允许上传」。
+  const aitest = sec.name === 'ai'
+    ? `<div class="acts" style="margin-top:10px">
+         <button class="block" data-testai>试一下 AI 连接（发一句"收到"）</button>
+         <p class="hint" data-aitestresult>读的是<b>已经保存</b>的配置 —— 刚改完先点下面的「保存」再点这里。</p>
+       </div>`
+    : '';
   return `<details class="sec" data-section="${sec.name}"${open ? ' open' : ''}>
       <summary>${esc(sec.title)}<i>${esc(sec.desc)}</i></summary>${
-      common.map(f => renderField(sec.name, f)).join('')}${tester}${picker}${updater}${tail}</details>`;
+      common.map(f => renderField(sec.name, f)).join('')}${tester}${aitest}${picker}${updater}${tail}</details>`;
 }
 
 function activateTab(name) {
@@ -1361,6 +1370,25 @@ function drawSettings() {
         box.style.color = ok ? '' : 'var(--overdue)';
       }
       toast(ok ? '发出去了，看看手机' : '没发成功，看下面那行说明');
+    };
+  });
+  // 试 AI：和测试推送同样的套路 —— 结果写在按钮下面（模型名抄错、
+  // 免费模型改名、地址少个 /v1，这些字符串两秒就忘，得留在屏幕上）。
+  $('detailInner').querySelectorAll('[data-testai]').forEach(b => {
+    b.onclick = async () => {
+      const box = b.parentElement.querySelector('[data-aitestresult]');
+      b.disabled = true;
+      b.textContent = '正在问模型…';
+      const res = await call('test_ai');
+      b.disabled = false;
+      b.textContent = '试一下 AI 连接（发一句"收到"）';
+      const ok = res && res.ok;
+      if (box) {
+        box.innerHTML = `${ok ? '✅' : '⚠️'} ${esc((res && res.message) || '没反应，看看后台日志')}`;
+        box.className = 'hint';
+        box.style.color = ok ? '' : 'var(--overdue)';
+      }
+      toast(ok ? 'AI 通了' : '没通，看下面那行说明');
     };
   });
   // 「读取我加的群」：列表是后台问 QQ 要来的（界面开不了那个口子），

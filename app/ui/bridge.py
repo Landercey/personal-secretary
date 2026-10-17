@@ -874,6 +874,21 @@ class Api:
         return {"ok": True, "changed": changed, "path": str(config.path or "")}
 
     @tracked
+    def test_ai(self) -> dict:
+        """试一下 AI 通不通：发一句固定的话，看模型回不回、回得多快。
+
+        为什么需要：填完地址/模型/密钥的人没法知道对不对，只能干等一条长消息
+        （最短也要等到群里发一条 40 字以上的通知）。模型名抄错、"免费模型改名了"、
+        地址少了 /v1 —— 都是点这一下就看得出来的事。
+
+        发出去的是**一句固定的话**，不是用户内容，所以不用先打开「允许上传」；
+        通了之后还会提醒他"开关没全开的话，现在其实还没在用"。
+        """
+        from ..runtime.ai_probe import probe
+
+        return probe()
+
+    @tracked
     def test_push(self) -> dict:
         """发一条测试推送，看看地址到底通不通。
 

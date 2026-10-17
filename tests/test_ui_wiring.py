@@ -97,6 +97,12 @@ class TestWiring(unittest.TestCase):
         for anchor in ("btnCopyTask", "taskText", "copyText", "execCommand"):
             self.assertTrue(anchor in self.html, f"界面里找不到：{anchor}")
 
+    def test_the_ai_section_has_a_test_button(self):
+        """「试一下 AI 连接」：填完地址/模型/密钥得能当场验证，别等长通知。"""
+        for anchor in ("data-testai", "data-aitestresult", "call('test_ai')"):
+            self.assertTrue(anchor in self.html, f"界面里找不到：{anchor}")
+        self.assertTrue(hasattr(Api, "test_ai"))
+
     def test_suggestions_and_sync_notes_have_a_place_to_show(self):
         """「等时机到了才出现」的建议、和同步带回来的提醒，都得有地方显示。
 

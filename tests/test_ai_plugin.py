@@ -283,6 +283,72 @@ class TestAnswerParsing(Base):
         self.assertIsNone(AI._parse_due(None))
 
 
+class TestProbe(Base):
+    """设置页那个「试一下 AI 连接」：一句话告诉我通不通、模型名对不对。
+
+    以前填完地址只能干等一条 40 字以上的长通知才知道通不通；
+    模型名抄错、"免费模型改名了"、地址少了 /v1 都是常见坑。
+    """
+
+    def setUp(self):
+        super().setUp()
+        # 探针模块读的是**全局** config（和插件一样的写法），测试里换成这份临时的
+        from app.runtime import ai_probe
+
+        self._probe = ai_probe
+        self._old_probe_config = ai_probe.config
+        ai_probe.config = self.config
+
+    def tearDown(self):
+        self._probe.config = self._old_probe_config
+        super().tearDown()
+
+    def test_a_good_endpoint_completes(self):
+        from app.runtime.ai_probe import probe
+
+        self.turn_on()
+        FakeModel.answers = ["收到"]
+        result = probe(timeout=10)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["reply"], "收到")
+        self.assertIn("通了", result["message"])
+        self.assertGreaterEqual(result["ms"], 0)
+        # 测试用的请求只发一句固定的话，且限制输出长度
+        sent = FakeModel.requests[-1]["body"]
+        self.assertEqual(sent["max_tokens"], 16)
+        self.assertIn("收到", sent["messages"][0]["content"])
+
+    def test_a_missing_endpoint_says_so(self):
+        from app.runtime.ai_probe import probe
+
+        self.turn_on(base_url="")
+        result = probe(timeout=5)
+        self.assertFalse(result["ok"])
+        self.assertIn("接口地址", result["message"])
+
+    def test_a_wrong_model_name_shows_the_http_error(self):
+        from app.runtime.ai_probe import probe
+
+        self.turn_on()
+        FakeModel.status = 404
+        try:
+            result = probe(timeout=10)
+        finally:
+            FakeModel.status = 200
+        self.assertFalse(result["ok"])
+        self.assertIn("404", result["message"])
+
+    def test_it_warns_when_the_switches_are_still_off(self):
+        """通了 ≠ 在用：两个开关没开要说出来，省得他以为坏了。"""
+        from app.runtime.ai_probe import probe
+
+        self.turn_on(enabled=False)
+        FakeModel.answers = ["收到"]
+        result = probe(timeout=10)
+        self.assertTrue(result["ok"])
+        self.assertIn("开关", result["message"])
+
+
 class TestDegradation(Base):
     def test_http_error_keeps_the_rule_result_and_says_why(self):
         self.turn_on()
