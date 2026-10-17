@@ -785,9 +785,12 @@ def run_deploy(store, pipeline, account: int) -> int:
     # 先把上次没退干净的收掉，再起新的。
     # 启动器把 QQ 拉起来之后自己会退出，所以"停止后台"经常清不掉那一窝 QQ；
     # 它们留在后台抢同一个号的登录，表现就是"启动很久没反应/扫了码还是登不上"。
-    strays = deploy.stop_all(shell)
+    strays = deploy.stray_processes(shell)
     if strays:
-        print(f"  清掉了 {strays} 个上次残留的 QQ/NapCat 进程")
+        # 界面上得动起来：这一步要几百毫秒到几秒，什么都不显示又会被当成卡死。
+        deploy.report(f"正在清理上次残留的 QQ 进程（{len(strays)} 个）…", active=True)
+        deploy.stop_all(shell)
+        print(f"  清掉了 {len(strays)} 个上次残留的 QQ/NapCat 进程")
     deploy.write_onebot_config(shell, account, token, port)
 
     # ① 先起我们的接收端

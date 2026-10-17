@@ -543,21 +543,27 @@ def stray_processes(shell_dir: Path) -> list[int]:
 
 
 def stop_all(shell_dir: Path) -> int:
-    """把这个目录下的 NapCat / QQ 全部收掉，返回清掉了几个。"""
+    """把这个目录下的 NapCat / QQ 全部收掉，返回清掉了几个。
+
+    ⚠️ 必须**一次交一批**给 taskkill：一条一条调的话，每个都要等它真的退出，
+    实测 115 个进程要磨两分钟 —— 那就又变回"点了启动一直在等"。
+    """
     killed = 0
     for _ in range(3):                       # 有的 QQ 会 fork 出新进程，来两轮才干净
         pids = stray_processes(shell_dir)
         if not pids:
             break
-        for pid in pids:
+        for start in range(0, len(pids), 100):
+            args = ["taskkill", "/F", "/T"]
+            for pid in pids[start:start + 100]:
+                args += ["/PID", str(pid)]
             try:
-                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
-                               capture_output=True, timeout=20,
+                subprocess.run(args, capture_output=True, timeout=30,
                                creationflags=no_window_flags())
-                killed += 1
             except Exception:
                 pass
-        time.sleep(0.4)
+            killed += len(pids[start:start + 100])
+        time.sleep(0.8)
     return killed
 
 
