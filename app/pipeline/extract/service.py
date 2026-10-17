@@ -35,6 +35,10 @@ _READERS = {
     ".xmind": archive.read_xmind,
 }
 
+# 哪些格式读出来的换行是"排版折行"，该接回句子（跟截图 OCR 同一个毛病）。
+# 表格/压缩包**不接**：那里的换行是数据本身的分隔（一行一条）。
+UNFOLD_EXTS = {".docx", ".pdf", ".txt", ".md", ".markdown"}
+
 # 明确不做的格式，给一句"那该怎么办"。只说"不支持"，用户只能来问作者。
 UNSUPPORTED_HINTS = {
     ".rar": "压缩包只认 .zip —— .rar / .7z 的解压算法有版权，标准库做不了。"
@@ -122,8 +126,11 @@ def extract_text(path: str | Path) -> ExtractResult:
             text = _READERS[ext](target)
             if not text.strip():
                 return ExtractResult(method=f"stdlib{ext}", note="文件里没有文字内容")
-            return ExtractResult(text=text, method=f"stdlib{ext}", ok=True,
-                                 note="Python 标准库直接读取")
+            result = ExtractResult(text=text, method=f"stdlib{ext}", ok=True,
+                                   note="Python 标准库直接读取")
+            # Word 的换行是排版折出来的：一条通知会被拆成十几行
+            #（2026-10-17 实测：一份《安全教育》文档切出 9 条碎片待办）。
+            return _unfold_result(result) if ext in UNFOLD_EXTS else result
 
         if ext in LEGACY_OFFICE_EXTS:
             # 旧版 .doc/.ppt/.xls 是二进制格式，标准库解不开，
@@ -138,10 +145,12 @@ def extract_text(path: str | Path) -> ExtractResult:
             text = ooxml.read_plain(target)
             if not text.strip():
                 return ExtractResult(method="plain", note="文本文件是空的")
-            return ExtractResult(text=text, method="plain", ok=True, note="纯文本直接读取")
+            result = ExtractResult(text=text, method="plain", ok=True,
+                                   note="纯文本直接读取")
+            return _unfold_result(result) if ext in UNFOLD_EXTS else result
 
         if ext in PDF_EXTS:
-            return pdf.extract(target)
+            return _unfold_result(pdf.extract(target))
 
         if ext in IMAGE_EXTS:
             return _unfold_result(ocr.recognize(str(target)))

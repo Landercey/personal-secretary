@@ -636,7 +636,13 @@ def should_merge(lines: list[str], from_file: bool) -> bool:
         # 只有明确出现 ≥2 条能独立成立的待办，才认为它真是一份任务清单。
         # 实测：一份《实验报告要求.docx》4 行，按行切会切出
         # "字数不少于 2000 字""交到"这种垃圾。
-        return len(solid) < 2
+        if len(solid) < 2:
+            return True
+        # 再加一条：**立得住的行不过半**时也整份合成一条。
+        # 实测（2026-10-17）：一份《安全教育》通知 20 来行，只有 5 行"像待办"
+        # （其余是"点击去学习""微课学习："这种），按行切就出 9 条碎片。
+        # 真清单一一行一件事的话，占比不会低于一半。
+        return len(solid) * 2 < len(lines)
     if is_schedule_block(lines) and _TABLE_WORD.search("\n".join(lines)):
         # 标题里明写了"值班表/排班表/课表"——**这就是一张表**，别管每行能不能
         # 独立成立：那种表长这样"张三 周一 8:00-12:00"，摘掉时间只剩一个人名，

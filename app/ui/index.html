@@ -131,6 +131,12 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
 /* 废件箱里的：点勾没意义，但又不想让那一列空着不好看 */
 .tick.ghost { border-style: dashed; border-color: #e2e2e6; cursor: default }
 .tick.ghost:hover { border-color: #e2e2e6; background: none }
+/* 批量模式下的选择框（方形一点的勾，和"标记完成"的圆勾区分开） */
+.pick { width: 17px; height: 17px; flex: none; margin-top: 1.5px;
+        border: 1.6px solid #cfcfd4; border-radius: 5px; cursor: pointer;
+        transition: border-color .12s, background .12s }
+.pick:hover { border-color: var(--accent) }
+.pick.on { background: var(--accent); border-color: var(--accent) }
 
 .body { flex: 1; min-width: 0 }
 .title { font-size: 14px; line-height: 1.45; word-break: break-word }
@@ -146,6 +152,15 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
 .meta .aipending { margin-left: 6px; font-size: 11px; color: var(--accent);
                    opacity: .85; animation: aipulse 1.6s ease-in-out infinite }
 @keyframes aipulse { 0%, 100% { opacity: .45 } 50% { opacity: 1 } }
+/* 批量条：选中几条之后浮在列表上方，处理完自动消失 */
+.bulkbar { display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+           margin: 0 0 6px; background: var(--panel); border-radius: 10px;
+           border: 1px solid var(--line); font-size: 12.5px }
+.bulkbar span { flex: 1; color: var(--text-2) }
+/* 原始消息搜索结果：跟待办列表分开，标一下"这是原话" */
+#msgResults .row { opacity: .92 }
+#msgResults .msgtext { font-size: 12.5px; color: var(--text-2);
+                       margin-top: 2px; white-space: pre-wrap }
 /* 提醒力度的选项：一排能点的小胶囊，**可以点好几个**（一条待办提醒多次） */
 .chip { display: inline-block; margin: 2px 6px 2px 0; padding: 3px 9px;
         border: 1px solid var(--line); border-radius: 999px; font-size: 11.5px;
@@ -406,9 +421,19 @@ details.adv[open] > summary::before { content: "▾ " }
       <span class="sub" id="viewSub"></span>
       <span class="hint" id="viewHint"></span>
       <input id="q" type="search" placeholder="搜标题、正文、地点、原话…">
+      <button id="btnBulk" title="多选几条一起处理">批量</button>
     </div>
     <div id="guide"></div>
+    <div class="bulkbar" id="bulkbar" style="display:none">
+      <span id="bulkcount">已选 0 条</span>
+      <button data-bulk="done">完成</button>
+      <button data-bulk="archive">归档</button>
+      <button data-bulk="drop">不是待办</button>
+      <button id="bulkDone" style="display:none">全部归档</button>
+      <button id="bulkCancel">取消</button>
+    </div>
     <div class="list" id="list"></div>
+    <div id="msgResults"></div>
   </main>
 
   <section class="detail" id="detail">
@@ -459,6 +484,11 @@ let current = 'today';
 let items = [];
 let selected = null;
 let counts = {};
+/* 批量模式：一次处理好几条（用户 2026-10-17 时列表里 82 条未完成，一条条点太慢） */
+let bulkMode = false;
+let bulkChosen = new Set();
+/* 搜索时顺带搜"原始消息"的结果（不是待办，单独一块显示） */
+let msgHits = [];
 /* 每次刷新自增。异步返回时对不上号就丢掉 ——
    否则连点两个分组时，先发的请求如果后回来，会把内容盖成上一个分组的。 */
 let refreshToken = 0;
@@ -537,6 +567,8 @@ function renderNav() {
       current = a.dataset.view;
       selected = null;
       editing = false;
+      bulkMode = false;              // 换分组就退出多选，别把上一组的选中带过来
+      bulkChosen.clear();
       keyword = '';                 // 点分组 = 退出搜索
       viewHint = '';                // "今天没安排"那句也别赖着
       $('q').value = '';
@@ -557,9 +589,12 @@ function renderList() {
   }
   box.innerHTML = items.map(t => `
     <div class="row ${String(t.id) === String(selected) ? 'sel' : ''}" data-id="${esc(String(t.id))}">
-      ${t.junk
-        ? '<i class="tick ghost" title="这是废件箱里的"></i>'
-        : `<i class="tick" data-done="${t.id}" title="标记完成"></i>`}
+      ${bulkMode
+        ? `<i class="pick${bulkChosen.has(String(t.id)) ? ' on' : ''}"
+              title="选中这一条"></i>`
+        : (t.junk
+            ? '<i class="tick ghost" title="这是废件箱里的"></i>'
+            : `<i class="tick" data-done="${t.id}" title="标记完成"></i>`)}
       <div class="body">
         <div class="title">${esc(t.title)}</div>
         <div class="meta">
@@ -574,6 +609,14 @@ function renderList() {
 
   box.querySelectorAll('.row').forEach(row => {
     row.onclick = (e) => {
+      if (bulkMode) {
+        // 批量模式下点整行 = 选中/取消，而不是打开详情
+        const id = String(row.dataset.id);
+        if (bulkChosen.has(id)) bulkChosen.delete(id); else bulkChosen.add(id);
+        renderList();
+        renderBulkBar();
+        return;
+      }
       if (e.target.dataset.done) return;
       // 废件箱那条的 id 是字符串（"task-7" / "text-3"），待办是数字，
       // 所以统一按字符串找，别用 Number()。
@@ -593,6 +636,52 @@ function renderList() {
       if (res) { toast('已完成'); refresh(); }
     };
   });
+  renderMsgHits();
+  renderBulkBar();
+}
+
+/* 搜索时把"原始消息"也列出来：答案常常在群里那条原话里，
+   而我们提炼出来的标题不一定留着那个数字（"班长说截止几号"）。 */
+function renderMsgHits() {
+  const box = $('msgResults');
+  if (!msgHits.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="sub" style="margin:14px 2px 6px">
+      原始消息（${msgHits.length} 条）—— 不是待办，只是原文里有这个词</div>`
+    + msgHits.map(m => `
+      <div class="row">
+        <i class="tick ghost"></i>
+        <div class="body">
+          <div class="title">${esc(m.text)}</div>
+          <div class="meta">
+            <span>${esc(String(m.at || '').slice(5, 16))}</span>
+            ${m.source ? `<i class="sep"></i><span>${esc(m.source)}</span>` : ''}
+            ${m.sender ? `<i class="sep"></i><span>${esc(m.sender)}</span>` : ''}
+          </div>
+        </div>
+      </div>`).join('');
+}
+
+function renderBulkBar() {
+  const bar = $('bulkbar');
+  bar.style.display = bulkMode ? 'flex' : 'none';
+  $('btnBulk').classList.toggle('on', bulkMode);
+  if (!bulkMode) return;
+  $('bulkcount').textContent = `已选 ${bulkChosen.size} 条`;
+  // 「已完成」那一组多一个"全部归档"：40 条一条条点太慢
+  const all = $('bulkDone');
+  all.style.display = current === 'done' ? '' : 'none';
+  all.onclick = () => bulkAct('archive_done', []);
+}
+
+async function bulkAct(action, ids) {
+  const res = await call('bulk', action, ids);
+  if (!res || !res.ok) { toast((res && res.message) || '没成功'); return; }
+  toast(action === 'archive_done' ? `归档了 ${res.count} 条` : `处理了 ${res.count} 条`);
+  bulkMode = false;
+  bulkChosen.clear();
+  selected = null;
+  setPanel(null);
+  refresh();
 }
 
 /* ---------- 右侧面板的总开关 ---------- */
@@ -2020,7 +2109,9 @@ async function refresh() {
     const res = await load(['search', keyword, current]);
     if (mine !== refreshToken) return;      // 有人抢先刷新了，我这份作废
     items = (res && res.items) || [];
+    msgHits = (res && res.messages) || [];
   } else if (current === 'junk') {
+    msgHits = [];
     const res = await load(['dropped']);
     if (mine !== refreshToken) return;
     // 废件箱是**两样东西合起来的**：你标成误判的待办 + 被规则拦下的原文。
@@ -2034,6 +2125,7 @@ async function refresh() {
       attachments: 0, files: [], junk: true,
     }));
   } else {
+    msgHits = [];
     const res = await load(['tasks', current]);
     if (mine !== refreshToken) return;
     items = (res && res.items) || [];
@@ -2225,6 +2317,26 @@ window.addEventListener('pywebviewready', () => {
     renderPanel(true);
   };
   $('btnClose').onclick = closePanel;
+  // 批量模式：点一下进"多选"，选完点完成/归档/误判；再点一下退出
+  $('btnBulk').onclick = () => {
+    bulkMode = !bulkMode;
+    bulkChosen.clear();
+    if (bulkMode) { selected = null; setPanel(null); }
+    renderList();
+    renderBulkBar();
+  };
+  $('bulkCancel').onclick = () => {
+    bulkMode = false;
+    bulkChosen.clear();
+    renderList();
+    renderBulkBar();
+  };
+  $('bulkbar').querySelectorAll('[data-bulk]').forEach(b => {
+    b.onclick = () => {
+      if (!bulkChosen.size) { toast('先点几条选中'); return; }
+      bulkAct(b.dataset.bulk, [...bulkChosen]);
+    };
+  });
   $('btnSync').onclick = async (e) => {
     e.target.disabled = true;
     const res = await call('sync_now');

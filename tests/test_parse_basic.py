@@ -327,6 +327,36 @@ class TestProseDetection(unittest.TestCase):
         drafts = quick_parse.parse_text("买牛奶\n拿快递\n写作业", strict=False)
         self.assertEqual(len(drafts), 3)
 
+    def test_a_document_with_few_task_lines_becomes_one_draft(self):
+        """文件里"像待办的句子"不过半 → 整份合成一条（2026-10-17 实测的 9 条碎片）。
+
+        真清单一一行一件事，占比不会低于一半；通知/说明文档才会。
+        """
+        doc = "\n".join([
+            "成都理工大学 2026 级本科新生爱国主义、国防常识、安全教育",
+            "学校通过动画视频、在线试题等多媒体手段开展在线学习。",
+            "学习时间由 2026 年 10 月 10 日起，截止日期以另行通知为准。",
+            "请同学们注意学习考试截止时间，考试要求为 60 分及格。",
+            "1. 微信公众号搜索并关注平安成理公众号",
+            "2. 点击安全教育选项中的新生安全教育选项进入",
+            "3. 输入姓名和学号，点击登录",
+            "微课学习：点击进入课程学习视频，学习期间不可以快进。",
+            "试题学习，为各章节考试试题以及正确答案学习。",
+            "点击去考试后进入考试计划，考试时间为 40 分钟。",
+        ])
+        drafts = quick_parse.parse_text(doc, strict=True, from_file=True)
+        self.assertEqual(len(drafts), 1, [d.title for d in drafts])
+
+    def test_a_real_checklist_file_stays_split(self):
+        """反过来：一行一件事的清单文件不能被合成一条。"""
+        checklist = "\n".join([
+            "10月20日前交实验报告",
+            "10月21日前交课程论文",
+            "10月22日前把学生证交给班长",
+        ])
+        drafts = quick_parse.parse_text(checklist, strict=True, from_file=True)
+        self.assertEqual(len(drafts), 3, [d.title for d in drafts])
+
     def test_titled_numbered_block_becomes_one_draft(self):
         """「标题 + 编号子项」是**一份东西**，不是三件事。
 

@@ -94,6 +94,9 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         # 晚上 10 点才开 → 再推"今天的早报"就是纯打扰，不推。
         # 填 0 = 错过就永远不补。
         "catch_up_minutes": 120,
+        # 免打扰：这段时间**不发临期提醒**（汇总照发 —— 汇总时间是用户自己挑的）。
+        # 格式 "23:00-07:30"，留空 = 关掉。
+        "quiet_hours": "23:00-07:30",
         # 推送里带的原文片段长度。
         "quote_max_chars": 80,
         # AI 不可用时的原文保底长度。
@@ -205,6 +208,10 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         # ⚠️ 为什么进程活着也要重启：2026-10-16 那天早上网络抖了一下，登录态掉了，
         # NapCat 退回要二维码、每 2 分钟报一次错，但进程一直没退 —— 用户只能手动点。
         "auto_restart_minutes": 5,
+        # 一天最多自动带号重启几次 QQ（0 = 不限）。连上就重新给满额的话，
+        # 一天重启 5 次后台就是 15 次登录 —— QQ 侧看到的是"同一个号反复登录"，
+        # 那才是真容易被风控盯上的形状。
+        "restart_cap_per_day": 6,
         # ===== 安全阀 =====
         "max_text_chars": 3000,           # 单条消息最多留多少字，防超长轰炸
     },
@@ -336,6 +343,8 @@ KEY_COMMENTS: dict[str, str] = {
                   "#   标题按时间点自动定：中午前叫「今天要做的」，傍晚后叫「明天要留意的」。",
     "push.catch_up_minutes": "错过了还补推吗：开机比推送时间晚了多久以内，还补这一次。\n"
                              "#   填 0 = 错过就永远不补。",
+    "push.quiet_hours": "免打扰时段：这段时间不发临期提醒（汇总照发），默认 23:00-07:30。\n"
+                        "#   格式 23:00-07:30；留空 = 关掉。",
     "push.quote_max_chars": "推送里附带的原文片段长度（方便你看它为什么被判成待办）。",
     "push.fallback_text_chars": "AI 用不了时，推送原文的前多少字作为保底。",
     # [remind] 提醒力度
@@ -418,8 +427,9 @@ KEY_COMMENTS: dict[str, str] = {
                          "#   开了 AI 的话每条都要过一次模型，别设太大（开机时会卡）。",
     "qq.auto_restart_minutes": "连着这么多分钟没连上（而 NapCat 进程还活着）就自动\n"
                                "#   带号重启一次，重试快速登录（等于你手点「重新启动 QQ」）。\n"
-                               "#   默认 5 分钟；填 0 = 关掉，掉线了就等你自己点。\n"
-                               "#   最多自动试 3 次，之后只在界面上提醒你手动来。",
+                               "#   默认 5 分钟；填 0 = 关掉，掉线了就等你自己点。",
+    "qq.restart_cap_per_day": "一天最多自动重连几次 QQ，默认 6，填 0 = 不限。\n"
+                              "#   用完就不自动重启了 —— 反复登录才会被风控盯上。",
     "qq.max_text_chars": "单条消息最多保留多少字，防超长内容刷屏。",
     # [timetable] 课表插件
     "timetable.url": "课表订阅地址（iCal / .ics）。留空 = 不用这个。\n"
@@ -513,7 +523,7 @@ ADVANCED_KEYS: frozenset[str] = frozenset({
     # 补收的三个上限一般不用动（补几条、多久内、一次总共几条）。
     "qq.catch_up_count", "qq.catch_up_hours", "qq.catch_up_total",
     # 掉线自救的等待时长（默认 5 分钟）也不用动。
-    "qq.auto_restart_minutes",
+    "qq.auto_restart_minutes", "qq.restart_cap_per_day",
     "title.max_len", "title.min_meaningful_chars",
 })
 

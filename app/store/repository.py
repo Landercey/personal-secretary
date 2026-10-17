@@ -596,6 +596,37 @@ class SqliteStore(Store):
         ).fetchall()
         return [self._row_to_task(row) for row in rows]
 
+    @_synchronized
+    def search_messages(self, keyword: str, limit: int = 30) -> list[dict]:
+        """在**原始消息**里找（不是待办）。
+
+        为什么需要："上个月班长说的截止几号"这种问题，答案在群里那条原话里，
+        而我们提炼出来的标题不一定保留那个数字。messages 表里本来就存着全文。
+        """
+        word = str(keyword or "").strip()
+        if not word:
+            return []
+        rows = self.conn.execute(
+            "SELECT msg_id, source_kind, source_name, sender, sent_at, text"
+            " FROM messages WHERE text LIKE ?"
+            " ORDER BY sent_at DESC LIMIT ?",
+            (f"%{word}%", max(1, int(limit)))).fetchall()
+        return [{"msg_id": row["msg_id"], "kind": row["source_kind"],
+                 "source": row["source_name"], "sender": row["sender"],
+                 "at": row["sent_at"], "text": row["text"]} for row in rows]
+
+    @_synchronized
+    def archive_all_done(self) -> int:
+        """把「已完成」全部归档。返回归档了几条。
+
+        为什么需要：用户 2026-10-17 时列表里已经 40 条已完成，一条条点"归档"太慢。
+        """
+        with self.conn:
+            cursor = self.conn.execute(
+                "UPDATE tasks SET is_archived=1, archive_reason='批量归档已完成',"
+                " updated_at=? WHERE status='done' AND is_archived=0", (now_text(),))
+            return int(cursor.rowcount or 0)
+
     # ------------------------------------------------------------------ meta
     @_synchronized
     def set_meta(self, key: str, value: str) -> None:

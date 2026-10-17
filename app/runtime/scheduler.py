@@ -171,6 +171,36 @@ def parse_times(raw) -> list[str]:
     return sorted(set(out))
 
 
+def _minutes_of_day(text: str) -> int | None:
+    """“23:00” → 1380。写坏的返回 None（这一项就当没配）。"""
+    try:
+        hour, _, minute = str(text or "").replace("：", ":").partition(":")
+        value = int(hour) * 60 + int(minute or 0)
+    except (TypeError, ValueError):
+        return None
+    return value if 0 <= value < 24 * 60 else None
+
+
+def in_quiet_hours(moment: datetime, raw=None) -> bool:
+    """现在是不是免打扰时段（默认 23:00–07:30，两头留空 = 关掉）。
+
+    只压**临期提醒**，不压汇总 —— 汇总的时间是用户自己挑的，
+    他挑 7:00 发早报，程序不能因为"免打扰到 7:30"把早报吞了。
+    """
+    window = raw if raw is not None else config.get("push", "quiet_hours", "23:00-07:30")
+    text = str(window or "").strip()
+    if not text or "-" not in text:
+        return False
+    start_text, _, end_text = text.partition("-")
+    start, end = _minutes_of_day(start_text), _minutes_of_day(end_text)
+    if start is None or end is None or start == end:
+        return False
+    now = moment.hour * 60 + moment.minute
+    if start < end:                      # 同一天内，比如 12:00-13:30
+        return start <= now < end
+    return now >= start or now < end     # 跨午夜，比如 23:00-07:30
+
+
 def slot_title(moment: datetime) -> str:
     """按时间点决定这份汇总叫什么。
 
@@ -371,6 +401,11 @@ class Scheduler:
 
     def _deliver_due_reminders(self, moment: datetime) -> list[str]:
         """临期提醒：按每档配的提前量，单独推这一条。"""
+        if in_quiet_hours(moment):
+            # 免打扰时段：**只压临期提醒**，汇总照发（汇总时间是用户自己挑的）。
+            # 半夜 2 点"还有 3 分钟"对谁都没用 —— 那条待办本来就在列表里，
+            # 早上第一份汇总会带上它。
+            return []
         done: list[str] = []
         for task, minutes in due_reminders(self.store, moment):
             batch = f"remind:{task.task_id}:{minutes}"

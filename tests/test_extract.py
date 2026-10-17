@@ -158,6 +158,17 @@ class TestUnfoldOcrLines(unittest.TestCase):
             ExtractResult(text="从迷茫与焦\n虑，走到方向。", method="win_ocr", ok=True))
         self.assertEqual(result.text, "从迷茫与焦虑，走到方向。")
 
+    def test_word_and_pdf_text_is_unfolded_too(self):
+        """Word/PDF 里的换行也是排版折出来的 —— 跟截图 OCR 同一个毛病。
+
+        2026-10-17 实测：一份《安全教育》通知被切成 9 条碎片待办。
+        """
+        self.assertIn(".docx", service.UNFOLD_EXTS)
+        self.assertIn(".pdf", service.UNFOLD_EXTS)
+        # 表格/压缩包不能接：那里换行是数据本身的分隔
+        self.assertNotIn(".xlsx", service.UNFOLD_EXTS)
+        self.assertNotIn(".zip", service.UNFOLD_EXTS)
+
 
 class TestPlainText(unittest.TestCase):
     def setUp(self):

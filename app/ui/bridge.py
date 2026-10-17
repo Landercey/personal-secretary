@@ -298,8 +298,41 @@ class Api:
         下个月的全冒出来了。搜索框就在这个分组的标题旁边，预期是"筛这个列表"。
         """
         rows = self.store.search(keyword, view=view or "all", limit=200)
+        # 顺手把**原始消息**也搜一遍：用户记得的往往是原话
+        # （"班长说的截止几号"），提炼后的标题不一定留着那个数字。
+        # 原文搜索结果单独一组，不混进待办列表。
+        found = self.store.search_messages(keyword, limit=20)
         return {"items": [self._task_dict(t) for t in rows],
+                "messages": [
+                    {"at": item["at"], "source": item["source"],
+                     "kind": item["kind"], "sender": item["sender"],
+                     "text": " ".join(str(item["text"] or "").split())[:160]}
+                    for item in found],
                 "keyword": str(keyword or ""), "view": view or "all"}
+
+    @tracked
+    def bulk(self, action: str, ids) -> dict:
+        """批量操作：完成 / 归档 / 判误判。
+
+        为什么要它：用户 2026-10-17 时列表里 82 条未完成、40 条已完成，
+        一条条点太慢。`archive_done` 是"把已完成的全部归档"。
+        """
+        if action == "archive_done":
+            return {"ok": True, "count": self.store.archive_all_done()}
+        clean = [int(i) for i in (ids or []) if str(i).isdigit()]
+        if not clean:
+            return {"ok": False, "message": "没有选中任何一条"}
+        for task_id in clean:
+            if action == "done":
+                self.store.set_status(task_id, "done")
+            elif action == "archive":
+                self.store.archive(task_id, "批量归档")
+            elif action == "drop":
+                self.store.set_status(task_id, "dropped", "批量判成误判")
+            else:
+                return {"ok": False, "message": f"不认识的操作：{action}"}
+        self._revision += 1
+        return {"ok": True, "count": len(clean)}
 
     def counts(self) -> dict:
         """左侧导航上的数字。"""

@@ -793,12 +793,29 @@ def run_deploy(store, pipeline, account: int) -> int:
                     offline_since = time.time()
                 minutes = int(config.get("qq", "auto_restart_minutes", 5) or 0)
                 cap = AUTO_RESTART_MAX
+                # 每日总闸：连上就重新给满额的话，一天重启 5 次后台就是 15 次登录。
+                # QQ 侧看到的是"同一个号一天里反复登录" —— 那才容易被盯上。
+                from app.runtime import restart_budget
+
+                day_cap = int(config.get("qq", "restart_cap_per_day", 6) or 0)
+                if not restart_budget.allow(store, day_cap):
+                    if last_port_hint != "budget":
+                        last_port_hint = "budget"
+                        used_today = restart_budget.used(store)
+                        print(f"  ⚠️ 今天已经自动重连 {used_today} 次（上限 {day_cap}），"
+                              "先不自动重启了 —— 去看一眼手机上 QQ 有没有提示。")
+                        deploy.report("今天自动重连次数用完，等你自己确认", active=False)
+                    offline_since = time.time()
+                    time.sleep(2)
+                    continue
+                last_port_hint = ""
                 if deploy.should_restart_for_login(
                         time.time() - offline_since, minutes=minutes,
                         used=auto_restarts, cap=cap,
                         proc_alive=napcat is not None and napcat.poll() is None,
                         connected=False):
                     auto_restarts += 1
+                    restart_budget.note(store)
                     print(f"  ⚠️ 已经 {minutes} 分钟没连上（NapCat 还活着，多半是掉登录态了），"
                           f"自动带号重启一次重试快速登录"
                           f"（第 {auto_restarts}/{cap} 次）")
@@ -1081,6 +1098,13 @@ def main(argv: list[str] | None = None) -> int:
             "再解压一份出来还会变成两份程序抢同一个端口（就是\"端口被占用\"那个毛病）；\n"
             "杀毒软件也特别喜欢拦临时目录里的程序。"))
         return 1
+
+    # 每天第一次启动顺手备一份库和配置（用户丢过配置、丢过待办）。
+    # 放在这儿：所有入口都会经过 —— 界面、--serve、命令行都算。
+    # run_daily 自己吞异常，备份失败绝不拦启动。
+    from app.runtime import backup
+
+    backup.run_daily()
 
     # 关键文件缺了（多半被杀软吃了）：**弹框说清楚**，别让用户对着"双击没反应"发呆。
     # 放在自检后面：`--selftest` 自己会把缺什么列出来，命令行用户不需要弹框。
