@@ -98,7 +98,11 @@ def _wecom(title: str, body: str) -> tuple[dict[str, Any], str, tuple[str, ...]]
     会顺手粘进通用地址里 —— 以前会走"自定义地址"，发出去的报文形状不对，
     企业微信直接拒（errcode 93000），用户只看到"推送失败"。
     """
-    text = f"{title}\n{body}" if title else body
+    # 企业微信的 text 消息上限 2048 字节（一个汉字 3 字节），超了整条被拒。
+    # 专用通道早就按这个截断了，这里也得截 —— 不然一部长一点的汇总就发不出去。
+    from .wecom_bot import TEXT_LIMIT, fit_bytes
+
+    text = fit_bytes(f"{title}\n{body}" if title else body, TEXT_LIMIT)
     return {"msgtype": "text", "text": {"content": text}}, "errcode", ("0",)
 
 

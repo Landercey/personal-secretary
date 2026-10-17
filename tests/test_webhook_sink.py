@@ -110,6 +110,9 @@ class TestVendorDetection(unittest.TestCase):
         self.assertEqual(payload["msgtype"], "text")
         self.assertIn("正文", payload["text"]["content"])
         self.assertEqual((field, good), ("errcode", ("0",)))
+        # 2048 字节是硬上限，超了整条被拒 —— 长汇总必须截断
+        long_payload, _, _ = build("标题", "很长" * 2000)
+        self.assertLessEqual(len(long_payload["text"]["content"].encode("utf-8")), 2048)
 
         build = vendor_of("https://oapi.dingtalk.com/robot/send?access_token=x")[1]
         payload, field, good = build("标题", "正文")
