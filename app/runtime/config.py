@@ -552,6 +552,17 @@ ADVANCED_KEYS: frozenset[str] = frozenset({
     "title.max_len", "title.min_meaningful_chars",
 })
 
+# 整段都是"调参"的：小白模式下直接不显示（设置 → 右上角「高级」打开才出现）。
+# 判据只有一条：**不填也不影响第一次用**。数据保留（store）不算 —— 那里挂着
+# 备份和恢复的按钮，藏了等于把"数据能救回来"这件事藏了。
+ADVANCED_SECTIONS: frozenset[str] = frozenset({
+    "title",        # 标题截多长、最短几个字才算待办
+    "extract",      # OCR 引擎、PDF 最多几页、渲染倍率
+    "resource",     # 内存超过多少就不干活
+    "ui",           # 检查更新的来源和频率
+    "mail",         # 邮箱插件那一堆连接参数
+})
+
 # 由**程序自己管**的项：程序会把同样的值写进 NapCat 的配置文件里。
 # 用户在这边单方面改，两边就对不上，QQ 会**静默收不到消息** ——
 # 这是最讨厌的那种坏法（界面看着一切正常，就是没反应）。
@@ -829,7 +840,9 @@ class Config:
             })
         # 常用的排前面，高级的排后面 —— 界面上高级那几项要单独折叠起来
         keys.sort(key=lambda item: item["level"] == "advanced")
-        return {"name": section, "title": title, "desc": desc, "keys": keys}
+        return {"name": section, "title": title, "desc": desc, "keys": keys,
+                # 整段都是调参的：小白模式下连标题都不显示
+                "advanced": section in ADVANCED_SECTIONS}
 
     def set(self, section: str, key: str, value: Any) -> None:
         """改一项配置，并写回 config.toml。

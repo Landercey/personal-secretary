@@ -174,6 +174,15 @@ class TestSchema(unittest.TestCase):
             for section in group["sections"]:
                 self.assertTrue(section["title"])
 
+    def test_tuning_only_sections_are_marked_advanced(self):
+        """小白模式下这几段整段不显示 —— 不填也不影响第一次用。"""
+        by_name = {s["name"]: s for g in self.groups for s in g["sections"]}
+        for name in ("mail", "extract", "title", "resource", "ui"):
+            self.assertTrue(by_name[name].get("advanced"), name)
+        # 这四段必须留在常用里：推送、收消息、看懂了什么、数据保留（挂着备份按钮）
+        for name in ("wecom_bot", "push_webhook", "push", "qq", "parse", "ai", "store"):
+            self.assertFalse(by_name[name].get("advanced"), name)
+
     def test_kind_matches_the_default_value(self):
         self.assertEqual(self.fields["push.times"]["kind"], "list")
         self.assertEqual(self.fields["qq.group_ids"]["kind"], "list")

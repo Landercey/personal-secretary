@@ -354,6 +354,11 @@ details.sec[open] > summary::before { content: "⌄" }
 .field.check .hint { margin-top: 3px }
 
 /* 高级：默认收起。一屏塞 60 个框，用户分不清哪个能碰 */
+/* 小白/大佬的总开关：默认只看常用。整段都是调参的（OCR、邮箱连接、
+   内存阈值…）直接不画出来 —— 不是折叠，是不存在。 */
+.advtoggle { display: flex; align-items: center; gap: 7px; margin: 0 0 10px;
+             font-size: 12px; color: var(--text-3); cursor: pointer; user-select: none }
+.advtoggle input { width: 14px; height: 14px }
 details.adv { margin: 2px 0 10px; border-top: 1px dashed var(--line); padding-top: 4px }
 details.adv > summary {
   list-style: none; cursor: pointer; font-size: 12px; color: var(--text-3); padding: 5px 2px
@@ -533,6 +538,10 @@ let drawnPanel = null;      // 已经画出来的是哪个，避免 5 秒轮询�
 let schema = null;          // 后端给的配置清单（分组 → 段 → 项）
 let openSection = null;     // 要跳过去并展开的那一段
 let activeGroup = null;     // 设置面板当前在哪个分组标签页
+/* 小白 / 大佬的总开关。默认关：只画"不填就用不了"的那几项。
+   记在 localStorage 里 —— 大佬打开一次，以后每次都是打开的状态。 */
+let showAdvanced = false;
+try { showAdvanced = localStorage.getItem('showAdvanced') === '1'; } catch (e) {}
 let unlocked = new Set();   // 这一轮里被用户手动解锁的"程序管着"的项
 let riskDismissed = false;  // 这一轮先不弹风控（下次开程序还会弹）
 let guideStamp = '';
@@ -1349,7 +1358,8 @@ function renderSection(sec, first) {
   const open = openSection ? sec.name === openSection : first;
   // 高级项折进段底部的「高级」里，默认收起 ——
   // 一屏塞 60 个框，用户根本分不清哪个能碰、哪个碰了会出事。
-  const tail = advanced.length
+  // 小白模式下连这个折条都不画：要调参就把顶部「高级设置」打开。
+  const tail = advanced.length && showAdvanced
     ? `<details class="adv"><summary>高级（一般不用动）</summary>${
         advanced.map(f => renderField(sec.name, f)).join('')}</details>`
     : '';
@@ -1483,7 +1493,18 @@ function drawSettings() {
     return;
   }
 
-  const groups = schema.groups || [];
+  // 有人点「去设置」跳到邮箱/OCR 这种整段调参的段：先把高级打开，
+  // 否则跳过去是一片空白，看起来像没做这个功能。
+  if (openSection && !showAdvanced
+      && (schema.groups || []).some(g => g.sections.some(
+           s => s.name === openSection && s.advanced))) {
+    showAdvanced = true;
+    try { localStorage.setItem('showAdvanced', '1'); } catch (e) {}
+  }
+  // 小白模式：整段都是调参的那种（OCR / 邮箱连接 / 内存阈值）直接不画。
+  const groups = (schema.groups || [])
+    .map(g => ({ ...g, sections: g.sections.filter(s => showAdvanced || !s.advanced) }))
+    .filter(g => g.sections.length);
   const active = groups.some(g => g.name === activeGroup) ? activeGroup : (groups[0] || {}).name;
   const tabs = groups.map(g =>
     `<button class="tab ${g.name === active ? 'on' : ''}" data-g="${g.name}" title="${esc(g.desc)}">${
@@ -1503,6 +1524,8 @@ function drawSettings() {
     <div class="panelhead"><h2>设置</h2></div>
     <p class="savepath">${esc(schema.version || '')}｜改动写回：${esc(schema.path)}<br>
        保存后马上生效；极少数要重启后台的项，会单独提醒你。</p>
+    <label class="advtoggle"><input type="checkbox" id="advToggle"${
+      showAdvanced ? ' checked' : ''}> 显示高级设置（OCR、邮箱连接、内存阈值这些调参项）</label>
     <div class="tabs">${tabs}</div>
     ${panes}
     ${restartText ? `<div class="guide warn" id="restartWarn" style="margin-top:14px">
@@ -1520,6 +1543,11 @@ function drawSettings() {
 
   $('detailInner').querySelectorAll('.tab').forEach(b =>
     b.onclick = () => activateTab(b.dataset.g));
+  $('advToggle').onchange = (e) => {
+    showAdvanced = e.target.checked;
+    try { localStorage.setItem('showAdvanced', showAdvanced ? '1' : '0'); } catch (err) {}
+    renderPanel(true);          // 重画一次：藏起来的段和折条立刻消失/出现
+  };
   $('btnSave').onclick = saveSettings;
   // 测试推送：结果**写在这段里面**，不能只用 toast ——
   // 失败时对方会回一串错误码（errcode 310000 这种），toast 两秒就没了，
