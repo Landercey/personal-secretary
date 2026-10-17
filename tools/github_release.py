@@ -67,6 +67,10 @@ def call(method: str, url: str, data=None, content_type="application/json",
             with urllib.request.urlopen(request, timeout=600) as response:
                 text = response.read().decode("utf-8", "replace")
                 return json.loads(text) if text.strip().startswith(("{", "[")) else text
+        except urllib.error.HTTPError:
+            # 4xx/5xx 是**确定的答案**（比如"这个 tag 还没有 Release"是 404），
+            # 重试只会把 404 拖成 5 次 404，外面那个 except 永远等不到它。
+            raise
         except (urllib.error.URLError, OSError) as exc:   # 代理断流是常态
             last = exc
             print(f"    第 {attempt} 次失败：{type(exc).__name__}: {exc}")

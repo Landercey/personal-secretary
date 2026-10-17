@@ -5,8 +5,7 @@
 =====================================================================
   改补丁包的下载地址规律   → `patch_url()`（**按版本号拼**，不查接口 —— 见下面的注释）
   改下载的大小上限/超时    → `MAX_BYTES` / `download()`
-  改更新脚本干什么         → `updater_script()`（纯 ASCII 批处理，覆盖完自己删掉）
-  改"更新完还起不起后台"   → `updater_script(restart_receiver=...)` + bridge.install_update
+  改"谁来覆盖文件"         → `run_upgrader()`：跑那个一键升级包（它自己关旧版、覆盖、重开）
   改失败怎么办             → 脚本把日志写进 `update.log`，程序下次启动不静默
 
 =====================================================================
@@ -43,10 +42,6 @@ import urllib.request
 from http.client import HTTPException
 from pathlib import Path
 
-ZIP_NAME = "update.zip"
-LOG_NAME = "update.log"
-SCRIPT_NAME = "update.cmd"
-
 # 补丁包约 38 MB。给足余量的同时挡一下"下错东西"（下到 2 GB 的东西就别下了）。
 MAX_BYTES = 200 * 1024 * 1024
 
@@ -59,12 +54,24 @@ MAX_BYTES = 200 * 1024 * 1024
 # 版本号走 raw 文件那条路（不受限流），地址按规律拼，整条链路就不碰 API 了。
 PATCH_URL = ("https://github.com/{repo}/releases/download/v{version}/"
              "personal-secretary-v{version}-patch.zip")
+# 一键升级包：45 MB，双击就会"关旧版 → 覆盖 → 重开"。
+# 为什么不用以前那套"写个批处理、等 PID 退出再 tar"（2026-10-17 实测废掉）：
+# detached 起 cmd 时，`tasklist | find` 那个管道会**卡死**（find 一直等输入），
+# 结果就是：程序被关掉了、文件没换成、什么也没重开。升级包这条路实测能过。
+UPGRADE_URL = ("https://github.com/{repo}/releases/download/v{version}/"
+               "personal-secretary-v{version}-upgrade.exe")
 
 
 def patch_url(repo: str, version: str) -> str:
     """按版本号拼出补丁包的下载地址（不请求任何接口）。"""
     clean = str(version or "").strip().lstrip("vV")
     return PATCH_URL.format(repo=repo, version=clean)
+
+
+def upgrade_url(repo: str, version: str) -> str:
+    """一键升级包的下载地址（同样是按版本号拼，不查接口）。"""
+    clean = str(version or "").strip().lstrip("vV")
+    return UPGRADE_URL.format(repo=repo, version=clean)
 
 
 def download(url: str, dest: Path, timeout: float = 300.0,
@@ -101,54 +108,13 @@ def download(url: str, dest: Path, timeout: float = 300.0,
     return dest
 
 
-def updater_script(app_dir: Path, pid: int, restart_receiver: bool = False) -> Path:
-    """写更新脚本，返回它的路径（放在程序自己的目录里）。
+def run_upgrader(exe: Path, app_dir: Path) -> None:
+    """把一键升级包启动起来；调用方随后就该退出（它会关掉我们）。
 
-    `pid` 是**当前进程**（界面）的：脚本先等它消失再动手覆盖。
-    后台那个进程（`--serve`）得在调这个之前就停掉 —— 它是同一个 exe，
-    不停的话脚本会一直等下去。
+    为什么交给它做：覆盖程序文件这事要在"旧进程已经退出"之后 ——
+    自己等 PID、自己写批处理那条路在真实环境里卡死过（见 UPGRADE_URL 上面的注释）。
+    升级包这边是**在控制台窗口里跑**的（不 detached）：进度、失败原因用户都看得见，
+    失败时它还会停在那儿等回车，不会一闪就没。
     """
-    script = app_dir / SCRIPT_NAME
-    # 起来之后按顺序：先起后台（如果原来在跑），再开界面 ——
-    # 界面一起来就会去读心跳，后台先起来它才不会显示"后台没在跑"。
-    start_lines = ["for %%f in (*.exe) do start \"\" \"%%f\""]      # 界面
-    if restart_receiver:
-        start_lines.insert(0, "for %%f in (*.exe) do start \"\" \"%%f\" --serve")
-    script.write_text("\r\n".join([
-        "@echo off",
-        "cd /d \"%~dp0\"",
-        # 注释也必须是 ASCII —— 中文进了批处理就可能变乱码（单测盯着这一点）
-        "rem wait until the old app exits: a running exe cannot be overwritten",
-        ":wait",
-        f'tasklist /FI "PID eq {pid}" 2>nul | find "{pid}" >nul',
-        "if not errorlevel 1 (",
-        "  timeout /t 1 /nobreak >nul",
-        "  goto wait",
-        ")",
-        f'tar -xf "{ZIP_NAME}" -C "." > "{LOG_NAME}" 2>&1',
-        "if errorlevel 1 goto failed",
-        f'del "{ZIP_NAME}"',
-        f"echo OK >> \"{LOG_NAME}\"",
-        *start_lines,
-        "del \"%~f0\"",
-        "exit /b 0",
-        ":failed",
-        f'echo FAILED >> "{LOG_NAME}"',
-        "del \"%~f0\"",
-        "exit /b 1",
-        "",
-    ]), encoding="ascii", newline="")
-    return script
-
-
-def launch(script: Path) -> None:
-    """把脚本启动起来，然后调用方就该退出了。
-
-    用 DETACHED_PROCESS：它得**活得比我们久**（我们在等它把我们覆盖掉），
-    顺便也就没有窗口了（这条路和 CREATE_NO_WINDOW 不能一起用 ——
-    见 deploy.no_window_flags 的注释）。
-    """
-    subprocess.Popen(["cmd", "/c", str(script)], cwd=str(script.parent),
-                     creationflags=getattr(subprocess, "DETACHED_PROCESS", 0),
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, close_fds=True)
+    # console-ok：这个黑框**就是**升级的进度界面，故意留着的
+    subprocess.Popen([str(exe), "--dir", str(app_dir)], cwd=str(exe.parent))

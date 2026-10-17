@@ -971,16 +971,18 @@ class Api:
 
     @tracked
     def install_update(self) -> dict:
-        """一键更新：下补丁 → 写更新脚本 → 停后台 → 关自己，让脚本覆盖再打开。
+        """一键更新：下「一键升级包」→ 让它去关旧版、覆盖、重开。
 
-        **这个调用返回之后界面就该退出了**（脚本在等这个进程消失）。
+        **这个调用返回之后界面就该退出了**（升级包会先 taskkill 掉我们）。
         覆盖的只有 `私人秘书.exe` 和 `_internal/`，配置、待办、插件、
         下好的 QQ 都在别的文件夹里 —— 所以**不用重新扫码登录**。
-        """
-        import os
 
-        from ..runtime import heartbeat, selfupdate, update
-        from ..runtime.config import default_root
+        为什么不自己写批处理等 PID 再 tar（2026-10-17 实测）：detached 起 cmd 时
+        `tasklist | find` 那个管道会卡死 —— 程序被自己关了、文件没换成、也没重开。
+        升级包这条路由"打包—覆盖—重启"一次跑通，直接把活交给它。
+        """
+        from ..runtime import selfupdate, update
+        from ..runtime.config import default_data_dir, default_root
 
         repo = self._update_repo()
         if not repo:
@@ -990,33 +992,24 @@ class Api:
             return {"ok": False,
                     "message": "问不到 GitHub（断网或临时限流）。"
                                "如果你用代理/加速器，确认它开着；过会儿再试。"}
-        # 地址按版本号拼，不问接口 —— 见 selfupdate.patch_url 的注释
-        url = selfupdate.patch_url(repo, latest)
-
-        app_dir = default_root()
+        # 地址按版本号拼，不问接口 —— 见 selfupdate.upgrade_url 的注释
+        url = selfupdate.upgrade_url(repo, latest)
+        exe = default_data_dir() / "updates" / f"一键升级-v{latest}.exe"
+        exe.parent.mkdir(parents=True, exist_ok=True)
+        # 上次更新留下的那份（45 MB）顺手清掉，别一次一次攒在 data 里
+        for old in exe.parent.glob("一键升级-*.exe"):
+            old.unlink(missing_ok=True)
         try:
-            selfupdate.download(url, app_dir / selfupdate.ZIP_NAME)
+            selfupdate.download(url, exe)
         except Exception as exc:
-            return {"ok": False, "message": f"下载失败：{type(exc).__name__}: {exc}"}
-
-        # 后台是**同一个 exe** 在跑（--serve）。它不退，脚本会一直等 —— 先让它停，
-        # 顺便记下"原来在跑"，更新完再帮它起回来。
-        was_running = heartbeat.proc_alive()
-        if was_running:
-            heartbeat.request_stop()
-            for _ in range(40):                       # 最多等 20 秒
-                if not heartbeat.proc_alive():
-                    break
-                time.sleep(0.5)
-
-        script = selfupdate.updater_script(app_dir, os.getpid(),
-                                          restart_receiver=was_running)
+            return {"ok": False, "message": f"下载升级包失败：{type(exc).__name__}: {exc}"}
         try:
-            selfupdate.launch(script)
+            # 升级包自己会：关掉正在跑的 私人秘书 → 覆盖程序文件 → 重新打开。
+            selfupdate.run_upgrader(exe, default_root())
         except OSError as exc:
-            return {"ok": False, "message": f"起不来更新脚本：{exc}"}
-        return {"ok": True, "restart_receiver": was_running,
-                "message": "开始更新：程序会自己关掉，几秒后重新打开。"
+            return {"ok": False, "message": f"起不来升级包：{exc}"}
+        return {"ok": True, "restart_receiver": True,
+                "message": "开始更新：会弹一个升级窗口，它负责关掉旧版、覆盖、再打开。"
                            "配置和待办都不动，也不用重新扫码登录。"}
 
     def quit_app(self) -> dict:

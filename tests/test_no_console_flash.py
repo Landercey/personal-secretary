@@ -30,6 +30,7 @@ TARGETS = [ROOT / "run.py", *sorted((ROOT / "app").rglob("*.py"))]
 
 def scan(path: Path) -> tuple[list[int], int]:
     """返回 (没带 creationflags 的行号, 一共找到几处起进程)。"""
+    lines = path.read_text(encoding="utf-8").splitlines()
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     bad: list[int] = []
     total = 0
@@ -44,6 +45,12 @@ def scan(path: Path) -> tuple[list[int], int]:
             continue
         total += 1
         if "creationflags" not in {kw.arg for kw in node.keywords}:
+            # 有意留窗口的（升级包：进度和失败原因要给人看）在行尾写 console-ok
+            # 注释放调用上面一行也行（多行调用时注释会写在前面）
+            above = lines[max(0, node.lineno - 3):node.lineno]
+            snippet = "\n".join(above)
+            if "console-ok" in snippet:
+                continue
             bad.append(node.lineno)
     return bad, total
 

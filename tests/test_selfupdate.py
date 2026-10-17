@@ -96,36 +96,49 @@ class TestPatchUrl(unittest.TestCase):
         self.assertIn("/v0.9.9/", selfupdate.patch_url("o/r", "v0.9.9"))
 
 
-class TestUpdaterScript(unittest.TestCase):
+class TestUpgradeUrl(unittest.TestCase):
+    """一键更新下的是「一键升级包」，地址同样按版本号拼、不查接口。"""
+
+    def test_builds_the_upgrade_asset_url(self):
+        self.assertEqual(
+            selfupdate.upgrade_url("owner/repo", "0.3.4"),
+            "https://github.com/owner/repo/releases/download/v0.3.4/"
+            "personal-secretary-v0.3.4-upgrade.exe")
+
+    def test_tolerates_a_leading_v(self):
+        self.assertIn("upgrade.exe", selfupdate.upgrade_url("o/r", "v0.9.9"))
+
+
+class TestRunUpgrader(unittest.TestCase):
+    """更新交给升级包去做。
+
+    为什么不再自己写批处理等 PID 再 tar（2026-10-17 实测）：detached 起 cmd 时，
+    `tasklist | find` 那个管道会卡死 —— 程序被自己关了、文件没换成、也没重开。
+    """
+
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.dir = Path(self.tmp.name)
+        self._real = selfupdate.subprocess.Popen
+        self.calls = []
 
-    def text(self, **kwargs) -> str:
-        script = selfupdate.updater_script(self.dir, 4242, **kwargs)
-        # 用 ascii 读：不是纯 ASCII 就会在这儿炸
-        return script.read_text(encoding="ascii")
+        def fake_popen(args, **kwargs):
+            self.calls.append((args, kwargs))
+            return object()
 
-    def test_script_is_pure_ascii(self):
-        """批处理里出现中文就可能变乱码 —— 而这个脚本跑的时候没人能救场。"""
-        self.assertTrue(self.text(restart_receiver=True).isascii())
+        selfupdate.subprocess.Popen = fake_popen
+        self.addCleanup(setattr, selfupdate.subprocess, "Popen", self._real)
 
-    def test_order_wait_then_extract_then_start(self):
-        text = self.text(restart_receiver=False)
-        wait = text.index(":wait")
-        extract = text.index("tar -xf")
-        start = text.index('start ""')
-        self.assertLess(wait, extract, "得先等旧进程退出，否则 exe 覆盖不了")
-        self.assertLess(extract, start, "得先解压完再打开程序")
-        self.assertIn("PID eq 4242", text)
-        self.assertIn('cd /d "%~dp0"', text)        # 不写死路径（目录名里有中文）
+    def test_it_runs_the_package_against_the_install_folder(self):
+        exe = self.dir / "updates" / "一键升级-v9.9.9.exe"
+        app = self.dir / "私人秘书"
+        selfupdate.run_upgrader(exe, app)
 
-    def test_restarts_the_background_only_if_it_was_running(self):
-        self.assertNotIn("--serve", self.text(restart_receiver=False))
-        self.assertIn("--serve", self.text(restart_receiver=True))
-
-    def test_failure_is_recorded_not_silent(self):
-        text = self.text(restart_receiver=False)
-        self.assertIn(":failed", text)
-        self.assertIn("FAILED", text)               # 失败要留痕，别静默
+        args, kwargs = self.calls[0]
+        self.assertEqual(args[0], str(exe))
+        self.assertEqual(args[1], "--dir")
+        self.assertEqual(args[2], str(app))
+        # 不能 detached：升级窗口要把进度和失败原因显示给用户看
+        self.assertNotIn("DETACHED_PROCESS", {k.upper() for k in kwargs})
+        self.assertNotIn("creationflags", kwargs)

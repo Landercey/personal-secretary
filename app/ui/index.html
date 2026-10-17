@@ -1414,7 +1414,7 @@ function drawSettings() {
         if (!window.confirm('现在更新？程序会自己关掉，几秒后重新打开。\n' +
                             '配置、待办、下好的 QQ 都不会动，也不用重新扫码。')) return;
         btn.disabled = true;
-        btn.textContent = '正在下载…（约 38 MB，别关窗口）';
+        btn.textContent = '正在下载…（约 45 MB，别关窗口）';
         const done = await call('install_update');
         if (!done || !done.ok) {
           btn.disabled = false;
