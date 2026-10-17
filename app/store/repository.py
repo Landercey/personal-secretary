@@ -827,6 +827,16 @@ class SqliteStore(Store):
         return [dict(row) for row in rows]
 
     @_synchronized
+    def has_dropped(self, msg_id: str) -> bool:
+        """这条消息是不是已经在废件箱里有一笔了（别同一个文件记两遍）。"""
+        if not str(msg_id or "").strip():
+            return False
+        row = self.conn.execute(
+            "SELECT 1 FROM dropped_items WHERE msg_id=? LIMIT 1",
+            (str(msg_id),)).fetchone()
+        return row is not None
+
+    @_synchronized
     def get_dropped(self, drop_id: int) -> dict[str, Any] | None:
         """取废件箱里的一条（界面上点开那条详情用）。"""
         row = self.conn.execute(

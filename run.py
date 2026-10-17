@@ -202,6 +202,54 @@ def build(database: str | Path | None = None):
     return store, source, pipeline, sink, registry
 
 
+# 先发文件、后跟一句话的那条路：文件先"攥着"，等下一条字建出待办再挂上去。
+# 只放内存里：窗口就 60 秒，进程重启了也就这一次丢了（文件还在 messages 里）。
+PENDING_FILES: dict[tuple[str, str, str], tuple[float, "Message"]] = {}
+
+
+def _pending_key(message) -> tuple[str, str, str]:
+    return (str(message.source_kind or ""), str(message.source_name or ""),
+            str(message.sender or ""))
+
+
+def _remember_pending_files(message, window: int) -> None:
+    if window <= 0 or not message.attachments:
+        return
+    PENDING_FILES[_pending_key(message)] = (time.time(), message)
+
+
+def _take_pending_files(message, window: int):
+    """刚才有没有一条"只带文件、说不出事"的消息在等这条字。"""
+    if window <= 0:
+        return None
+    held = PENDING_FILES.pop(_pending_key(message), None)
+    if held is None:
+        return None
+    stamp, older = held
+    return older if time.time() - stamp <= window else None
+
+
+def _sweep_pending_files(store, window: int, force: bool = False) -> None:
+    """攥过期的（或进程要退了）：记进废件箱，让用户还能一键捡回来。"""
+    now = time.time()
+    for key, (stamp, held) in list(PENDING_FILES.items()):
+        if not force and now - stamp <= max(window, 0):
+            continue
+        PENDING_FILES.pop(key, None)
+        names = "、".join(a.name for a in held.attachments if getattr(a, "name", ""))
+        try:
+            # 这条消息可能已经因为"文字不像待办"进过废件箱了 ——
+            # 那就别再记一笔，同一个文件在废件箱里出现两遍只会更难找。
+            if store.has_dropped(held.msg_id):
+                continue
+            store.log_dropped_text(
+                f"[文件] {names}" + (f"\n{held.text[:120]}" if held.text else ""),
+                "文件：内容没被认成待办（点「这条其实有用」能连文件一起捡回来）",
+                held.source_kind, held.source_name, held.msg_id)
+        except Exception:
+            pass
+
+
 def ingest_message(store, pipeline, message, refiner=None) -> int:
     """一条标准消息 → 待办。返回新入库的条数。
 
@@ -229,11 +277,20 @@ def ingest_message(store, pipeline, message, refiner=None) -> int:
         # 不 await、不 wait —— 收消息那条线程一秒都不等它。
         refiner.submit(prepared, stored)
 
-    # 合并窗口：这条自己没解析出待办，但带着附件 ——
-    # 大概率是"上一条的补充材料"（先发一句"明天要交作业"，
-    # 紧接着发一张作业要求图）。挂到刚才那条上，别变成孤零零一条。
+    window = int(config.get("parse", "merge_window_seconds", 60) or 0)
+
+    # 合并窗口，两个方向都要管（用户 2026-10-17 报的："字和文件会分开发"）：
+    #
+    #   ① 字先发、文件后到：文件自己解析不出事 → 挂到刚才那条上（下面这段）。
+    #   ② 文件先发、字后到：文件先被"攥着"，等后面那条字建出待办再挂上去。
+    #      以前只做了 ①，文件先发的顺序就**整份丢了**（只留在消息表里）。
+    if stored and window > 0:
+        held = _take_pending_files(prepared, window)
+        if held is not None:
+            attached = store.attach_message_files(stored[0].task_id, held)
+            print(f"  ↳ 把刚才那份附件挂到「{stored[0].title}」（{attached} 个）")
+
     if not drafts and prepared.attachments:
-        window = int(config.get("parse", "merge_window_seconds", 60) or 0)
         recent = store.recent_task_for(prepared.source_kind, prepared.source_name,
                                        prepared.sender, window)
         if recent is not None:
@@ -242,6 +299,12 @@ def ingest_message(store, pipeline, message, refiner=None) -> int:
             store.purge_old_dropped()
             store.purge_old_attachments()
             return 0
+        # 没有"刚才那条"可挂：先攥着，等后面那句"这个明天要交"。
+        _remember_pending_files(prepared, window)
+
+    # 攥太久还没人来认领的：记进废件箱（点「这条其实有用」能连文件一起捡回来），
+    # 别让一份附件只在磁盘上躺着、界面上哪儿都找不到。
+    _sweep_pending_files(store, window)
 
     # 被闲聊过滤器挡下的
     skip_reason = prepared.raw.get("skip_reason")
@@ -501,6 +564,8 @@ def run_qq(store, pipeline) -> int:
         source.stop()
         if refiner is not None:
             refiner.stop()
+        # 还没等到"那句字"的附件记进废件箱，别让它只在磁盘上躺着
+        _sweep_pending_files(store, 0, force=True)
     print("  已停止。")
     return 0
 
@@ -847,6 +912,7 @@ def run_deploy(store, pipeline, account: int) -> int:
         source.stop()
         if refiner is not None:
             refiner.stop()
+        _sweep_pending_files(store, 0, force=True)
         # 连子进程一起收：真正的 QQ 是 NapCat 的子进程，光 terminate 启动器
         # 会留下一堆 QQ 在跑（占内存 + 锁着 napcat/ 目录）—— 见 deploy.stop_shell。
         if napcat is not None:
