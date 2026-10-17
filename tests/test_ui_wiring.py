@@ -111,6 +111,12 @@ class TestWiring(unittest.TestCase):
         self.assertTrue(hasattr(Api, "backups"))
         self.assertTrue(hasattr(Api, "restore_backup"))
 
+    def test_the_about_panel_says_official_and_free(self):
+        """关于页是"给买家看"的：正版免费、官方地址、构建签名。"""
+        for anchor in ("data-about", "call('about')", "官方构建", "免费开源"):
+            self.assertTrue(anchor in self.html, f"界面里找不到：{anchor}")
+        self.assertTrue(hasattr(Api, "about"))
+
     def test_suggestions_and_sync_notes_have_a_place_to_show(self):
         """「等时机到了才出现」的建议、和同步带回来的提醒，都得有地方显示。
 

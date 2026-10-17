@@ -1022,6 +1022,38 @@ class Api:
         return str(config.get("ui", "update_source", "") or "").strip()
 
     @tracked
+    def about(self) -> dict:
+        """「关于」面板要的东西：版本、构建签名、官方地址、数据在哪。
+
+        为什么要摆出来：开源之后一定有人打包去卖。这段话是**给买家看的** ——
+        他打开关于页就知道正版免费、签名对不对、数据在哪个文件夹。
+        """
+        import sys
+
+        from ..runtime.config import default_data_dir, default_root
+        from ..version import VERSION, version_text
+
+        root = default_root()
+        info = root / "build-info.txt"
+        built = ""
+        if info.is_file():
+            try:
+                built = info.read_text(encoding="utf-8", errors="replace").strip()
+            except OSError:
+                built = ""
+        signed = "签名" in built and "未签名" not in built
+        return {
+            "version": VERSION,
+            "version_text": version_text(root),
+            "build": built,
+            "signed": signed,
+            "repo": "https://github.com/Landercey/personal-secretary",
+            "data": str(default_data_dir()),
+            "root": str(root),
+            "frozen": bool(getattr(sys, "frozen", False)),
+        }
+
+    @tracked
     def check_update(self) -> dict:
         """手动问一次有没有新版本（左下角那次是后台自动的，这个是按钮点的）。
 

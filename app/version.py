@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-VERSION = "0.3.31"
+VERSION = "0.3.32"
 
 
 def version_text(root: Path | None = None) -> str:

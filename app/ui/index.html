@@ -445,6 +445,14 @@ details.adv[open] > summary::before { content: "▾ " }
 <div class="mask" id="riskMask">
   <div class="dialog">
     <h2>挂 QQ 之前，先把这件事想清楚</h2>
+    <!-- 防背锅的那段话放在最上面：倒卖者不会替我们说，只能让买家在这里看见。
+         只加文字、不加拦截 —— 提醒到就够了，不能把正版用户也挡在外面。 -->
+    <p style="background:var(--accent-bg);padding:9px 11px;border-radius:8px">
+      <b>先说清楚：这个软件是免费的、开源的。</b><br>
+      官方地址只有 <b>github.com/Landercey/personal-secretary</b>。
+      如果你是<b>花钱</b>从别人那里买的（"整合包""代配置""会员版"），
+      你被多收了一笔钱 —— 正版在这里免费下，还会自动更新。
+    </p>
     <p>这个程序要一直挂着你的 QQ 才能收消息。用哪个号，代价不一样 ——
        作者只能给你事实，不能给你保证：</p>
     <p><b>· 程序已经帮你降到最轻了。</b>它只收不发：不发言、不加好友、不拉群成员名单，
@@ -1323,6 +1331,12 @@ function renderSection(sec, first) {
          <p class="hint" data-updateresult>点一下问 GitHub 有没有新版。更新不碰配置和待办，也不用重新扫码。</p>
        </div>`
     : '';
+  // 关于：版本、构建签名、官方地址、数据在哪。给"花钱买到别人打包版"的人看的。
+  const about = sec.name === 'ui'
+    ? `<div class="acts" style="margin-top:10px">
+         <button class="block" data-about>关于（版本 / 来源 / 数据在哪）</button>
+       </div>`
+    : '';
   // AI 段多一个「试一下」：填完地址/模型/密钥之后没法知道对不对 ——
   // 要么干等群里来一条 40 字以上的长通知，要么盯着左下角那行状态猜。
   // 这一下只发一句固定的话，不碰用户的待办，所以不需要先开「允许上传」。
@@ -1343,7 +1357,7 @@ function renderSection(sec, first) {
     : '';
   return `<details class="sec" data-section="${sec.name}"${open ? ' open' : ''}>
       <summary>${esc(sec.title)}<i>${esc(sec.desc)}</i></summary>${
-      common.map(f => renderField(sec.name, f)).join('')}${tester}${aitest}${restore}${picker}${updater}${tail}</details>`;
+      common.map(f => renderField(sec.name, f)).join('')}${tester}${aitest}${restore}${picker}${updater}${about}${tail}</details>`;
 }
 
 function activateTab(name) {
@@ -1490,6 +1504,29 @@ function drawSettings() {
     };
   });
   // 「读取我加的群」：列表是后台问 QQ 要来的（界面开不了那个口子），
+  // 关于：把"正版免费"和"数据在哪"摊开说 —— 倒卖者不会替我们说这句话。
+  $('detailInner').querySelectorAll('[data-about]').forEach(b => {
+    b.onclick = async () => {
+      const info = await call('about');
+      if (!info) return;
+      const badge = info.signed
+        ? '<span style="color:#16a34a">✓ 官方构建</span>'
+        : '<span style="color:var(--overdue)">⚠️ 未签名（源码/自建或他人重打包）</span>';
+      $('detailInner').innerHTML = `
+        <div class="panelhead"><h2>关于</h2></div>
+        <div class="kv"><b>版本</b><span>${esc(info.version_text)}</span></div>
+        <div class="kv"><b>构建</b><span>${esc(info.build || '（源码运行）')}</span></div>
+        <div class="kv"><b>来源</b><span>${badge}</span></div>
+        <div class="kv"><b>官方</b><span>${esc(info.repo)}<br>
+          <b>本软件免费开源</b>；花钱从别人那里买到的，都是别人在卖免费的代码。</span></div>
+        <div class="kv"><b>数据</b><span style="word-break:break-all">${esc(info.data)}</span></div>
+        <div class="kv"><b>程序</b><span style="word-break:break-all">${esc(info.root)}</span></div>
+        <div class="acts"><button class="block" id="btnBackSettings">返回设置</button></div>
+        <p class="hint">待办库、配置、备份都在「数据」那个文件夹里 ——
+          换电脑时把整个文件夹拷走就行。</p>`;
+      $('btnBackSettings').onclick = () => { setPanel('settings'); renderPanel(true); };
+    };
+  });
   // 这里只负责勾选和把结果写回群号那一格。
   // 备份列表：画完面板再异步填（和"读取我加的群"一个套路）
   const backupSel = $('detailInner').querySelector('[data-backupsel]');

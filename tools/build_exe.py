@@ -430,6 +430,21 @@ def write_build_info() -> None:
     except (OSError, subprocess.SubprocessError):
         commit = ""
     text = f"v{VERSION}｜{stamp}｜提交 {commit or '未知'}"
+    # 构建签名：给"这是不是我发的版本"留一个可对账的凭据。
+    # 密钥只在我的机器上（环境变量），不进仓库 —— 源码自建出来的显示"未签名"。
+    # 它防不了死心塌地改代码的人（本地校验永远能被绕过），但能做到两件事：
+    #   ① 买家在「关于」里能看出自己拿到的是不是官方包；
+    #   ② 反馈包里带签名，我一眼能认出"这不是我发的版本"。
+    key = os.environ.get("SECRETARY_SIGN_KEY", "").strip()
+    if key:
+        import hashlib
+        import hmac
+
+        digest = hmac.new(key.encode("utf-8"), text.encode("utf-8"),
+                          hashlib.sha256).hexdigest()[:16]
+        text += f"｜签名 {digest}"
+    else:
+        text += "｜未签名（源码/自建）"
     (DIST / "build-info.txt").write_text(text, encoding="utf-8")
     print(f"已记下这一版：{text}")
 
