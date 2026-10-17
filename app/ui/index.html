@@ -203,6 +203,14 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
 .guide li.ok { color: var(--text-3) }
 .guide li.ok .mk { color: #16a34a }
 .guide li.todo .mk { color: var(--today) }
+/* 战报：累计五个数摆成一排，今天退成一行小字。
+   数字用等宽字形（tabular-nums），不然每次刷新位数一变就左右跳。 */
+.statgrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px }
+.stat { padding: 9px 11px; border-radius: 8px; background: #fafafb; border: 1px solid var(--line) }
+.stat b { display: block; font-size: 19px; font-weight: 600; letter-spacing: -.2px;
+          font-variant-numeric: tabular-nums; line-height: 1.25 }
+.stat i { display: block; font-style: normal; font-size: 11px; color: var(--text-3); margin-top: 2px }
+.statfoot { margin: 9px 0 0; font-size: 11.5px; color: var(--text-3); line-height: 1.7 }
 .guide li .go { margin-left: auto; font-size: 11.5px; color: var(--accent) }
 
 /* 「时机到了才出现」的一句话建议：第一次推送成功后提示调推送时间 */
@@ -2231,15 +2239,25 @@ async function renderGuide() {
 
   const parts = [];
 
-  // 今天的战报：让用户看见"过滤真的在干活"（57 条群消息 → 6 条待办）。
-  const stats = await call('today_stats');
-  if (stats && (stats.received || stats.kept || stats.junk)) {
-    parts.push(`<div class="guide tip">
-        <span>今天收到 <b>${stats.received || 0}</b> 条 ·
-          留下 <b>${stats.kept || 0}</b> 条待办 ·
-          拦下 <b>${stats.junk || 0}</b> 条（闲聊/碎片）${
-          stats.merged ? ` · 合并重复 <b>${stats.merged}</b> 条` : ''}${
-          stats.pushed ? ` · 推送 <b>${stats.pushed}</b> 次` : ''}</span></div>`);
+  // 战报：累计当主角（"这东西到底替我干了多少"），今天退成一行小字。
+  const [stats, total] = await Promise.all([call('today_stats'), call('total_stats')]);
+  if (total && (total.received || total.kept || total.junk)) {
+    const num = n => Number(n || 0).toLocaleString('zh-CN');
+    const tile = (n, label) => `<div class="stat"><b>${num(n)}</b><i>${label}</i></div>`;
+    parts.push(`<div class="guide">
+        <p class="statfoot" style="margin:0 0 8px">累计${total.since ? `（从 ${esc(total.since)} 起）` : ''}${
+          total.merged ? ` · 有 ${num(total.merged)} 条待办被重复提到过` : ''}</p>
+        <div class="statgrid">
+          ${tile(total.received, '收到消息')}
+          ${tile(total.kept, '留下待办')}
+          ${tile(total.junk, '拦下闲聊/碎片')}
+          ${tile(total.done, '完成')}
+          ${tile(total.pushed, '推送次数')}
+        </div>
+        <p class="statfoot">今天：收到 ${num(stats && stats.received)} ·
+          留下 ${num(stats && stats.kept)} · 拦下 ${num(stats && stats.junk)}${
+          stats && stats.pushed ? ` · 推送 ${num(stats.pushed)} 次` : ''}</p>
+      </div>`);
   }
 
   // 启动自检的结果：库坏了/盘满了/进了安全模式/配置读坏了。

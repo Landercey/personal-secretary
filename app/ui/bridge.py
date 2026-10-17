@@ -401,6 +401,15 @@ class Api:
         """今天的战报：收到多少、收下多少、拦下多少。界面拿它证明"过滤真的在干活"。"""
         return self.store.today_stats()
 
+    @tracked
+    def total_stats(self) -> dict:
+        """装机以来的累计数 —— 回答"这东西到底替我省了多少事"。
+
+        和 today_stats 分开两个接口，是为了不把原来的返回形状改掉
+        （界面和测试都在读那几个键）。两个口径都由后端算，界面不自己加减。
+        """
+        return self.store.total_stats()
+
     def stats(self) -> dict:
         return self.store.stats()
 

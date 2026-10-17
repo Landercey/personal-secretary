@@ -66,6 +66,24 @@ class TestTodayStats(Base):
         self.store.log_dropped_text("收到", "闲聊", "qq_group", "某班群", "qq:10")
         self.assertEqual(self.store.today_stats()["junk"], 2)
 
+    def test_totals_are_not_limited_to_today(self):
+        """累计数要真的"累计"：昨天以前的消息也得算，不然越用越像刚开始。"""
+        self.store.save_message(self.message)
+        self.store.conn.execute(
+            "UPDATE messages SET created_at='2020-01-01 08:00:00'")
+        self.store.conn.commit()
+        self.assertEqual(self.store.today_stats()["received"], 0)
+        self.assertEqual(self.store.total_stats()["received"], 1)
+        self.assertEqual(self.store.total_stats()["since"], "2020-01-01")
+
+    def test_totals_count_a_task_once_no_matter_how_often_it_repeats(self):
+        """累计里的"重复提到过"数的是**待办条数**，不是重复次数。"""
+        task = self.add("交作业")
+        for _ in range(5):
+            self.store._merge_into(task.task_id, self.message,
+                                   TaskDraft(title="交作业"))
+        self.assertEqual(self.store.total_stats()["merged"], 1)
+
 
 class TestUndo(Base):
     def test_two_tasks_at_the_same_minute_are_flagged_as_a_clash(self):

@@ -669,6 +669,33 @@ class SqliteStore(Store):
         }
 
     @_synchronized
+    def total_stats(self) -> dict:
+        """装机以来的累计数 —— "这工具到底替我干了多少"。
+
+        口径和 today_stats 一样，只有两处不一样，都是为了数字站得住：
+        · `junk` 按消息编号数（同一条被重放不算多次）；
+        · `merged` 数的是"**多少条待办被重复提到过**"，不是事件行数 ——
+          事件表里还留着改版前重放记下的旧账，按行数会一路虚高。
+        """
+        def one(sql: str) -> int:
+            row = self.conn.execute(sql).fetchone()
+            return int(row[0] or 0) if row else 0
+
+        first = self.conn.execute(
+            "SELECT MIN(created_at) FROM messages WHERE created_at <> ''").fetchone()
+        return {
+            "received": one("SELECT COUNT(*) FROM messages"),
+            "kept": one("SELECT COUNT(*) FROM tasks"),
+            "junk": one("SELECT COUNT(DISTINCT CASE WHEN msg_id='' THEN drop_id"
+                        " ELSE msg_id END) FROM dropped_items"),
+            "merged": one("SELECT COUNT(DISTINCT task_id) FROM task_events"
+                          " WHERE kind='merged'"),
+            "pushed": one("SELECT COUNT(*) FROM push_records"),
+            "done": one("SELECT COUNT(*) FROM tasks WHERE status='done'"),
+            "since": str((first[0] if first else "") or "")[:10],
+        }
+
+    @_synchronized
     def restore_from(self, source: Path) -> None:
         """用一份备份**覆盖**当前库。
 
