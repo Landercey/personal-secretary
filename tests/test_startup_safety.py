@@ -54,6 +54,27 @@ class TestStartupCounter(StartupBase):
         self.assertGreaterEqual(third, startup.LIMIT,
                                 "连续没起来三次，下一次就该进安全模式")
 
+    def test_safe_mode_only_rescues_once(self):
+        """安全模式只救一次：进去之后清计数，下次必须正常启动。
+
+        不清的话它会**永远**停在安全模式（插件一直不加载），比原来的问题更糟。
+        另外 `--serve` 也必须清计数 —— 只在界面那条路清的话，
+        每开一次（后台 + 界面各加一次）就攒 1，三次就把正常启动误判成"打不开"。
+        """
+        from app.runtime import startup
+
+        for _ in range(startup.LIMIT):
+            startup.note_attempt()
+        startup.reset()                        # main() 进安全模式时做的事
+        self.assertEqual(startup.note_attempt(), 1, "下次启动要重新从 1 数")
+
+    def test_the_serve_path_also_clears_the_counter(self):
+        """`--serve` 起来之后也要 mark_ready（不然会误进安全模式）。"""
+        source = (ROOT / "run.py").read_text(encoding="utf-8")
+        # run_qq 和 run_deploy 各一处
+        self.assertGreaterEqual(source.count("startup.mark_ready()"), 3,
+                                "界面 + 两条接收端路径都要清")
+
 
 class TestPreflight(StartupBase):
     def test_a_healthy_db_produces_no_notes(self):

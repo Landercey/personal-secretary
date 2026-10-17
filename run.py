@@ -555,6 +555,10 @@ def run_qq(store, pipeline) -> int:
     if not source.start():
         print("启动失败，看上面的提示。")
         return 1
+    # 接收端起来了 = 能用了（`--serve` / `--qq` 都要清启动计数，见 run_deploy 里的说明）
+    from app.runtime import startup
+
+    startup.mark_ready()
 
     print("=" * 62)
     print("  私人秘书 · QQ 接收")
@@ -806,6 +810,12 @@ def run_deploy(store, pipeline, account: int) -> int:
         deploy.report("端口被占用：关掉另一份程序再点启动", active=False)
         return 1
     print(f"  接收端已监听 127.0.0.1:{port}")
+    # 到这儿算"能用了"：清启动计数。⚠️ `--serve` 也必须清 ——
+    # 只在界面那条路清的话，每开一次（后台+界面各加一次）就攒 1，
+    # 三次之后正常启动也会被误判成"打不开"进安全模式（2026-10-17 真踩到）。
+    from app.runtime import startup
+
+    startup.mark_ready()
 
     # ② 再起 NapCat
     #    窗口藏起来：不藏的话用户点一下「启动 QQ」就蹦出两个终端，
@@ -1236,6 +1246,9 @@ def main(argv: list[str] | None = None) -> int:
             "code": "APP.SAFE_MODE", "level": "warn",
             "message": "上次启动没走完，这次先进安全模式（暂时不加载插件）。"
                        "配置和待办都在，界面里能正常改设置。"})
+        # 安全模式只救一次：清掉计数，下次照常启动。
+        # 否则它会**永远**停在安全模式（插件一直不加载），比原来的问题更糟。
+        startup.reset()
 
     # 结构化日志：清掉 7 天前的，把"没人接的异常"也接住（崩了至少有编号和堆栈）。
     from app.runtime import logger

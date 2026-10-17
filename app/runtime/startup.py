@@ -53,6 +53,11 @@ def mark_ready() -> None:
         pass
 
 
+def reset() -> None:
+    """清掉计数（安全模式用：它只救一次，下次照常启动）。"""
+    mark_ready()
+
+
 def crash_count() -> int:
     try:
         return int(json.loads(_file().read_text(encoding="utf-8")).get("attempts") or 0)
