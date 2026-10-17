@@ -724,24 +724,27 @@ def run_setup(onekey_dir: Path, account: int, token: str, port: int,
     if deploy.is_installed(onekey_dir):
         print("已经装过了，跳过下载安装。")
     else:
+        # 这张包是用户自己放进来的（别人发他的离线包）还是我们下的？
+        # 他自己那份装完不删 —— 删了下次出问题又要重发一遍。
+        provided = deploy.local_onekey(onekey_dir) is not None
         try:
             zip_path = deploy.download_onekey(onekey_dir, notify)
             deploy.extract(zip_path, onekey_dir, notify)
             deploy.run_installer(onekey_dir, notify)
         except Exception as exc:
             print(f"\n安装失败：{exc}")
-            print("可以手动去 https://github.com/NapNeko/NapCatQQ/releases "
-                  "下载 OneKey 包，解压后双击 NapCatInstaller.exe。")
             deploy.report(f"安装失败：{exc}", active=False)
             return 1
         deploy.report("装好了，准备启动", active=False)
         # 装成功了就把安装包删掉 —— 那是个 300 MB 的 zip，留着纯占地方。
         # 用户要的是"全在一个文件夹里、删了就干净"，这个也算在里面。
         # 装失败时**不删**：留着重试就不用再下一次。
-        try:
-            zip_path.unlink()
-        except OSError:
-            pass
+        # ⚠️ 离线包（他自己放进来那份）不删。
+        if not provided:
+            try:
+                zip_path.unlink()
+            except OSError:
+                pass
 
     shell = deploy.find_shell_dir(onekey_dir)
     if shell is None:

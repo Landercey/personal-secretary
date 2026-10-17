@@ -144,10 +144,31 @@ def download(url: str, dest: Path,
     return dest
 
 
+def local_onekey(dest_dir: Path) -> Path | None:
+    """用户自己放进来的离线包（别人发他的那份）。没有就 None。"""
+    target = dest_dir / "NapCat.Shell.Windows.OneKey.zip"
+    try:
+        if target.is_file() and target.stat().st_size > 100 * 1024 \
+                and zipfile.is_zipfile(target):
+            return target
+    except OSError:
+        return None
+    return None
+
+
 def download_onekey(dest_dir: Path,
                     on_progress: Callable[[str], None] | None = None) -> Path:
-    """下一键包，直连失败就换镜像。"""
+    """下一键包，直连失败就换镜像。**本地已有就直接用，不联网。**
+
+    为什么先看本地：有些校园网/安全软件会拦 HTTPS，Python 这边报的是
+    `CERTIFICATE_VERIFY_FAILED`（浏览器却能打开，因为浏览器信了那个拦截证书）。
+    这时候唯一可靠的办法就是别人把包发过来 —— 放在这个目录里，程序就用它。
+    """
     target = dest_dir / "NapCat.Shell.Windows.OneKey.zip"
+    if local_onekey(dest_dir) is not None:
+        if on_progress:
+            on_progress("用你放在这儿的离线包（这次不联网）")
+        return target
     last_error: Exception | None = None
     for url in (ONEKEY_URL, *ONEKEY_MIRRORS):
         try:
@@ -156,7 +177,23 @@ def download_onekey(dest_dir: Path,
             last_error = exc
             if on_progress:
                 on_progress(f"  这个地址不行（{type(exc).__name__}），换下一个")
-    raise RuntimeError(f"三个地址都下不下来：{last_error}")
+    raise RuntimeError(f"三个地址都下不下来：{last_error}{_offline_hint(last_error, dest_dir)}")
+
+
+def _offline_hint(error: Exception | None, dest_dir: Path) -> str:
+    """下载失败时补一句"到底为什么、还能怎么办"。
+
+    证书错误和"被墙"是两回事：被墙是超时/重置，证书错误是**这台电脑不信任
+    对方的证书**（校园网网关、公司代理、安全软件做 HTTPS 拦截时最常见）。
+    不分开说，用户只会去换网络，换来换去还是这个错。
+    """
+    if "CERTIFICATE_VERIFY_FAILED" not in str(error or ""):
+        return ""
+    return ("\n  这是**证书**问题，不是被墙：这台电脑的 HTTPS 证书不被程序信任"
+            "（校园网网关 / 公司代理 / 安全软件做 HTTPS 拦截时最常见）。"
+            f"\n  办法一：让能装的人把整个 napcat 文件夹打包发你，解压到 {dest_dir.parent}"
+            f"\n  办法二：下载 OneKey 包，改名成 NapCat.Shell.Windows.OneKey.zip，"
+            f"放进 {dest_dir}，再点一次「启动 QQ」")
 
 
 def extract(zip_path: Path, dest_dir: Path,
@@ -526,7 +563,7 @@ def stray_processes(shell_dir: Path) -> list[int]:
     这台机器上实测堆到 23 个启动器 + 92 个 QQ.exe —— 每个都在抢同一个号的登录，
     表现就是"启动很久没反应""扫了码还是没登上""后台连不上"。
 
-    只按**路径**认（`<shell_dir>\...`），绝不按进程名杀：
+    只按**路径**认（`<shell_dir>\\...`），绝不按进程名杀：
     用户电脑上自己的 QQ 也叫 QQ.exe，按名字杀等于把人家的聊天软件关了。
     """
     try:
