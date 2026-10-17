@@ -214,6 +214,15 @@ def _load_one(path: Path, registry: Registry) -> PluginStatus:
         del registry.text_enrichers[text_before:]
         del registry.draft_enrichers[draft_before:]
         del registry.sources[source_before:]
+        # 坏插件只记一个状态、界面上看得到；完整堆栈还要进结构化日志，
+        # 不然社区问"为什么我的插件没加载"你只能让他去猜。
+        try:
+            from . import logger
+
+            logger.note("error", "PLUGIN.LOAD.FAILED", stage="plugin",
+                        detail=f"{name}: {exc}", exc=exc, plugin=name)
+        except Exception:
+            pass
         return PluginStatus(name, title, False, f"{type(exc).__name__}: {exc}",
                             section, description)
 

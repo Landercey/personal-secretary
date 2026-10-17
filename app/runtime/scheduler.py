@@ -397,6 +397,13 @@ class Scheduler:
                       f"（{len(tasks)} 条，另有 {len(everything) - len(tasks)} 条更远）")
         else:
             self._say(f"{slot.batch} 推送失败：{result.message}")
+            # 失败原因（钉钉的 errcode、企微的 45009…）要进结构化日志：
+            # 界面上那句话两秒就没了，用户来问时你手上得有原始的。
+            from . import logger
+
+            logger.note("error", "PUSH.DELIVER.FAILED", stage="output",
+                        detail=str(result.message), batch=slot.batch,
+                        channel=getattr(self.sink, "name", ""))
         return bool(result.ok)
 
     def _deliver_due_reminders(self, moment: datetime) -> list[str]:

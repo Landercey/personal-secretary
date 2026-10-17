@@ -425,6 +425,44 @@ def extract_preview(path: str) -> dict:
             "note": result.note or "", "method": result.method or ""}
 
 
+def replay_message(store, pipeline, msg_id: str) -> int:
+    """把库里某条消息重新跑一遍理解层，看现在会解析成什么。**不入库、不推送**。
+
+    为什么要有：用户说"这条为什么没收下/收错了"，光看日志只能看到结论；
+    拿原话重跑一遍，才能看见规则每一步的判断（也方便修完规则后验证）。
+    """
+    from app.contracts.models import Message
+
+    row = store.get_message(str(msg_id or "").strip())
+    if not row:
+        print(f"库里没有这条消息：{msg_id}")
+        print("提示：消息编号在「废件箱 → 详情」或反馈包里能看到（形如 qq:123456）。")
+        return 1
+    message = Message(
+        msg_id=str(row.get("msg_id") or ""),
+        source_kind=str(row.get("source_kind") or "manual"),
+        source_name=str(row.get("source_name") or ""),
+        sender=str(row.get("sender") or ""),
+        sent_at=str(row.get("sent_at") or ""),
+        text=str(row.get("text") or ""),
+        raw=dict(row.get("raw") or {}))
+    prepared, drafts = pipeline.run(message)
+    print(f"消息：{message.source_name}｜{message.sent_at}｜{message.sender}")
+    print(f"正文（前 200 字）：{message.text[:200]!r}")
+    skip = prepared.raw.get("skip_reason") or ""
+    print(f"闲聊过滤：{'拦下 —— ' + skip if skip else '放行'}")
+    for line in prepared.raw.get("dropped_lines", [])[:10]:
+        print(f"  丢弃的行：{line[:60]!r}")
+    for err in prepared.raw.get("enricher_errors", []):
+        print(f"  插件出错：{err}")
+    print(f"解析结果：{len(drafts)} 条")
+    for draft in drafts:
+        print(f"  · {draft.title!r}｜截止 {draft.due_at}｜地点 {draft.location}")
+    if not drafts:
+        print("（一条都没出：上面那几行说明了是哪一步拦下的）")
+    return 0
+
+
 def read_file(path: str) -> int:
     """只看一个文件能提出什么文字，不入库。
 
@@ -1146,6 +1184,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="在桌面创建快捷方式")
     parser.add_argument("--file", help="把一个文件（图片/Word/PPT/PDF）变成待办")
     parser.add_argument("--read", help="只看这个文件能提出什么字，不入库")
+    parser.add_argument("--replay", metavar="MSG_ID",
+                        help="把库里某条原始消息重新跑一遍理解层，看现在会解析成什么"
+                             "（不入库、不推送）。排查'这条为什么没收下'用。")
     parser.add_argument("--stats", action="store_true", help="看统计")
     parser.add_argument("--plugins", action="store_true",
                         help="看装了哪些插件（plugins/ 文件夹里的 .py）")
@@ -1195,6 +1236,21 @@ def main(argv: list[str] | None = None) -> int:
             "code": "APP.SAFE_MODE", "level": "warn",
             "message": "上次启动没走完，这次先进安全模式（暂时不加载插件）。"
                        "配置和待办都在，界面里能正常改设置。"})
+
+    # 结构化日志：清掉 7 天前的，把"没人接的异常"也接住（崩了至少有编号和堆栈）。
+    from app.runtime import logger
+
+    logger.purge_old()
+    for note in STARTUP_NOTES:
+        logger.note(note.get("level", "warn"), note.get("code", ""),
+                    stage="startup", detail=note.get("message", ""))
+    if not SAFE_MODE:
+        def _alert_crash(title: str, text: str) -> None:
+            from app.runtime.desktop import alert
+
+            alert(title, text)
+
+        logger.install_hooks(alert=_alert_crash)
 
     # 每天第一次启动顺手备一份库和配置（用户丢过配置、丢过待办）。
     # 放在自检**之后**：库坏了就不能拿坏库去覆盖今天的备份。
@@ -1294,6 +1350,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.read:
         return read_file(args.read)
+
+    if args.replay:
+        return replay_message(store, pipeline, args.replay)
 
     if args.file:
         target = Path(args.file)

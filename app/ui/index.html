@@ -2005,6 +2005,7 @@ function drawFeedbackPanel() {
     <div class="acts">
       <button class="primary block" id="fbMake">生成反馈</button>
       <button class="block" id="fbCopy" disabled>复制到剪贴板</button>
+      <button class="block" id="fbZip">保存诊断包（zip，带完整错误日志）</button>
     </div>
     <div id="fbOut"></div>
     <p class="hint" style="margin-top:12px">
@@ -2020,6 +2021,24 @@ function drawFeedbackPanel() {
     $('fbCopy').disabled = false;
     $('fbText').focus();
     $('fbText').select();
+  };
+  // 诊断包：文字反馈只有概况，这个 zip 里带**完整的结构化错误日志**（含堆栈）。
+  // 用户说"点了没反应"时，靠这份才查得动。
+  $('fbZip').onclick = async () => {
+    const btn = $('fbZip');
+    btn.disabled = true;
+    btn.textContent = '正在打包…';
+    const res = await call('diagnostics', $('fbNote') ? $('fbNote').value : '');
+    btn.disabled = false;
+    btn.textContent = '保存诊断包（zip，带完整错误日志）';
+    toast((res && res.message) || '打包失败');
+    if (res && res.ok) {
+      $('fbOut').innerHTML =
+        `<div class="field"><label>诊断包已保存</label>
+         <textarea id="fbText" rows="2" readonly>${esc(res.path)}</textarea>
+         <p class="hint">在 data 文件夹里。发给我之前自己扫一眼 —— 里面有群名和日志。</p></div>`;
+      $('fbCopy').disabled = false;
+    }
   };
   $('fbCopy').onclick = async () => {
     const box = $('fbText');

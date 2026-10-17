@@ -1617,6 +1617,27 @@ class Api:
             text += "\n\n—— 我想说的 ——\n" + str(note).strip()
         return {"ok": True, "text": text}
 
+    @tracked
+    def diagnostics(self, note: str = "") -> dict:
+        """打一个诊断包（zip），返回路径。
+
+        和"复制反馈"的区别：反馈是一段文字，只有概况；诊断包里有**结构化的
+        事件日志（带完整堆栈）**和脱敏后的配置 —— 用户说"点了没反应"时，
+        这份东西才答得上来。
+        """
+        from ..runtime import diagnostics
+
+        report = self.feedback_report(note)
+        plugins = "\n".join(
+            f"{item['title']}：{'正常' if item['ok'] else item['error']}"
+            for item in (self.plugins().get("items") or []))
+        try:
+            path = diagnostics.build(report.get("text") or "", plugins=plugins)
+        except Exception as exc:
+            return {"ok": False, "message": f"打包失败：{type(exc).__name__}: {exc}"}
+        return {"ok": True, "path": str(path),
+                "message": f"诊断包好了：{path.name}（在 data 文件夹里）"}
+
     # 暂存文件名长什么样："时间戳-内容指纹-原文件名"。
     # 存成一个固定形状是为了能**严格校验**：界面传回来的 token 直接拼路径，
     # 不校验的话一个 "../.." 就能读到别处的文件。

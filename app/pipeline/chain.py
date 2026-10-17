@@ -122,6 +122,14 @@ class Pipeline:
                 message.raw.setdefault("enricher_errors", []).append(
                     f"{getattr(enricher, 'name', '?')}: {type(exc).__name__}"
                 )
+                # 以前只记一个类型名（"ValueError"），排查时等于什么都没有。
+                # 现在完整堆栈进结构化日志，界面上仍然只有一句人话。
+                from ..runtime import logger
+
+                logger.note("error", "PLUGIN.RUN.FAILED", stage="understand",
+                            detail=f"{getattr(enricher, 'name', '?')}: {exc}",
+                            exc=exc, plugin=getattr(enricher, "name", "?"),
+                            msg_id=getattr(message, "msg_id", ""))
             if message.raw.get("skip_reason"):
                 break            # 被否决了，后面的零件不用跑
         return current
