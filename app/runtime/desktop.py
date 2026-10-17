@@ -70,6 +70,18 @@ def launcher(root: Path) -> tuple[Path | None, str]:
     """
     exe = frozen_exe()
     if exe is not None:
+        # exe 旁边要有 icon.json（打包时放的）：里面是**带内容指纹**的图标文件名。
+        # 为什么不用 "exe,0"：Windows 按路径缓存图标，exe 路径没变、只换了内容时，
+        # 桌面会继续显示上一版的图（用户报过两次"图标没变"）。
+        meta = exe.parent / "icon.json"
+        if meta.is_file():
+            try:
+                name = json.loads(meta.read_text(encoding="utf-8")).get("shortcut_icon")
+                ico = exe.parent / str(name or "")
+                if name and ico.is_file():
+                    return exe, str(ico)
+            except (OSError, ValueError):
+                pass
         return exe, f"{exe},0"
     return pythonw(), str(icon_path(root))
 

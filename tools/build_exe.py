@@ -158,6 +158,18 @@ def build() -> None:
     proc = subprocess.run(args, cwd=str(ROOT))
     if proc.returncode != 0:
         raise SystemExit(f"打包失败（PyInstaller 退出码 {proc.returncode}）")
+    # 图标单独放一份在 exe 旁边（带内容指纹的文件名）。
+    # Windows 按**路径**缓存图标：exe 路径没变、只换了内容时，桌面会继续显示旧图。
+    # 文件名一变，缓存必然失效 —— 见 desktop.launcher。
+    meta = ROOT / "assets" / "icon.json"
+    if meta.is_file():
+        import json
+        import shutil
+
+        name = json.loads(meta.read_text(encoding="utf-8")).get("shortcut_icon")
+        if name and (ROOT / "assets" / name).is_file():
+            shutil.copy2(meta, DIST / "icon.json")
+            shutil.copy2(ROOT / "assets" / name, DIST / name)
 
 
 def verify() -> None:
