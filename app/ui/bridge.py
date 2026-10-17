@@ -1323,6 +1323,25 @@ class Api:
                         or config.get("qq", "inbox_ids")
                         or config.get("qq", "receive_all"))
 
+        def has_scope() -> bool:
+            """真的选了要收什么吗。
+
+            ⚠️ 不能拿 `enabled` 当"选过了"：打开 QQ 接入只是把开关拨上去，
+            一个群都没勾的话消息照样一条不进 —— 清单却会打勾，用户以为成了。
+            """
+            return bool(config.get("qq", "group_ids")
+                        or config.get("qq", "private_ids")
+                        or config.get("qq", "inbox_ids")
+                        or config.get("qq", "receive_all")
+                        or config.get("qq", "receive_private_all"))
+
+        # 不用 QQ 的配置就别去碰心跳（有的调用方传的是个空壳 store）
+        receiver = heartbeat_state(self.store) if qq_in_use() else {}
+        # "启动 QQ"那一条要的是**真的登录上了**，不是"进程起来了"。
+        # 光起后台不扫码，消息一条也不会来，清单却会提前打勾。
+        logged_in = bool(receiver.get("alive")) and str(
+            receiver.get("detail") or "").startswith("登录号")
+
         checks = [
             {"key": "risk", "section": "risk", "label": "看过风控提示（小号还是大号）",
              "ok": bool(config.get("risk", "confirmed_secondary_account"))},
@@ -1341,16 +1360,16 @@ class Api:
                          "这个号要先用电脑上的 QQ 退出登录）",
                 "ok": bool(int(config.get("qq", "account", 0) or 0))}]
               if qq_in_use() else []),
-            {"key": "qq", "section": "qq", "label": "选了要收的群或私聊",
-             "ok": qq_in_use()},
-            # ⚠️ **这一步以前没有**（用户问"安装好的教程做了吗"时才发现的）：
-            # 配置填完 ≠ 能收到消息 —— 还得把后台起起来、扫码登录。
-            # 少了它，用户填完所有东西、清单一消失就不知道该干嘛了，
-            # 干等半天手机上什么都没有。
-            # 点它要跳到「📱 QQ 接收」那一栏（不是设置），所以带个 panel 标记。
+            # ⚠️ 顺序：**先启动扫码，再选群**。反过来的话用户会卡住 ——
+            # 「读取我加的群」要登录之后才读得到，先让他选群等于让他干瞪眼。
+            # 点登录那条要跳到「📱 QQ 接收」那一栏（不是设置），所以带个 panel 标记。
             *([{"key": "qq_login", "panel": "qq",
                 "label": "启动 QQ 并扫码登录（点这里）",
-                "ok": bool(heartbeat_state(self.store).get("alive"))}]
+                "ok": logged_in}]
+              if qq_in_use() else []),
+            *([{"key": "qq", "section": "qq",
+                "label": "选要收的群或私聊（登录后点「读取我加的群」；想全收就先勾「全部群」）",
+                "ok": has_scope()}]
               if qq_in_use() else []),
             # AI 不在这里列 —— 它是**可选**功能（默认关着也能正常用）。
             # 清单只放"不做就用不起来"的步骤；塞一个可选项进去，等于催用户
@@ -1358,6 +1377,10 @@ class Api:
         ]
         return {"checks": checks,
                 "done": all(item["ok"] for item in checks if not item.get("optional")),
+                # 全弄完之后界面还要说一句"接下来会发生什么"（以前是直接断崖），
+                # 顺便告诉他可以当场验一次推送。
+                "pushed_once": self._pushed_once(),
+                "push_times": list(config.get("push", "times", []) or []),
                 # 启动自检的问题（库坏了/盘满了/安全模式）+ 配置读坏了的说明。
                 # 界面把它们当提示条显示 —— 不然用户只会觉得"设置怎么全没了"。
                 "notes": (list(self._notices)

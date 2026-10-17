@@ -2240,7 +2240,10 @@ async function drawPluginsPanel() {
 }
 
 function wireGuide() {
-  $('guide').querySelectorAll('li.todo, .guide.tip').forEach(node => {
+  // 只绑**带跳转目标**的提示条。战报那一行也是 .guide.tip，
+  // 以前点它会被当成"去设置"，结果跳进一个没选中的设置页。
+  $('guide').querySelectorAll('li.todo, .guide.tip[data-section], .guide.tip[data-panel]')
+    .forEach(node => {
     node.onclick = () => {
       // 有的步骤不在设置里 —— 比如"启动 QQ 并扫码"，那一栏是独立面板
       const target = node.dataset.panel;
@@ -2254,6 +2257,14 @@ function wireGuide() {
       openSettings(section);
     };
   });
+  const test = $('guideTestPush');
+  if (test) test.onclick = async (e) => {
+    e.stopPropagation();
+    test.textContent = '正在发…';
+    const res = await call('test_push');
+    test.textContent = '发一条试试 ›';
+    toast((res && (res.message || (res.ok ? '发出去了，看手机' : '没发成'))) || '没发成');
+  };
 }
 
 async function renderGuide() {
@@ -2316,10 +2327,19 @@ async function renderGuide() {
            <span class="go">${c.panel ? '去启动 ›' : '去设置 ›'}</span></li>`).join('');
     parts.push(`<div class="guide">
         <h3>还没弄完这几步</h3>
-        <p>前几条是把配置填上，<b>最后一条要真的把 QQ 起起来扫码</b> ——
-           少了它手机上什么都不会有。点哪一条都能直接跳过去。</p>
+        <p>前几条是把配置填上，然后<b>先启动 QQ 扫码登录，再去选群</b> ——
+           顺序反了会读不到群列表（那个按钮要登录后才读得到）。
+           点哪一条都能直接跳过去。</p>
         <ul>${rows}</ul>
       </div>`);
+  } else if (!state.pushed_once) {
+    // 全打勾 ≠ 已经收到过东西。第一份汇总可能要等到晚上 ——
+    // 中间这半天用户只会干等，所以这里直接给一个"当场验一次"的入口。
+    const times = (state.push_times || []).join(' / ') || '每天的推送时间';
+    parts.push(`<div class="guide tip">
+        <span>都弄好了。接下来等 <b>${esc(times)}</b> 的第一份汇总，手机会响。
+          想现在确认能不能收到，点右边。</span>
+        <span class="go" id="guideTestPush">发一条试试 ›</span></div>`);
   }
 
   const html = parts.join('');

@@ -295,6 +295,28 @@ class TestBridge(unittest.TestCase):
         risk = next(c for c in self.api.setup_state()["checks"] if c["key"] == "risk")
         self.assertTrue(risk["ok"])
 
+    def test_login_comes_before_picking_groups(self):
+        """"读取我加的群"要登录之后才读得到 —— 顺序反了新用户会卡住。"""
+        keys = [c["key"] for c in self.api.setup_state()["checks"]]
+        self.assertLess(keys.index("qq_login"), keys.index("qq"))
+
+    def test_running_but_not_logged_in_is_still_todo(self):
+        """进程起来了、还没扫码：这条不能提前打勾，否则用户以为成了。"""
+        original = heartbeat.state
+        heartbeat.state = lambda store: {
+            "alive": True, "age_seconds": 1, "detail": "等扫码登录",
+            "at": "", "rss_mb": 31.0, "groups": []}
+        self.addCleanup(setattr, heartbeat, "state", original)
+        item = next(c for c in self.api.setup_state()["checks"] if c["key"] == "qq_login")
+        self.assertFalse(item["ok"])
+
+    def test_turning_qq_on_without_picking_anything_is_still_todo(self):
+        """打开 QQ 接入 ≠ 选好收什么。零个群等于一条消息都不会来。"""
+        self.api.save_settings({"qq.enabled": True, "qq.group_ids": "",
+                                "qq.receive_all": False})
+        item = next(c for c in self.api.setup_state()["checks"] if c["key"] == "qq")
+        self.assertFalse(item["ok"])
+
     def test_setup_done_once_the_two_required_things_are_filled(self):
         self.api.confirm_risk()
         self.api.save_settings({"wecom_bot.webhook": self.FAKE_WEBHOOK,
