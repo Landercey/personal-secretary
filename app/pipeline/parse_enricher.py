@@ -20,6 +20,7 @@ from ..contracts.interfaces import DraftEnricher
 from ..contracts.models import SOURCE_QQ_INBOX, Message, TaskDraft
 from ..runtime.config import config
 from . import quick_parse
+from .actionable import is_actionable
 
 
 class RuleParseEnricher(DraftEnricher):
@@ -39,6 +40,16 @@ class RuleParseEnricher(DraftEnricher):
         text = message.text or ""
         found = quick_parse.parse_text(
             text, strict=strict, from_file=bool(message.raw.get("text_from_file")))
+        if self._is_file_text(message):
+            # 附件/截图读出来的字，标题还要再按"这句话是不是一件事"过一遍。
+            #
+            # 为什么必须单独过：整条消息过的是**消息级**那把尺子（时间还在原文里、
+            # 后面还有一整段话），而切出来的标题只剩一个名字。海报、天气小程序、
+            # 系统弹窗的截图会切出「成华区」「Q 成都奶龙大学 ℃ om」
+            # 「0四川省高校心理健康教育专委会」这种纯名词碎片 ——
+            # 2026-10-17 查真实数据，8 条误收里有 4 条是这么来的。
+            found = [draft for draft in found
+                     if is_actionable(draft.title)[0]]
         self._record_dropped(message, text)
         quote_len = int(config.get("push", "quote_max_chars", 80))
         for draft in found:
@@ -49,6 +60,13 @@ class RuleParseEnricher(DraftEnricher):
             draft.attachments = list(message.attachments)
             draft.quoted = message.quote(quote_len)
         return found
+
+    @staticmethod
+    def _is_file_text(message: Message) -> bool:
+        """这段字是从附件/截图里读出来的吗（用户点按钮要的、小号收的不算）。"""
+        if message.raw.get("explicit") or message.source_kind == SOURCE_QQ_INBOX:
+            return False         # 他明确要的、或者专门发给自己的，不替他判断
+        return bool(message.raw.get("text_from_file"))
 
     @staticmethod
     def _record_dropped(message: Message, text: str) -> None:

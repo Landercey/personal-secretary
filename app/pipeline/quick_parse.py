@@ -43,7 +43,9 @@ from .text_norm import to_simplified
 _WEEKDAY = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6,
             "1": 0, "2": 1, "3": 2, "4": 3, "5": 4, "6": 5, "7": 6}
 
-_BULLET = re.compile(r"^\s*(?:[-*•·>#]|\d+\s*[.、)．，,]|[（(]\d+[）)])\s*")
+# ①-⑳（U+2460–U+2473）也当编号：学校通知里"①.②.③."太常见了。
+_BULLET = re.compile(r"^\s*(?:[-*•·>#]|[\u2460-\u2473]\s*[.、)．,]?"
+                     r"|\d+\s*[.、)．，,]|[（(]\d+[）)])\s*")
 _URL = re.compile(r"https?://\S+")
 # 聊天里的占位符不是内容，标题里要去掉。
 # 第二段是 QQ 协议的原始代码（[CQ:at,qq=123] / [CQ:flashtransfer,...]）——
@@ -62,6 +64,19 @@ _PLACEHOLDER = re.compile(
 # 时刻那几条一直带着 `\s*`，日期这几条当初漏了。
 _DATE_YMD = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})")
 _DATE_MD = re.compile(r"(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]")
+# 「10.11」「10.18」这种点分日期：学校通知里几乎都这么写
+# （实测一条真通知："①.学生手册重考——10.11-10.23期间"、"（10.18日前）"）。
+# 不认的话，那一行就成了"没有时间"的普通句子，整条通知的标题退化成
+# 开头的「✨立即执行」——用户 2026-10-17 报的就是这个。
+# 后面紧跟 元/块/折/分/%/小时 的不算日期（"6.5分"是分数、"3.5元"是钱）。
+_DATE_DOT = re.compile(
+    r"(?<![\d.])(\d{1,2})\s*[.．/]\s*(\d{1,2})"
+    r"(?![\d.元块折分%小倍斤个人次万])")
+# 「10.11-10.23」这种区间：截止是**后面**那天（区间是窗口，窗口到那天关）
+_DATE_DOT_RANGE = re.compile(
+    r"(?<![\d.])(\d{1,2})\s*[.．/]\s*(\d{1,2})"
+    r"\s*[-—~～至到]\s*(\d{1,2})\s*[.．/]\s*(\d{1,2})"
+    r"(?![\d.元块折分%小倍斤个人次万])")
 _DATE_THIS_MONTH = re.compile(r"本月\s*(\d{1,2})\s*[日号]")
 _DATE_NEXT_MONTH = re.compile(r"下月\s*(\d{1,2})\s*[日号]")
 _DATE_REL = re.compile(r"(大后天|后天|今天|今晚|今早|明天|明晚|明早)")
@@ -94,9 +109,11 @@ _CN_CLOCK_MIN = re.compile(rf"({_CN_NUM})\s*([点時时])\s*({_CN_NUM})(?!\s*分
 # ---- 标题清理用（把所有时间片段摘掉）----
 _DATE_STRIP = re.compile(
     r"(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\s*月\s*\d{1,2}\s*[日号]"
+    r"|(?<![\d.])\d{1,2}\s*[.．/]\s*\d{1,2}"
+    r"(?![\d.元块折分%小倍斤个人次万])"
     r"|本月\s*\d{1,2}\s*[日号]|下月\s*\d{1,2}\s*[日号]"
     r"|大后天|后天|今天|明天|今晚|明晚|今早|明早"
-    r"|(?:下周|本周|这周|周|星期)[一二三四五六日天1-7])(?:以前|之前|前|后)?"
+    r"|(?:下周|本周|这周|周|星期)[一二三四五六日天1-7])(?:以前|之前|前|后|期间|之间)?"
 )
 _TIME_STRIP = re.compile(
     rf"(?:{_TIME_PERIOD}\s*\d{{1,2}}\s*[:：]\s*\d{{2}}"
@@ -237,6 +254,23 @@ def resolve_date(text: str) -> tuple[datetime | None, str | None]:
             pass
 
     m = _DATE_MD.search(text)
+    if m:
+        try:
+            consider(m.start(), today.replace(month=int(m.group(1)), day=int(m.group(2))),
+                     m.group(0))
+        except ValueError:
+            pass
+
+    # 点分日期（"10.18"）。区间要在单个日期**之前**判：同样从第 0 个字符开始，
+    # 谁先 consider 谁赢，而区间该取后一个日子。
+    m = _DATE_DOT_RANGE.search(text)
+    if m:
+        try:
+            consider(m.start(), today.replace(month=int(m.group(3)), day=int(m.group(4))),
+                     m.group(0))
+        except ValueError:
+            pass
+    m = _DATE_DOT.search(text)
     if m:
         try:
             consider(m.start(), today.replace(month=int(m.group(1)), day=int(m.group(2))),
@@ -388,7 +422,8 @@ def has_concrete_time(text: str) -> bool:
     if resolve_time(normalized) is not None:
         return True
     return any(pattern.search(normalized) for pattern in
-               (_DATE_YMD, _DATE_MD, _DATE_THIS_MONTH, _DATE_NEXT_MONTH, _DATE_WEEK))
+               (_DATE_YMD, _DATE_MD, _DATE_DOT, _DATE_THIS_MONTH,
+                _DATE_NEXT_MONTH, _DATE_WEEK))
 
 
 def text_without_time(text: str) -> str:
@@ -407,6 +442,10 @@ def text_without_time(text: str) -> str:
 def _clean_title(text: str) -> str:
     """清掉摘除时间/地点后残留的碎片与标点。"""
     text = re.sub(r"\s{2,}", " ", text)
+    # 通知里常见的「主题——具体说明」：破折号后面是细则，标题取前面那半截就够了
+    # （细则本来就在正文里）。实测「②.理论学习和考试——（10.18日前）本周内请…」
+    # 摘掉日期后剩「理论学习和考试—— 本周内请…」，带着一截尾巴。
+    text = re.split(r"[—–]{2,}", text)[0]
     text = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", text)
     # 摘掉地点后会留下"， 集合"这样的空档：中文标点不在 \u4e00-\u9fff 区间里，
     # 上面那条规则管不到，得单独清一次，否则标题会带着一个多余的空格。

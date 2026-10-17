@@ -244,6 +244,44 @@ class TestTimeParsing(unittest.TestCase):
         dian = quick_parse.resolve_time("下午3点")
         self.assertEqual((colon[0], colon[1]), (dian[0], dian[1]))
 
+    def test_dot_dates_are_understood(self):
+        """学校通知里几乎都写「10.18」而不是「10月18日」。"""
+        date, _raw = quick_parse.resolve_date("10.18日前交作业")
+        self.assertIsNotNone(date)
+        self.assertEqual((date.month, date.day), (10, 18))
+
+    def test_a_dot_range_takes_the_end_day(self):
+        """「10.11-10.23期间」的截止是后面那天 —— 区间是窗口，窗口到那天关。"""
+        date, _raw = quick_parse.resolve_date("学生手册重考——10.11-10.23期间")
+        self.assertIsNotNone(date)
+        self.assertEqual((date.month, date.day), (10, 23))
+
+    def test_decimal_numbers_are_not_dates(self):
+        """「6.5分」「3.5元」不能当日期 —— 否则成绩、钱都会被算成某月某日。"""
+        for text in ("这次考试6.5分", "一共3.5元", "1.5小时"):
+            with self.subTest(text=text):
+                self.assertIsNone(quick_parse.resolve_date(text)[0])
+
+    def test_a_structured_notice_does_not_title_itself_immediately_execute(self):
+        """「①.②.」那种通知，标题不能再退化成开头的「✨立即执行」。
+
+        2026-10-17 用户报的：整条通知只剩一个「✨立即执行」当标题，
+        真正的内容（学生手册重考、理论学习和考试）全埋在正文里。
+        """
+        notice = "\n".join([
+            "@全体  ",
+            "✨立即执行：",
+            "请所有同学落实以下内容，注意截止时间和截图标准：",
+            "①.学生手册重考（要求95+）——10.11-10.23期间",
+            "②.理论学习和考试——（10.18日前）本周内落实成绩截图",
+            "军训为必修课程，未参加考试的同学没有学分。",
+        ])
+        drafts = quick_parse.parse_text(notice)
+        self.assertEqual(len(drafts), 1)
+        self.assertIn("学生手册重考", drafts[0].title)
+        self.assertNotIn("立即执行", drafts[0].title)
+        self.assertIn("2026-10-23", drafts[0].due_at)
+
 
 class TestNoise(unittest.TestCase):
     def test_noise_lines_rejected(self):

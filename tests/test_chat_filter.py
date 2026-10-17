@@ -203,5 +203,50 @@ class TestVetoStopsTheChain(unittest.TestCase):
         self.assertEqual(drafts[0].title, "集合")
 
 
+class TestFileTextTitles(unittest.TestCase):
+    """截图/附件里读出来的字，切出来的标题要再按"这句话是不是一件事"过一遍。
+
+    2026-10-17 查真实数据：8 条误收里有 4 条是截图 OCR 的纯名词碎片 ——
+    「成华区」（天气小程序）、「Q 成都奶龙大学 ℃ om」（招新海报边角）、
+    「0四川省高校心理健康教育专委会」（讲座海报抬头）。
+    它们能混进来是因为"要不要收"那把尺子量的是**整条消息**（时间还在原文里），
+    而切出来的标题只剩一个名字。
+    """
+
+    @staticmethod
+    def _run(text, explicit=False, inbox=False):
+        from app.pipeline.chain import Pipeline
+        from app.pipeline.parse_enricher import RuleParseEnricher
+
+        pipeline = Pipeline(draft_enrichers=[ChatNoiseEnricher(), RuleParseEnricher()])
+        message = Message(
+            msg_id="qq:9",
+            source_kind=SOURCE_QQ_INBOX if inbox else SOURCE_QQ_GROUP,
+            source_name="测试群", text=text,
+            raw={"text_from_file": True, "explicit": explicit})
+        return pipeline.run(message)[1]
+
+    def test_screenshot_garbage_does_not_become_a_todo(self):
+        for text in ("成华区", "Q 成都奶龙大学 ℃ om",
+                     "0四川省高校心理健康教育专委会"):
+            with self.subTest(text=text):
+                self.assertEqual(self._run(text), [])
+
+    def test_a_real_notice_from_a_poster_survives(self):
+        drafts = self._run("ICT双选会志愿者招募\n一、招募人数 5人\n二、活动时间 10月14日14：00")
+        self.assertEqual(len(drafts), 1)
+        self.assertIn("志愿者招募", drafts[0].title)
+
+    def test_the_user_asked_for_it_so_no_judging(self):
+        """界面上点着「变成待办」拖进来的，不许再替他判断。"""
+        drafts = self._run("成华区", explicit=True)
+        self.assertEqual(len(drafts), 1)
+
+    def test_the_inbox_is_never_filtered(self):
+        """小号收件箱全盘接收 —— 发一张图过去就是明说"这个我要记下来"。"""
+        drafts = self._run("成华区", inbox=True)
+        self.assertEqual(len(drafts), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

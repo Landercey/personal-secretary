@@ -1083,7 +1083,9 @@ def main(argv: list[str] | None = None) -> int:
         if not target.is_file():
             print(f"文件不存在：{target}")
             return 1
-        message = source.from_files([str(target)])
+        # 走 explicit：命令行里主动指一个文件，和界面上点"变成待办"是一个意思，
+        # 别让"文件里大多是资料"那道闸把它拦掉。
+        message = explicit_file_message(source, str(target))
         added = ingest_message(store, pipeline, message)
         print(f"\n录入完成：新待办 {added} 条")
         for task in store.list_tasks("open", limit=5):
