@@ -59,6 +59,13 @@ class TestTodayStats(Base):
         stats = self.store.today_stats()
         self.assertEqual(set(stats.values()), {0})
 
+    def test_a_replayed_message_counts_as_one_drop(self):
+        """同一条消息被补收重放三次，只能算"拦下 1 条"。"""
+        for _ in range(3):
+            self.store.log_dropped_text("哈哈哈", "闲聊", "qq_group", "某班群", "qq:9")
+        self.store.log_dropped_text("收到", "闲聊", "qq_group", "某班群", "qq:10")
+        self.assertEqual(self.store.today_stats()["junk"], 2)
+
 
 class TestUndo(Base):
     def test_two_tasks_at_the_same_minute_are_flagged_as_a_clash(self):

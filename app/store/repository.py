@@ -258,6 +258,22 @@ class SqliteStore(Store):
                 (message.source_kind, message.source_name, now_text(), now_text()),
             )
 
+    @_synchronized
+    def has_message(self, msg_id: str) -> bool:
+        """这条消息处理过没有（按 QQ 那边的消息编号）。
+
+        为什么需要：断线重连、每次启动的"补收"，都会把最近的历史再喂一遍。
+        同一条消息被重跑，就会把同一条待办再"合并"一次 ——
+        今天实测 6 条待办被记了 104 次"合并重复"，废件箱也跟着涨。
+        空编号（手动录入）一律返回 False：那些不是同一条，只是没编号。
+        """
+        key = str(msg_id or "").strip()
+        if not key:
+            return False
+        row = self.conn.execute(
+            "SELECT 1 FROM messages WHERE msg_id=? LIMIT 1", (key,)).fetchone()
+        return row is not None
+
     # ------------------------------------------------------------------ 待办
     @_synchronized
     def save_drafts(self, message: Message, drafts: Iterable[TaskDraft]) -> list[Task]:
@@ -643,7 +659,10 @@ class SqliteStore(Store):
         return {
             "received": one("SELECT COUNT(*) FROM messages WHERE created_at LIKE ?"),
             "kept": one("SELECT COUNT(*) FROM tasks WHERE created_at LIKE ?"),
-            "junk": one("SELECT COUNT(*) FROM dropped_items WHERE dropped_at LIKE ?"),
+            # 按**消息编号**数，不按行数：同一条消息被重放三次（补收/重连）
+            # 会记三行，以前"拦下 291 条"其实只有 104 条消息。
+            "junk": one("SELECT COUNT(DISTINCT CASE WHEN msg_id='' THEN drop_id"
+                        " ELSE msg_id END) FROM dropped_items WHERE dropped_at LIKE ?"),
             "merged": one("SELECT COUNT(*) FROM task_events WHERE kind='merged'"
                           " AND created_at LIKE ?"),
             "pushed": one("SELECT COUNT(*) FROM push_records WHERE pushed_at LIKE ?"),

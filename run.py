@@ -271,6 +271,14 @@ def ingest_message(store, pipeline, message, refiner=None) -> int:
     规则版先入库让用户马上看到；AI 交给后台线程回来精修（见 runtime/ai_refine.py）。
     手动录入/拖文件不传它 —— 那是用户正等着结果的动作，同步跑完更直观。
     """
+    # 同一条消息只走一次管线。
+    # 断线重连、每次启动的「补收」都会把最近的历史再喂一遍 —— 以前每条都
+    # 重新跑一遍理解层，于是同一条待办被记一次"合并重复"、同一条闲聊被记一次
+    # "拦下"：今天实测 6 条待办被记了 104 次重复。消息表按 msg_id 去重，
+    # 见过就直接跳过（代价：万一上一次存完消息就崩了，这条不会自动重跑，
+    # 用 `--replay 消息编号` 能手动重来）。
+    if store.has_message(message.msg_id):
+        return 0
     store.save_message(message)
     prepared, drafts = pipeline.run(message, skip={"ai"} if refiner else ())
     # 再存一次。第一次存的是"还没读附件"的原样消息，跑完管线才有正文 ——
