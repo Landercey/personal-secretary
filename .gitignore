@@ -15,6 +15,7 @@ napcat/
 # 打包产物
 build/
 dist/
+dist-*/
 *.spec
 
 # 日志和临时文件

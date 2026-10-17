@@ -163,8 +163,10 @@ class TestSchema(unittest.TestCase):
 
     def test_settings_are_grouped_into_tabs(self):
         """用户的原话是"太杂，没有分类"。四个标签页，每页 2~3 段。"""
-        self.assertEqual([g["title"] for g in self.groups],
-                         ["推送到手机", "收消息", "看懂消息", "数据与资源"])
+        titles = [g["title"] for g in self.groups]
+        self.assertEqual(titles[:4], ["推送到手机", "收消息", "看懂消息", "数据与资源"])
+        # 第 5 组「插件」是装了带设置段的插件才有的，由插件自己注册，不是主程序写死。
+        self.assertEqual(titles[4:], ["插件"] * (len(titles) - 4))
         for group in self.groups:
             self.assertTrue(group["desc"])
             # 一页最多四段。再多就该拆新组了 —— 用户的原话是"太杂，没有分类"。

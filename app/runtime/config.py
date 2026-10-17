@@ -512,6 +512,28 @@ SECTION_GROUPS: tuple[tuple[str, str, str, tuple[tuple[str, str, str], ...]], ..
 
 # 一般不用动的东西。界面上折进每段底部的「高级」里，默认收起 ——
 # 一屏塞 60 个框，用户不知道哪个能碰、哪个碰了会出事。
+# 插件声明的设置段：section -> (标题, 说明)。由 plugins.py 在加载插件时填，
+# `schema()` 把它们单独归到「插件」组里 —— 插件作者不用碰前端就能有自己的设置页。
+PLUGIN_SECTIONS: dict[str, tuple[str, str]] = {}
+
+
+def register_plugin_section(section: str, title: str = "", desc: str = "",
+                            defaults: dict[str, Any] | None = None,
+                            comments: dict[str, str] | None = None) -> None:
+    """插件注册一段自己的设置（由插件清单里的 `settings` 触发）。
+
+    注册进 DEFAULTS 之后，`config.set()` 才认得这些键（不然会 KeyError），
+    界面也会自动把它画出来 —— 插件作者不需要改一行前端代码。
+    """
+    section = str(section or "").strip()
+    if not section:
+        return
+    DEFAULTS.setdefault(section, {}).update(defaults or {})
+    for key, text in (comments or {}).items():
+        KEY_COMMENTS.setdefault(f"{section}.{key}", str(text))
+    PLUGIN_SECTIONS[section] = (str(title or section), str(desc or ""))
+
+
 ADVANCED_KEYS: frozenset[str] = frozenset({
     "qq.max_text_chars",
     "parse.merge_window_seconds", "parse.due_default_hour",
@@ -762,6 +784,16 @@ class Config:
             if items:
                 groups.append({"name": group_id, "title": group_title,
                                "desc": group_desc, "sections": items})
+
+        # 插件自己声明的设置段：单独一组放在后面（见 register_plugin_section）。
+        plugin_items = [self._section_entry(section, title, desc)
+                        for section, (title, desc) in PLUGIN_SECTIONS.items()
+                        if section in DEFAULTS]
+        placed.update(PLUGIN_SECTIONS)
+        if plugin_items:
+            groups.append({"name": "group_plugins", "title": "插件",
+                           "desc": "装了什么插件，它自己的设置就出现在这里",
+                           "sections": plugin_items})
 
         # 兜底：没在 SECTION_GROUPS 里登记过的段，塞进最后一个组。
         # 为什么要兜底：以后加了新配置段忘了登记，用户也得能在界面上改到它。

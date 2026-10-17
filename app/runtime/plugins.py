@@ -65,6 +65,10 @@ from pathlib import Path
 
 from ..contracts.interfaces import DraftEnricher, Source, TextEnricher
 
+# 插件接口版本。老插件不写 `PLUGIN = {"api": ...}` 的，按 1 算（永远兼容）。
+# 以后接口要变大改时：+1，并让加载器明确拒绝"要求新版本"的插件（见 _load_one）。
+API_VERSION = 1
+
 PLUGIN_DIRNAME = "plugins"
 
 
@@ -80,6 +84,8 @@ class PluginStatus:
     # 不声明也没有：那就只有名字和状态。
     section: str = ""
     description: str = ""        # 一句话说它是干什么的
+    version: str = ""            # 插件自己声明的版本（清单里的 version）
+    permissions: tuple[str, ...] = ()   # 它要什么权限：network / files / upload
 
     def describe(self) -> str:
         if self.ok:
@@ -180,6 +186,8 @@ def _load_one(path: Path, registry: Registry) -> PluginStatus:
     title = name
     section = ""
     description = ""
+    version = ""
+    permissions: tuple[str, ...] = ()       # 出异常时也要有值（except 里要用）
     # 注册前的长度。出任何事都截回这里，不留半个插件在管线里。
     text_before = len(registry.text_enrichers)
     draft_before = len(registry.draft_enrichers)
@@ -203,6 +211,35 @@ def _load_one(path: Path, registry: Registry) -> PluginStatus:
         title = str(getattr(module, "TITLE", "") or name)
         section = str(getattr(module, "CONFIG_SECTION", "") or "")
         description = str(getattr(module, "DESCRIPTION", "") or "")
+
+        # ---- 清单（可选）------------------------------------------------------
+        # `PLUGIN = {"api": 1, "version": "1.0", "permissions": [...], "settings": {...}}`
+        # 不写清单的老插件照常工作（按 api 1 算）。
+        meta = getattr(module, "PLUGIN", None) or {}
+        if not isinstance(meta, dict):
+            raise TypeError("PLUGIN 清单要写成 dict")
+        wanted = int(meta.get("api") or API_VERSION)
+        if wanted > API_VERSION:
+            raise RuntimeError(
+                f"这个插件要求接口 api {wanted}，主程序只支持到 {API_VERSION} —— "
+                "先升级主程序再装它")
+        version = str(meta.get("version") or "")
+        permissions = tuple(str(p) for p in (meta.get("permissions") or ()))
+        # 插件自己那一段设置：注册进配置默认值之后，界面「插件」组里自动出现。
+        settings = meta.get("settings") or {}
+        if isinstance(settings, dict):
+            from .config import register_plugin_section
+
+            for section_name, spec in settings.items():
+                if not isinstance(spec, dict):
+                    continue
+                register_plugin_section(
+                    section_name, str(spec.get("title") or section_name),
+                    str(spec.get("desc") or ""), spec.get("fields") or {},
+                    spec.get("comments") or {})
+                if not section:
+                    section = str(section_name)
+
         register = getattr(module, "register", None)
         if not callable(register):
             raise AttributeError("插件里没写 register(registry) 函数")
@@ -224,9 +261,10 @@ def _load_one(path: Path, registry: Registry) -> PluginStatus:
         except Exception:
             pass
         return PluginStatus(name, title, False, f"{type(exc).__name__}: {exc}",
-                            section, description)
+                            section, description, version, permissions)
 
-    return PluginStatus(name, title, True, "", section, description)
+    return PluginStatus(name, title, True, "", section, description,
+                        version, permissions)
 
 
 def _verify(registry: Registry, text_before: int, draft_before: int,
