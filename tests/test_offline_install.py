@@ -58,3 +58,23 @@ class TestOfflinePackage(unittest.TestCase):
 
     def test_other_errors_get_no_extra_text(self):
         self.assertEqual(deploy._offline_hint(TimeoutError("timed out"), self.dir), "")
+
+    def test_it_retries_once_after_the_network_changes(self):
+        """从校园网切到热点的那一下会报证书错 —— 等三秒再走一轮，不用用户自己重开。"""
+        tries = []
+
+        def boom(url, dest, on_progress=None):
+            tries.append(url)
+            raise urllib.error.URLError(
+                ssl.SSLError("CERTIFICATE_VERIFY_FAILED"))
+
+        original_dl, original_sleep = deploy.download, deploy.time.sleep
+        deploy.download = boom
+        deploy.time.sleep = lambda s: None          # 测试里别真等
+        self.addCleanup(setattr, deploy, "download", original_dl)
+        self.addCleanup(setattr, deploy.time, "sleep", original_sleep)
+
+        with self.assertRaises(RuntimeError) as caught:
+            deploy.download_onekey(self.dir)
+        self.assertEqual(len(tries), 6, "三个地址 × 两轮")
+        self.assertIn("证书", str(caught.exception))

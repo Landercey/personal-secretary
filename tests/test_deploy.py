@@ -210,14 +210,18 @@ class TestDownloadFallback(unittest.TestCase):
             raise OSError("下不动")
 
         deploy.download = boom
+        original_sleep = deploy.time.sleep
+        deploy.time.sleep = lambda s: None          # 两轮之间那 3 秒别真等
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 with self.assertRaises(RuntimeError):
                     deploy.download_onekey(Path(tmp), None)
         finally:
             deploy.download = original
+            deploy.time.sleep = original_sleep
 
-        self.assertEqual(len(tried), 1 + len(deploy.ONEKEY_MIRRORS))
+        # 三个地址 × 两轮（换网时那一轮重试是在 v4.0.9 加的）
+        self.assertEqual(len(tried), 2 * (1 + len(deploy.ONEKEY_MIRRORS)))
         self.assertTrue(any("ghfast.top" in url for url in tried),
                         "没试 ghfast.top 镜像")
 

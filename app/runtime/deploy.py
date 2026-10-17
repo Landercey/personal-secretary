@@ -170,13 +170,20 @@ def download_onekey(dest_dir: Path,
             on_progress("用你放在这儿的离线包（这次不联网）")
         return target
     last_error: Exception | None = None
-    for url in (ONEKEY_URL, *ONEKEY_MIRRORS):
-        try:
-            return download(url, target, on_progress)
-        except Exception as exc:
-            last_error = exc
+    # 两轮：换网（校园网 → 热点）的一瞬间，请求会被认证页接住，报的是证书错。
+    # 等三秒再走一遍，比让用户自己"再点一次启动"可靠。
+    for round_no in (1, 2):
+        for url in (ONEKEY_URL, *ONEKEY_MIRRORS):
+            try:
+                return download(url, target, on_progress)
+            except Exception as exc:
+                last_error = exc
+                if on_progress:
+                    on_progress(f"  这个地址不行（{type(exc).__name__}），换下一个")
+        if round_no == 1:
             if on_progress:
-                on_progress(f"  这个地址不行（{type(exc).__name__}），换下一个")
+                on_progress("  网络像是刚断过 —— 等 3 秒再试一轮")
+            time.sleep(3)
     raise RuntimeError(f"三个地址都下不下来：{last_error}{_offline_hint(last_error, dest_dir)}")
 
 
