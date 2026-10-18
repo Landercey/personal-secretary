@@ -343,6 +343,20 @@ class Api:
         self._revision += 1
         return {"ok": True, "message": "移出来了"}
 
+    @tracked
+    def complete_with_children(self, task_id: int) -> dict:
+        """连整棵子树一起完成（勾父待办时用户点了"一起完成"）。"""
+        ids = [t.task_id for t, _depth in self.store.descendants_of(int(task_id))
+               if getattr(t, "status", "open") == "open"]
+        done = 0
+        for cid in ids:
+            self.store.set_status(cid, STATUS_DONE, "父待办完成时一起完成的")
+            done += 1
+        self.store.set_status(int(task_id), STATUS_DONE, "界面里标记完成")
+        self._revision += 1
+        return {"ok": True, "count": done,
+                "message": f"连同 {done} 条子项一起完成了" if done else "完成了"}
+
     def search(self, keyword: str, view: str = "all") -> dict:
         """在当前分组里找。
 
@@ -1585,8 +1599,17 @@ class Api:
         if not isinstance(result, dict):          # 兜底：老装配点只返回条数
             result = {"added": result, "notes": []}
         self._revision += 1
-        return {"ok": True, "added": int(result.get("added") or 0),
+        from ..runtime.config import config
+
+        has_source = bool(config.get("timetable", "url") or config.get("timetable", "file")
+                          or config.get("mail", "enabled"))
+        data = {"ok": True, "added": int(result.get("added") or 0),
                 "notes": list(result.get("notes") or [])}
+        if not has_source and not data["added"]:
+            # 点了没反应最气人：说清楚"同步"到底同步什么
+            data["message"] = ("同步只拉课表 / 邮箱插件的新内容；这两个都没开，"
+                               "所以没东西可同步")
+        return data
 
     # ------------------------------------------------------------------ 拖进来的东西
     @tracked

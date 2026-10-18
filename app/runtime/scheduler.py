@@ -368,8 +368,9 @@ class Scheduler:
         everything = self.store.list_tasks("open", limit=50)
         horizon = slot_horizon(slot.when)
         tasks = [t for t in everything if within_horizon(t, slot.when, horizon)]
-        # 子项：跟着父待办一起露一行"现在轮到"，不单独占编号
-        kids = {t.task_id: self.store.children_of(t.task_id) for t in tasks}
+        # 子项：跟着父待办一起露一行"现在轮到"，不单独占编号。
+        # 用 descendants（含孙辈），这样三层也能看出来。
+        kids = {t.task_id: self.store.descendants_of(t.task_id) for t in tasks}
         kids = {key: value for key, value in kids.items() if value}
         payload = build_digest(tasks, title=slot.title,
                                rest=len(everything) - len(tasks),

@@ -98,7 +98,8 @@ class TestChildrenElsewhere(Base):
         self.store.attach_child(a.task_id, parent.task_id)
         self.store.attach_child(b.task_id, parent.task_id)
         rows = self.store.list_tasks("open")
-        payload = build_digest(rows, children={parent.task_id: self.store.children_of(parent.task_id)})
+        payload = build_digest(
+            rows, children={parent.task_id: self.store.descendants_of(parent.task_id)})
         self.assertIn("搬家", payload.body)
         self.assertIn("现在轮到", payload.body)
 
@@ -109,3 +110,27 @@ class TestChildrenElsewhere(Base):
         self.store.attach_child(kid.task_id, parent.task_id)
         items = Api(self.store, [], {}, notices=[]).search("借推车", "all")["items"]
         self.assertEqual(items[0]["parent"], "搬家")
+
+    def test_a_child_goes_through_ai_refine_like_any_other_todo(self):
+        """子项不是特殊物种：它就是一条普通待办，精修队列照样收。
+
+        （用户问"消息录入才分进子待办，精修不是都有吗"——对，确实都有；
+        这条测试把这件事钉住，免得以后谁在 submit 里按 parent_id 过滤。）
+        """
+        from app.runtime.ai_refine import Refiner
+
+        class FakeAI:
+            name = "ai"
+
+            def enabled(self):
+                return True
+
+            def wants(self, text):
+                return True
+
+        parent, kid = self.add("搬家"), self.add("借推车")
+        self.store.attach_child(kid.task_id, parent.task_id)
+        refiner = Refiner(self.store, FakeAI())
+        accepted = refiner.submit(self.message, [self.store.get_task(kid.task_id)])
+        self.assertTrue(accepted, "子项被拒在精修队列外了")
+        refiner.stop()

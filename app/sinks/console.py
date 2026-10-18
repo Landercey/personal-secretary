@@ -106,12 +106,18 @@ def build_digest(tasks: list[Task], title: str = "待办汇总",
             lines.append(format_task_line(task, i + 1))
             # 有子项的，紧跟着写一行"现在轮到哪一条" —— 用户的原话是
             # "列出总任务，现在轮到做 XX"。子项不单独占编号，它们是这件事的步骤。
-            kids = [k for k in (children or {}).get(task.task_id, [])
-                    if getattr(k, "status", "open") == "open"]
-            if kids:
-                nxt = kids[0]
-                when = human_due(nxt.due_at)[0]
-                lines.append(f"    └ 现在轮到：{nxt.title}（{when}）")
+            # 子项（含孙辈）按层级缩进列出"还没做"的那几条；全做完就什么都不写
+            level = 0
+            first = True
+            for kid, depth in (children or {}).get(task.task_id, []):
+                if getattr(kid, "status", "open") != "open":
+                    continue
+                prefix = "    " + "    " * (depth - 1) + ("└ 现在轮到：" if first else "· ")
+                lines.append(f"{prefix}{kid.title}（{human_due(kid.due_at)[0]}）")
+                first = False
+                level += 1
+                if level >= 3:          # 一条总任务下面最多列 3 行，再多就成了清单
+                    break
         quotes = [line for line in (_excerpt_line(t) for t in tasks) if line]
         tail = [""] + quotes if quotes else []
         # 有一条是 AI 归纳的，就在末尾说清楚（合同里写明必须标）

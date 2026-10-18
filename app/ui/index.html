@@ -862,6 +862,18 @@ function drawDetail() {
   const copy = $('btnCopyTask');
   if (copy) copy.onclick = () => copyText(taskText(t));
   if (t.child_count) loadChildren(t.id);
+  const completeAll = $('btnCompleteAll');
+  if (completeAll) completeAll.onclick = async () => {
+    // 问一句，默认"只完成这一条"——顺手把子项也做掉是好事，但得他说了算
+    const yes = window.confirm(
+      `这条下面还有 ${t.child_count} 条子项。\n\n确定 = 全部一起完成；取消 = 只完成这一条`);
+    if (!yes) { act('complete'); return; }
+    const res = await call('complete_with_children', t.id);
+    toast((res && res.message) || '完成了');
+    selected = null;
+    setPanel(null);
+    refresh();
+  };
   const attach = $('btnAttach');
   if (attach) attach.onclick = () => {
     attachTarget = t.id;
@@ -1061,7 +1073,9 @@ function detailActions(t) {
     // 主操作在最上，两个次要动作并排，复制和"不是待办"收成一行安静的字
     // 以前是四个等宽大按钮堆着，用户分不清哪个是"该点的那个"
     return `<div class="acts">
-        <button class="primary block" onclick="act('complete')">标记完成</button>
+        ${t.child_count
+          ? `<button class="primary block" id="btnCompleteAll">标记完成（含 ${t.child_count} 条子项）</button>`
+          : `<button class="primary block" onclick="act('complete')">标记完成</button>`}
         <div class="two">
           <button onclick="editTask()">改内容</button>
           <button id="btnAttach">归到…</button>
@@ -2820,7 +2834,8 @@ window.addEventListener('pywebviewready', () => {
     const res = await call('sync_now');
     e.target.disabled = false;
     if (!res) return;
-    toast(res.added ? `同步完成，新增 ${res.added} 条` : '同步完成，没有新的');
+    toast(res.message || (res.added ? `同步完成，新增 ${res.added} 条`
+                                    : '同步完成，没有新的'));
     // 同步带回来的提醒要留在界面上，不能只用一句飘过去的提示 ——
     // 用户正在看别的地方，一条 toast 两秒就没了，等于没说
     syncNotes = Array.isArray(res.notes) ? res.notes : [];
