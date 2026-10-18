@@ -1229,12 +1229,32 @@ class Api:
         try:
             if self._tray is None:
                 self._tray = self._make_tray()
+                if self._tray is None:
+                    self._log_tray_note()
             if self._tray is not None and tooltip:
                 self._tray.Text = str(tooltip)[:63]       # .NET 上限 63 个字符
             return {"ok": self._tray is not None, "message": self._tray_note}
         except Exception as exc:                          # noqa: BLE001
             self._tray_note = f"{type(exc).__name__}: {exc}"
+            self._log_tray_note()
             return {"ok": False, "message": self._tray_note}
+
+    def _log_tray_note(self) -> None:
+        """把"为什么没托盘图标"写进结构化日志 —— 只写一次，别每 5 秒刷一条。
+
+        用户说"没有托盘图标"时，光看界面分不清是没建出来，还是 Windows
+        把它折进「隐藏的图标」里了。日志里有原因，才能一次问清。
+        """
+        text = str(self._tray_note or "")
+        if not text or text == getattr(self, "_tray_logged", ""):
+            return
+        self._tray_logged = text
+        try:
+            from ..runtime import logger
+
+            logger.note("warn", "UI.TRAY", stage="ui", detail=text)
+        except Exception:                                 # noqa: BLE001
+            pass
 
     def _make_tray(self):
         """把 NotifyIcon 建出来。菜单两项：打开界面 / 退出界面。"""
@@ -1280,11 +1300,35 @@ class Api:
         import sys
 
         if getattr(sys, "frozen", False):
-            return icon_cls.ExtractAssociatedIcon(sys.executable)
+            # 先找 exe 旁边那个带指纹的 .ico（打包时放的）。
+            # 以前只用 ExtractAssociatedIcon：拿不到就返回 null，而 NotifyIcon
+            # 挂了 null 图标是"建成功了但什么都不显示" —— 表现就是没有托盘图标。
+            root = Path(sys.executable).resolve().parent
+            try:
+                import json
+
+                meta = root / "icon.json"
+                name = json.loads(meta.read_text(encoding="utf-8")).get("shortcut_icon")
+                ico = root / str(name or "")
+                if name and ico.is_file():
+                    return icon_cls(str(ico))
+            except (OSError, ValueError):
+                pass
+            found = icon_cls.ExtractAssociatedIcon(sys.executable)
+            if found is not None:
+                return found
+            from System.Drawing import SystemIcons
+
+            return SystemIcons.Application      # 兜底：至少有个图标
         ico = Path(__file__).resolve().parents[2] / "assets" / "app.ico"
         if ico.is_file():
             return icon_cls(str(ico))
-        return icon_cls.ExtractAssociatedIcon(sys.executable)
+        found = icon_cls.ExtractAssociatedIcon(sys.executable)
+        if found is not None:
+            return found
+        from System.Drawing import SystemIcons
+
+        return SystemIcons.Application
 
     def _show_window(self) -> None:
         window = getattr(self, "_window", None)
