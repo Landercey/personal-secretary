@@ -491,7 +491,20 @@ def _build_title(raw: str) -> str:
     title = _strip_soft(title, _TIME_STRIP)
     _location, location_raw = resolve_location(raw)
     if location_raw:
-        title = title.replace(location_raw, " ")
+        # 摘地点会把句子从中间截断：「把报名表交到辅导员办公室」被认成
+        # 地点「导员办公室」，剩个"把报名表交到辅" —— 比不摘还难读。
+        # 判据：地点前面必须是**边界**（介词/空格/标点），否则说明它只是
+        # 某个更长词的后半截（辅|导员办公室），这时候不摘。
+        index = title.find(location_raw)
+        before = title[index - 1] if index > 0 else " "
+        # 「在图书馆门口集合」里的"在"是地点的一部分，一起摘掉才剩"集合"；
+        # 「交到办公室」里的"到"是动作的一部分，留着。
+        cut = title.replace(location_raw, " ")
+        if before in "在于":
+            cut = title.replace(before + location_raw, " ")
+        boundary = before in " 在到去往于和与，,。；;、"
+        if boundary and not re.search(r"[到在去往给和与]$", cut.strip()):
+            title = cut             # 摘得干净才摘；摘不干净就整句留着
     # 时间/地点被摘掉后，括号里可能只剩空括号或日期碎片（"（ ）"、"（28号）"）
     title = re.sub(r"[（(【\[][\s、,，:：;；]*[）)】\]]", " ", title)
     title = re.sub(r"[（(【\[][^）)】\]]{0,8}(?:号|日|月|周|星期)"
