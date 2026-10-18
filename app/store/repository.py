@@ -99,8 +99,31 @@ def open_database(path: str | Path) -> sqlite3.Connection:
     conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
     _normalize_remind_unit(conn)
     _add_missing_columns(conn)
+    _dedupe_dropped_once(conn)
     conn.commit()
     return conn
+
+
+def _dedupe_dropped_once(conn: sqlite3.Connection) -> None:
+    """一次性清掉废件箱里的历史重复行（同一条消息记了十几遍）。
+
+    原因：补收/重连会把最近的消息再喂一遍，而"同一条只记一次"的闸门
+    是 2026-10-17 才加的 —— 在那之前每次重启都往废件箱里多塞一份。
+    只留每组最早那一条，数据不丢（原文本来就一样）。
+    """
+    try:
+        done = conn.execute(
+            "SELECT value FROM meta WHERE key='dropped_dedup_v1'").fetchone()
+        if done:
+            return
+        conn.execute(
+            "DELETE FROM dropped_items WHERE msg_id <> '' AND drop_id NOT IN"
+            " (SELECT MIN(drop_id) FROM dropped_items WHERE msg_id <> ''"
+            "  GROUP BY msg_id)")
+        conn.execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES('dropped_dedup_v1', '1')")
+    except sqlite3.Error:
+        pass
 
 
 def _add_missing_columns(conn: sqlite3.Connection) -> None:
@@ -1059,13 +1082,24 @@ class SqliteStore(Store):
         """记一条被判为碎片/噪声的原文。翻案、调规则全靠它。
 
         截断到 500 字：废件箱是给人翻的，不是备份原文的地方。
+
+        **同一条消息只记一笔**：以前补收/重连会把同一条再喂一遍，
+        废件箱里就会堆出十几份一模一样的行（用户 2026-10-18 报的）。
+        去重放在这个出口上最保险 —— 不管调用方是哪条路，都绕不过去。
         """
+        key = str(msg_id or "").strip()
         with self.conn:
+            if key:
+                row = self.conn.execute(
+                    "SELECT 1 FROM dropped_items WHERE msg_id=? LIMIT 1", (key,)
+                ).fetchone()
+                if row:
+                    return
             self.conn.execute(
                 """INSERT INTO dropped_items
                    (text, reason, source_kind, source_name, msg_id, dropped_at)
                    VALUES (?,?,?,?,?,?)""",
-                (text[:500], reason, source_kind, source_name, msg_id, now_text()),
+                (text[:500], reason, source_kind, source_name, key, now_text()),
             )
 
     @_synchronized
