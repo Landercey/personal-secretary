@@ -232,8 +232,9 @@ def flatten_message(event: dict[str, Any], self_id: str
 
 # 合并转发的节点内容可能挂在这几个字段上（各版本叫法不一样）。
 _FORWARD_KEYS = ("content", "messages", "nodes", "nodeList")
-# 整包通知可能很长，而这是"当一条消息用"的摘要（正文另有上限），截一刀。
-_FORWARD_KEEP = 500
+# 整包通知可能很长。500 字只够十来行聊天，而"把一天的群聊合并转发过来"
+# 动辄几十行 —— 那正是用户要的用法，所以放宽到 1500（正文另有 max_text_chars）。
+_FORWARD_KEEP = 1500
 
 
 def forward_text(data: dict[str, Any]) -> str:
@@ -543,6 +544,11 @@ def event_to_message(event: dict[str, Any], settings: "QQSettings",
             "mentioned": mentioned,
             "image_urls": images,
             "message_id": msg_id,
+            # 合并转发：用户是**特意**把一段聊天记录转过来的（多半是没录入过的通知）。
+            # 打上这个标记，闲聊过滤器才不会把整包当"群里在聊天"扔掉。
+            "forward": any(isinstance(s, dict) and s.get("type") == "forward"
+                           for s in (event.get("message") or [])
+                           if isinstance(s, dict)),
         },
     )
     return message, ""

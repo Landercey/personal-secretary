@@ -257,6 +257,10 @@ class Api:
         rows = self.store.list_tasks(view, limit=500)
         self._revision += 1
         items = [self._task_dict(t) for t in rows]
+        # 子项数：列表上父待办后面挂个 "+3"。一次查完，别每条待办查一遍库。
+        kids = self.store.child_counts()
+        for item in items:
+            item["child_count"] = kids.get(item["id"], 0)
         # 「时间撞车」：同一天同一分钟有好几条 —— 多半是两件事排到一起了。
         # 在这里算而不是每条查一次库：500 条 × 1 次查询会让列表卡住。
         seen: dict[str, int] = {}
@@ -302,7 +306,35 @@ class Api:
             "archived": bool(task.is_archived),
             # 后台 AI 正在精修这条（规则版先入库，AI 回来再改写标题）
             "ai": bool(getattr(task, "ai_pending", False)),
+            "parent_id": getattr(task, "parent_id", None),
         }
+
+    @tracked
+    def children(self, task_id: int) -> dict:
+        """一个父待办下面的子项。只在这个父待办的详情里用。"""
+        rows = self.store.children_of(int(task_id))
+        kids = self.store.child_counts()
+        items = [self._task_dict(t) for t in rows]
+        for item in items:
+            item["child_count"] = kids.get(item["id"], 0)
+        return {"items": items}
+
+    @tracked
+    def attach_child(self, child_id: int, parent_id: int) -> dict:
+        """把一条待办归到另一条下面（只支持一层）。"""
+        ok, why = self.store.attach_child(int(child_id), int(parent_id))
+        if not ok:
+            return {"ok": False, "message": why}
+        self._revision += 1
+        return {"ok": True, "message": "归好了"}
+
+    @tracked
+    def detach_child(self, task_id: int) -> dict:
+        """从父待办下面移出来 —— 挪错了总得能退。"""
+        if not self.store.detach_child(int(task_id)):
+            return {"ok": False, "message": "这条不在任何父待办下面"}
+        self._revision += 1
+        return {"ok": True, "message": "移出来了"}
 
     def search(self, keyword: str, view: str = "all") -> dict:
         """在当前分组里找。

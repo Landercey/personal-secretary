@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- 1 = 后台 AI 正在精修这条（界面显示「AI 整理中…」）。规则版先入库，
     -- AI 回来再改写标题；改完清零。
     ai_pending    INTEGER NOT NULL DEFAULT 0
+    -- 子待办：指向父待办。只允许一层（父的 parent_id 必须是空）。
+    ,parent_id    INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, is_archived);
 CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_at);

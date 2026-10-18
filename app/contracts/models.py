@@ -168,6 +168,9 @@ class Task:
     # AI 正在后台精修这条（界面上显示「AI 整理中…」）。
     # 规则版先入库让用户马上看到，AI 回来再改写标题 —— 这期间它是 True。
     ai_pending: bool = False
+    # 子待办：指向父待办。**只允许一层**（父的 parent_id 必须是空），
+    # 再往下就变成另一个 Notion，跟"极简"冲突。
+    parent_id: int | None = None
 
 
 @dataclass(slots=True)

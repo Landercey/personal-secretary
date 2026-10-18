@@ -121,6 +121,9 @@ def _add_missing_columns(conn: sqlite3.Connection) -> None:
     if "ai_pending" not in columns:
         # "AI 正在后台精修这条"的标记（界面上的「AI 整理中…」）。
         conn.execute("ALTER TABLE tasks ADD COLUMN ai_pending INTEGER NOT NULL DEFAULT 0")
+    if "parent_id" not in columns:
+        # 子待办：指向父待办。老库加一列就行，不用动别的数据。
+        conn.execute("ALTER TABLE tasks ADD COLUMN parent_id INTEGER")
 
 
 def _normalize_remind_unit(conn: sqlite3.Connection) -> None:
@@ -439,6 +442,9 @@ class SqliteStore(Store):
     @_synchronized
     def list_tasks(self, view: str = "open", limit: int = 200) -> list[Task]:
         where, params = self._view_filter(view)
+        # 子待办只在父待办的详情里出现，不进任何分组 ——
+        # 否则「今天」里会混进一堆"借书""填表"，把主线冲掉。
+        where = f"({where}) AND parent_id IS NULL"
         sql = (
             "SELECT * FROM tasks WHERE " + where +
             " ORDER BY (due_at IS NULL), due_at, priority, task_id DESC LIMIT ?"
@@ -449,6 +455,7 @@ class SqliteStore(Store):
     @_synchronized
     def count_tasks(self, view: str = "open") -> int:
         where, params = self._view_filter(view)
+        where = f"({where}) AND parent_id IS NULL"
         row = self.conn.execute(
             "SELECT COUNT(*) AS n FROM tasks WHERE " + where, params
         ).fetchone()
@@ -466,6 +473,56 @@ class SqliteStore(Store):
         row = self.conn.execute(
             "SELECT COUNT(*) AS n FROM dropped_items").fetchone()
         return int(row["n"] if row else 0)
+
+    # ------------------------------------------------------------------ 子待办
+    @_synchronized
+    def children_of(self, parent_id: int) -> list[Task]:
+        """一个父待办下面的子项。做完的排后面，别把还没做的挤下去。"""
+        rows = self.conn.execute(
+            "SELECT * FROM tasks WHERE parent_id=?"
+            " ORDER BY (status<>'open'), (due_at IS NULL), due_at, task_id",
+            (int(parent_id),)).fetchall()
+        return [self._row_to_task(row) for row in rows]
+
+    @_synchronized
+    def child_counts(self) -> dict[int, int]:
+        """{父待办编号: 子项数} —— 列表上一次查完，别每条待办查一遍库。"""
+        rows = self.conn.execute(
+            "SELECT parent_id, COUNT(*) AS n FROM tasks"
+            " WHERE parent_id IS NOT NULL GROUP BY parent_id").fetchall()
+        return {int(row["parent_id"]): int(row["n"]) for row in rows}
+
+    @_synchronized
+    def attach_child(self, child_id: int, parent_id: int) -> tuple[bool, str]:
+        """把一条待办挂到另一条下面。只允许一层，且不能挂到自己下面。"""
+        child_id, parent_id = int(child_id), int(parent_id)
+        if child_id == parent_id:
+            return False, "不能挂到自己下面"
+        child = self.get_task(child_id)
+        parent = self.get_task(parent_id)
+        if child is None or parent is None:
+            return False, "有一条找不到了"
+        if child.parent_id:
+            return False, "这条已经是别人的子项了，先移出来"
+        if parent.parent_id:
+            return False, "只支持一层：父待办本身不能是子项"
+        with self.conn:
+            self.conn.execute(
+                "UPDATE tasks SET parent_id=?, updated_at=? WHERE task_id=?",
+                (parent_id, now_text(), child_id))
+            self._event(child_id, "attach", f"归到「{parent.title}」下面")
+        return True, ""
+
+    @_synchronized
+    def detach_child(self, child_id: int) -> bool:
+        """从父待办下面移出来 —— 挪错了总得能退。"""
+        with self.conn:
+            cursor = self.conn.execute(
+                "UPDATE tasks SET parent_id=NULL, updated_at=? WHERE task_id=?"
+                " AND parent_id IS NOT NULL", (now_text(), int(child_id)))
+            if cursor.rowcount:
+                self._event(int(child_id), "detach", "从父待办下面移出来了")
+            return bool(cursor.rowcount)
 
     def _view_filter(self, view: str) -> tuple[str, tuple[Any, ...]]:
         """把界面上的分组名翻译成 SQL 条件。
@@ -757,6 +814,7 @@ class SqliteStore(Store):
             archive_reason=row["archive_reason"],
             drop_reason=row["drop_reason"],
             ai_pending=bool(row["ai_pending"]),
+            parent_id=(int(row["parent_id"]) if row["parent_id"] else None),
         )
 
     # ------------------------------------------------------------------ 状态

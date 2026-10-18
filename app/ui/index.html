@@ -553,6 +553,7 @@ let drawnPanel = null;      // 已经画出来的是哪个，避免 5 秒轮询�
 let schema = null;          // 后端给的配置清单（分组 → 段 → 项）
 let openSection = null;     // 要跳过去并展开的那一段
 let activeGroup = null;     // 设置面板当前在哪个分组标签页
+let attachTarget = null;    // 正在给哪条待办找"父待办"（归到…面板用）
 /* 小白 / 大佬的总开关。默认关：只画"不填就用不了"的那几项
    记在 localStorage 里 —— 大佬打开一次，以后每次都是打开的状态。 */
 let showAdvanced = false;
@@ -660,6 +661,7 @@ function renderList() {
           ${t.location ? `<i class="sep"></i><span>${esc(t.location)}</span>` : ''}
           ${t.source ? `<i class="sep"></i><span>${esc(t.source)}</span>` : ''}
           ${t.attachments ? `<span class="clip">📎${t.attachments}</span>` : ''}
+          ${t.child_count ? `<span class="clip">+${t.child_count} 子项</span>` : ''}
           ${t.ai ? '<span class="aipending">AI 整理中…</span>' : ''}
         </div>
       </div>
@@ -764,6 +766,7 @@ function renderPanel(force) {
   if (panel === 'settings') return drawSettings();
   if (panel === 'new') return drawComposer();
   if (panel === 'drop') return drawDrop();
+  if (panel === 'attach') return drawAttach();
   if (panel === 'qq') return drawQqPanel();
   if (panel === 'plugins') return drawPluginsPanel();
   if (panel === 'feedback') return drawFeedbackPanel();
@@ -850,11 +853,20 @@ function drawDetail() {
     ${t.quoted ? `<div class="quote"><em>原始消息（判错了你能看出为什么）</em>${esc(t.quoted)}</div>` : ''}
     ${t.detail ? `<div class="quote">${esc(t.detail)}</div>` : ''}
     ${(t.files && t.files.length) ? '<div class="files" id="files"></div>' : ''}
+    ${t.child_count ? `<div class="kv"><b>子项</b><span>${t.child_count} 条</span></div>
+       <div id="childList"></div>` : ''}
     ${detailActions(t)}`;
   const back = $('btnRestore');
   if (back) back.onclick = () => act('restore', t.id);
   const copy = $('btnCopyTask');
   if (copy) copy.onclick = () => copyText(taskText(t));
+  if (t.child_count) loadChildren(t.id);
+  const attach = $('btnAttach');
+  if (attach) attach.onclick = () => {
+    attachTarget = t.id;
+    setPanel('attach');
+    renderPanel(true);
+  };
   // 提醒力度：点一下就存，**可以勾好几个**（"要能实现多次提醒，不是只能选一个"）
   const chips = $('remindChips');
   if (chips) chips.onclick = async (event) => {
@@ -970,6 +982,63 @@ function copyText(text) {
   toast(ok ? '复制好了，去粘到别处吧' : '复制失败，手动选中试试');
 }
 
+/* 父待办详情里的子项：一行一条，能单独完成、也能移出来。
+   子项**不进任何分组**（库里 list_tasks 过滤掉了），否则「今天」会被"借书""填表"冲掉。 */
+async function loadChildren(taskId) {
+  const box = $('childList');
+  if (!box) return;
+  const res = await call('children', taskId);
+  const kids = (res && res.items) || [];
+  box.innerHTML = kids.map(k => `
+    <div class="kv" style="align-items:center;gap:8px">
+      <b style="width:12px;flex:none">${k.done ? '✓' : '○'}</b>
+      <span style="flex:1;${k.done ? 'color:var(--text-3);text-decoration:line-through' : ''}">${
+        esc(k.title)}</span>
+      ${k.done ? '' : `<a data-kid-done="${k.id}" style="color:var(--accent);cursor:pointer">完成</a>`}
+      <a data-kid-out="${k.id}" style="color:var(--text-3);cursor:pointer;margin-left:10px">移出</a>
+    </div>`).join('');
+  box.querySelectorAll('[data-kid-done]').forEach(a => a.onclick = async () => {
+    await call('complete', Number(a.dataset.kidDone));
+    refresh();
+  });
+  box.querySelectorAll('[data-kid-out]').forEach(a => a.onclick = async () => {
+    const r = await call('detach_child', Number(a.dataset.kidOut));
+    toast((r && r.message) || '移出来了');
+    refresh();
+  });
+}
+
+/* 「归到…」：从还没完成的待办里挑一条当父待办。只支持一层。 */
+async function drawAttach() {
+  const res = await call('tasks', 'open');
+  const items = ((res && res.items) || [])
+    .filter(i => String(i.id) !== String(attachTarget) && !i.parent_id);
+  $('detailInner').innerHTML = `
+    <div class="panelhead"><h2>归到哪条下面？</h2></div>
+    <p class="note">它不会从列表里消失，只是挂到那条待办的详情里；只支持一层</p>
+    ${items.length ? `
+      <select class="block" id="attachSel">${items.map(i =>
+        `<option value="${i.id}">${esc(i.title)}${i.due ? `（${esc(i.due)}）` : ''}</option>`
+      ).join('')}</select>
+      <div class="acts">
+        <button class="primary block" id="attachOk">归到这条下面</button>
+        <button class="block" id="attachCancel">算了</button>
+      </div>`
+      : `<p class="note">没有别的待办可以当归宿 —— 先建一条</p>
+         <div class="acts"><button class="block" id="attachCancel">知道了</button></div>`}`;
+  const cancel = $('attachCancel');
+  if (cancel) cancel.onclick = () => { setPanel('detail'); renderPanel(true); };
+  const ok = $('attachOk');
+  if (ok) ok.onclick = async () => {
+    const parentId = Number($('attachSel').value);
+    const r = await call('attach_child', Number(attachTarget), parentId);
+    toast((r && r.message) || (r && r.ok ? '归好了' : '没归成'));
+    setPanel('detail');
+    renderPanel(true);
+    refresh();
+  };
+}
+
 function detailActions(t) {
   if (!t.done && !t.archived) {
     // 主操作在最上，两个次要动作并排，复制和"不是待办"收成一行安静的字
@@ -982,6 +1051,7 @@ function detailActions(t) {
         </div>
         <div class="quiet">
           <button id="btnCopyTask">复制</button>
+          <button id="btnAttach">归到…</button>
           <button class="danger" onclick="act('drop')">这不是待办</button>
         </div>
       </div>`;

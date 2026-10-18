@@ -26,6 +26,8 @@ from .actionable import is_actionable
 # 库里存多少原文。详情页的「原始消息」直接显示它，所以给得宽一点；
 # 推送里只带一小段（见 scheduler / console），两件事别混成一个上限。
 STORE_QUOTE_CHARS = 1200
+# 一条合并转发最多切出几条待办（防"转一次刷出二十条"）
+FORWARD_MAX_DRAFTS = 12
 
 
 class RuleParseEnricher(DraftEnricher):
@@ -45,6 +47,10 @@ class RuleParseEnricher(DraftEnricher):
         text = message.text or ""
         found = quick_parse.parse_text(
             text, strict=strict, from_file=bool(message.raw.get("text_from_file")))
+        if message.raw.get("forward") and len(found) > FORWARD_MAX_DRAFTS:
+            # 一份聊天记录里可能几十行都"像事"，全收会把列表刷爆。
+            # 留前 12 条，原文还在详情里（用户自己翻）。
+            found = found[:FORWARD_MAX_DRAFTS]
         if self._is_file_text(message):
             # 附件/截图读出来的字，标题还要再按"这句话是不是一件事"过一遍。
             #

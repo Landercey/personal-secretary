@@ -100,6 +100,11 @@ class ChatNoiseEnricher(DraftEnricher):
         # 他已经明确表达过意图了，再拿规则去猜是跟用户对着干。
         if message.raw.get("explicit"):
             return False
+        # 合并转发过来的整包聊天记录：用户是特意转的（多半是想让程序把里面的事挑出来）。
+        # 这种文字里必然混着"哈哈""收到"，整包判成闲聊等于这个用法白做；
+        # 噪声由切分那一层按行判断。
+        if message.raw.get("forward"):
+            return False
         # 小号收件箱：你专门发给自己的东西，**全盘接收** —— 连文件里的字也不过滤。
         # 这条必须排在 text_from_file 前面：把小号当收件箱的人，
         # 发一份文件过去就是明说"这个我要记下来"，
