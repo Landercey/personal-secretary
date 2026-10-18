@@ -254,11 +254,13 @@ class Api:
               **next_week（下周一~周日）** / overdue / **done（已完成）** /
               archive / junk
         """
-        rows = self.store.list_tasks(view, limit=500)
+        # 上限 2000 条：以前是 500，攒两个月就可能撞上（列表会"少了几条"）。
+        # 2000 条的查询 + 序列化仍在几十毫秒量级，够用了。
+        rows = self.store.list_tasks(view, limit=2000)
         self._revision += 1
         items = [self._task_dict(t) for t in rows]
-        # 子项数：列表上父待办后面挂个 "+3"。一次查完，别每条待办查一遍库。
-        kids = self.store.child_counts()
+        # 整棵树有多少条：列表上父待办后面挂个 "+3"。一次查完，别每条查一遍库。
+        kids = self.store.descendant_counts()
         for item in items:
             item["child_count"] = kids.get(item["id"], 0)
         # 「时间撞车」：同一天同一分钟有好几条 —— 多半是两件事排到一起了。
@@ -311,12 +313,17 @@ class Api:
 
     @tracked
     def children(self, task_id: int) -> dict:
-        """一个父待办下面的子项。只在这个父待办的详情里用。"""
-        rows = self.store.children_of(int(task_id))
-        kids = self.store.child_counts()
-        items = [self._task_dict(t) for t in rows]
-        for item in items:
-            item["child_count"] = kids.get(item["id"], 0)
+        """一个待办下面的**整棵树**（子、孙…），每条带 depth。
+
+        只在这个父待办的详情里用 —— 子项不进任何分组，免得把列表冲乱。
+        """
+        counts = self.store.descendant_counts()
+        items = []
+        for task, depth in self.store.descendants_of(int(task_id)):
+            item = self._task_dict(task)
+            item["depth"] = depth
+            item["child_count"] = counts.get(item["id"], 0)
+            items.append(item)
         return {"items": items}
 
     @tracked

@@ -177,6 +177,8 @@ def _synchronized(method):
 # 同一条通知"做完之后又来"的宽限天数：这几天内点过完成的、标题一模一样的，
 # 当作同一条（不新建、不推送）。想更宽松就把它调大。
 DONE_REPEAT_DAYS = 3
+# 子待办最多几层（一级 → 子 → 孙）。再深没人看得清，也不好排版。
+MAX_TASK_DEPTH = 3
 # 太短的标题（"交作业"）不套这条规则 —— 那更像用户真的又要做一次。
 DONE_REPEAT_MIN_CHARS = 6
 
@@ -494,7 +496,11 @@ class SqliteStore(Store):
 
     @_synchronized
     def attach_child(self, child_id: int, parent_id: int) -> tuple[bool, str]:
-        """把一条待办挂到另一条下面。只允许一层，且不能挂到自己下面。"""
+        """把一条待办挂到另一条下面。**最多三层**（父 → 子 → 孙）。
+
+        为什么留三层：一层不够用（"搬家 → 借推车 → 找张叔"），
+        但再深就没人看得清了 —— 三层是"够用又不失控"的那条线。
+        """
         child_id, parent_id = int(child_id), int(parent_id)
         if child_id == parent_id:
             return False, "不能挂到自己下面"
@@ -504,14 +510,70 @@ class SqliteStore(Store):
             return False, "有一条找不到了"
         if child.parent_id:
             return False, "这条已经是别人的子项了，先移出来"
-        if parent.parent_id:
-            return False, "只支持一层：父待办本身不能是子项"
+        if self.children_of(child_id):
+            # 带子项的待办不能再被拎走：树会跟着搬家，层级就不受控了
+            return False, "这条下面还有子项，先把它自己的子项移出来"
+        if self._depth_of(parent_id) >= MAX_TASK_DEPTH:
+            return False, f"最多 {MAX_TASK_DEPTH} 层，再往下就不好看了"
+        # 防环：往上走一遍，别把祖宗挂到孙子下面
+        cursor, guard = parent_id, 0
+        while cursor and guard < MAX_TASK_DEPTH + 2:
+            if cursor == child_id:
+                return False, "不能挂到自己的子孙下面"
+            row = self.conn.execute(
+                "SELECT parent_id FROM tasks WHERE task_id=?", (cursor,)).fetchone()
+            cursor = int(row["parent_id"]) if row and row["parent_id"] else 0
+            guard += 1
         with self.conn:
             self.conn.execute(
                 "UPDATE tasks SET parent_id=?, updated_at=? WHERE task_id=?",
                 (parent_id, now_text(), child_id))
             self._event(child_id, "attach", f"归到「{parent.title}」下面")
         return True, ""
+
+    def _depth_of(self, task_id: int) -> int:
+        """这条待办在第几层：一级 = 1，子项 = 2。"""
+        depth, cursor, guard = 1, int(task_id), 0
+        while guard < MAX_TASK_DEPTH + 2:
+            row = self.conn.execute(
+                "SELECT parent_id FROM tasks WHERE task_id=?", (cursor,)).fetchone()
+            if not row or not row["parent_id"]:
+                break
+            depth += 1
+            cursor = int(row["parent_id"])
+            guard += 1
+        return depth
+
+    @_synchronized
+    def descendants_of(self, task_id: int) -> list[tuple[Task, int]]:
+        """整棵树（子、孙…），带层级。详情页按层级缩进显示。"""
+        out: list[tuple[Task, int]] = []
+        frontier = [(int(task_id), 0)]
+        guard = 0
+        while frontier and guard < 50:
+            guard += 1
+            next_frontier = []
+            for parent_id, depth in frontier:
+                for task in self.children_of(parent_id):
+                    out.append((task, depth + 1))
+                    next_frontier.append((task.task_id, depth + 1))
+            frontier = next_frontier
+        return out
+
+    @_synchronized
+    def descendant_counts(self) -> dict[int, int]:
+        """{一级待办: 整棵树里一共多少条} —— 列表上的 "+N" 用这个数。"""
+        parents = {int(r["task_id"]): (int(r["parent_id"]) if r["parent_id"] else None)
+                   for r in self.conn.execute("SELECT task_id, parent_id FROM tasks")}
+        roots: dict[int, int] = {}
+        for task_id in parents:
+            cursor, guard = task_id, 0
+            while parents.get(cursor) and guard < MAX_TASK_DEPTH + 2:
+                cursor = parents[cursor]
+                guard += 1
+            if cursor != task_id:
+                roots[cursor] = roots.get(cursor, 0) + 1
+        return roots
 
     @_synchronized
     def detach_child(self, child_id: int) -> bool:

@@ -990,11 +990,12 @@ async function loadChildren(taskId) {
   const res = await call('children', taskId);
   const kids = (res && res.items) || [];
   box.innerHTML = kids.map(k => `
-    <div class="kv" style="align-items:center;gap:8px">
+    <div class="kv" style="align-items:center;gap:8px;padding-left:${(k.depth - 1) * 18}px">
       <b style="width:12px;flex:none">${k.done ? '✓' : '○'}</b>
       <span style="flex:1;${k.done ? 'color:var(--text-3);text-decoration:line-through' : ''}">${
         esc(k.title)}</span>
       ${k.done ? '' : `<a data-kid-done="${k.id}" style="color:var(--accent);cursor:pointer">完成</a>`}
+      <a data-kid-attach="${k.id}" style="color:var(--text-3);cursor:pointer;margin-left:10px">归到…</a>
       <a data-kid-out="${k.id}" style="color:var(--text-3);cursor:pointer;margin-left:10px">移出</a>
     </div>`).join('');
   box.querySelectorAll('[data-kid-done]').forEach(a => a.onclick = async () => {
@@ -1006,37 +1007,52 @@ async function loadChildren(taskId) {
     toast((r && r.message) || '移出来了');
     refresh();
   });
+  box.querySelectorAll('[data-kid-attach]').forEach(a => a.onclick = () => {
+    attachTarget = Number(a.dataset.kidAttach);
+    setPanel('attach');
+    renderPanel(true);
+  });
 }
 
-/* 「归到…」：从还没完成的待办里挑一条当父待办。只支持一层。 */
+/* 「归到…」：搜标题、点一条当上级。最多三层（一级 → 子 → 孙）。 */
 async function drawAttach() {
   const res = await call('tasks', 'open');
-  const items = ((res && res.items) || [])
-    .filter(i => String(i.id) !== String(attachTarget) && !i.parent_id);
+  const pool = ((res && res.items) || [])
+    .filter(i => String(i.id) !== String(attachTarget));
   $('detailInner').innerHTML = `
-    <div class="panelhead"><h2>归到哪条下面？</h2></div>
-    <p class="note">它不会从列表里消失，只是挂到那条待办的详情里；只支持一层</p>
-    ${items.length ? `
-      <select class="block" id="attachSel">${items.map(i =>
-        `<option value="${i.id}">${esc(i.title)}${i.due ? `（${esc(i.due)}）` : ''}</option>`
-      ).join('')}</select>
-      <div class="acts">
-        <button class="primary block" id="attachOk">归到这条下面</button>
-        <button class="block" id="attachCancel">算了</button>
-      </div>`
-      : `<p class="note">没有别的待办可以当归宿 —— 先建一条</p>
-         <div class="acts"><button class="block" id="attachCancel">知道了</button></div>`}`;
-  const cancel = $('attachCancel');
-  if (cancel) cancel.onclick = () => { setPanel('detail'); renderPanel(true); };
-  const ok = $('attachOk');
-  if (ok) ok.onclick = async () => {
-    const parentId = Number($('attachSel').value);
-    const r = await call('attach_child', Number(attachTarget), parentId);
-    toast((r && r.message) || (r && r.ok ? '归好了' : '没归成'));
-    setPanel('detail');
-    renderPanel(true);
-    refresh();
+    <div class="panelhead"><h2>归到哪条下面</h2></div>
+    <p class="note">点一条就是它的上级。最多三层，子项只在上级的详情里出现</p>
+    <input id="attachSearch" type="search" placeholder="搜标题，挑一条当上级…"
+           style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:7px">
+    <div id="attachList" style="margin-top:10px;max-height:360px;overflow:auto"></div>
+    <div class="acts"><button class="block" id="attachCancel">算了</button></div>`;
+  $('attachCancel').onclick = () => { setPanel('detail'); renderPanel(true); };
+
+  const draw = (keyword) => {
+    const box = $('attachList');
+    if (!box) return;
+    const q = String(keyword || '').trim();
+    const rows = pool.filter(i => !q || String(i.title).includes(q));
+    box.innerHTML = rows.length ? rows.map(i => `
+      <div class="kv" data-pick="${i.id}" style="cursor:pointer;align-items:center;">
+        <b style="width:auto;flex:none;color:var(--accent)">＋</b>
+        <span style="flex:1">${esc(i.title)}${
+          i.child_count ? ` <span style="color:var(--text-3)">（下面已有 ${i.child_count} 条）</span>` : ''}</span>
+        <span style="color:var(--text-3);white-space:nowrap">${esc(i.due || '')}</span>
+      </div>`).join('') : '<p class="note">没找到这条 —— 换个词试试</p>';
+    box.querySelectorAll('[data-pick]').forEach(row => row.onclick = async () => {
+      const r = await call('attach_child', Number(attachTarget), Number(row.dataset.pick));
+      toast((r && r.message) || (r && r.ok ? '归好了' : '没归成'));
+      if (r && r.ok) {
+        setPanel('detail');
+        renderPanel(true);
+        refresh();
+      }
+    });
   };
+  draw('');
+  $('attachSearch').oninput = (e) => draw(e.target.value);
+  $('attachSearch').focus();
 }
 
 function detailActions(t) {
@@ -1047,11 +1063,11 @@ function detailActions(t) {
         <button class="primary block" onclick="act('complete')">标记完成</button>
         <div class="two">
           <button onclick="editTask()">改内容</button>
+          <button id="btnAttach">归到…</button>
           <button onclick="act('archive')">归档</button>
         </div>
         <div class="quiet">
           <button id="btnCopyTask">复制</button>
-          <button id="btnAttach">归到…</button>
           <button class="danger" onclick="act('drop')">这不是待办</button>
         </div>
       </div>`;
