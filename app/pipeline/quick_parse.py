@@ -338,16 +338,24 @@ def resolve_time(text: str) -> tuple[int, int, str] | None:
             return hour, minute, m.group(0)
 
     m = _TIME_CN.search(text)
-    if m:
+    while m:
         # 时间词前面没带"下午/晚上"时，看看同一行附近有没有 ——
         # "今天下午拉练，2点20前集合"里，下午离"2点"隔着半句话。
         period = m.group(1) or _nearby_period(text, m.start())
         hour_raw = int(m.group(2))
         tail = (m.group(3) or "").strip()
+        # 「吃饱一点」「快一点」里的"一点"不是时刻 —— 后面直接跟标点/结尾就跳过。
+        # （用户 2026-10-18 那条备忘被算成 13:00，就是因为"晚饭吃饱一点。"）
+        after = text[m.end():m.end() + 1]
+        if (not period and not tail and hour_raw == 1
+                and (not after or after in "，。！？；、,.!?;\n ")):
+            m = _TIME_CN.search(text, m.end())
+            continue
         minute = 30 if tail.startswith("半") else int(re.sub(r"\D", "", tail) or 0)
         hour_raw = _apply_period(period, hour_raw)
         if 0 <= hour_raw <= 23 and 0 <= minute <= 59:
             return hour_raw, minute, m.group(0)
+        m = _TIME_CN.search(text, m.end())
     return None
 
 

@@ -239,6 +239,23 @@ class TestTimeParsing(unittest.TestCase):
         exact = quick_parse.parse_line("明天下午三点交实验报告")
         self.assertFalse(exact.time_guess)
 
+    def test_the_word_yidian_in_a_sentence_is_not_one_oclock(self):
+        """「晚饭吃饱一点。22:00 关门」——"一点"是"一点"，不是 13:00。"""
+        draft = quick_parse.parse_line("大家晚饭吃饱一点。最后 22:00 整准时关门")
+        self.assertTrue(draft.due_at.endswith("22:00:00"), draft.due_at)
+
+    def test_an_inbox_note_stays_one_task(self):
+        """收件箱是"发给自己的备忘"：一段话就是一件事，不按句子切碎。"""
+        from app.contracts.models import SOURCE_QQ_INBOX, Message
+        from app.pipeline.parse_enricher import RuleParseEnricher
+
+        text = ("因为要熬夜赶进度，大家晚饭吃饱一点。最后再说一遍：22:00 整准时关门，"
+                "迟到 10 分钟以上算旷课！收到回复一下。")
+        message = Message(msg_id="qq:1", source_kind=SOURCE_QQ_INBOX, text=text)
+        drafts = RuleParseEnricher().process(message, [])
+        self.assertEqual(len(drafts), 1, [d.title for d in drafts])
+        self.assertTrue(drafts[0].due_at.endswith("22:00:00"), drafts[0].due_at)
+
     def test_traditional_chinese_normalized(self):
         """繁简归一：不归一，繁体里的"點"认不出来，时间会全错。"""
         self.assertEqual(to_simplified("明天早上11點打遊戲"), "明天早上11点打游戏")

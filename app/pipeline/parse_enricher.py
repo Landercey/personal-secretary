@@ -45,8 +45,14 @@ class RuleParseEnricher(DraftEnricher):
             return drafts          # 已经有草稿了（比如插件提前产出），不重复切
         strict = self._strict(message)
         text = message.text or ""
-        found = quick_parse.parse_text(
-            text, strict=strict, from_file=bool(message.raw.get("text_from_file")))
+        if message.source_kind == SOURCE_QQ_INBOX:
+            # 收件箱是"你发给自己的备忘"：**一条消息就是一件事**。
+            # 以前照群消息那样按句子/行切开，一段话被切成三条，
+            # 标题还被摘地点摘得七零八落（用户 2026-10-18："被切的不像样了"）。
+            found = self._as_one_note(text)
+        else:
+            found = quick_parse.parse_text(
+                text, strict=strict, from_file=bool(message.raw.get("text_from_file")))
         if message.raw.get("forward") and len(found) > FORWARD_MAX_DRAFTS:
             # 一份聊天记录里可能几十行都"像事"，全收会把列表刷爆。
             # 留前 12 条，原文还在详情里（用户自己翻）。
@@ -74,6 +80,23 @@ class RuleParseEnricher(DraftEnricher):
             draft.attachments = list(message.attachments)
             draft.quoted = message.quote(quote_len)
         return found
+
+    @staticmethod
+    def _as_one_note(text: str) -> list[TaskDraft]:
+        """收件箱的一条消息 → 一条待办（原文全进正文，标题取开头一小段）。"""
+        body = str(text or "").strip()
+        if not body:
+            return []
+        parsed = quick_parse.parse_line(body)      # 借它算时间/地点，标题不用它的
+        limit = int(config.get("title", "max_len", 200) or 200)
+        head = " ".join(body.split())[:60]
+        return [TaskDraft(
+            title=head[:limit],
+            detail=body,
+            due_at=parsed.due_at if parsed else None,
+            location=parsed.location if parsed else None,
+            source_kind=SOURCE_QQ_INBOX,
+        )]
 
     @staticmethod
     def _is_file_text(message: Message) -> bool:
