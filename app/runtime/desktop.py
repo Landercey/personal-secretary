@@ -388,3 +388,46 @@ def ensure_autostart(root: Path | None = None) -> str:
         return "开机自启指向正确"
     ok, why = set_autostart(True, project)
     return f"开机自启已修好：{why}" if ok else f"开机自启修不了：{why}"
+
+
+def promote_tray_icon(exe: Path | None = None,
+                      base: str = r"Control Panel\NotifyIconSettings") -> bool:
+    """让托盘图标默认露在任务栏上，而不是被塞进「隐藏的图标」。
+
+    为什么需要（2026-10-18）：用户说"现在还没有托盘图标"。查注册表发现
+    图标其实**建出来了**，只是在 Win11 的溢出区里（`IsPromoted` 空着 = 折叠）。
+    用户不会去点那个 `^` 里翻，所以对他来说就是"没有"。
+
+    这是**每个用户自己**的设置（HKCU），改的是本程序那一条，不碰别人。
+    找不到那一条就返回 False（老系统没有这个键，图标本来就在外面）。
+    """
+    import sys
+    import winreg
+
+    target = str(exe or getattr(sys, "executable", "")).lower()
+    if not target:
+        return False
+    try:
+        root = winreg.OpenKey(winreg.HKEY_CURRENT_USER, base, 0, winreg.KEY_READ)
+    except OSError:
+        return False
+    try:
+        count = winreg.QueryInfoKey(root)[0]
+        for index in range(count):
+            name = winreg.EnumKey(root, index)
+            try:
+                with winreg.OpenKey(root, name, 0,
+                                    winreg.KEY_READ | winreg.KEY_SET_VALUE) as item:
+                    try:
+                        path = str(winreg.QueryValueEx(item, "ExecutablePath")[0])
+                    except OSError:
+                        continue
+                    if path.lower() != target:
+                        continue
+                    winreg.SetValueEx(item, "IsPromoted", 0, winreg.REG_DWORD, 1)
+                    return True
+            except OSError:
+                continue
+    finally:
+        root.Close()
+    return False

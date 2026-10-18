@@ -1292,6 +1292,20 @@ class Api:
         tray.DoubleClick += on_open
         tray.Text = "私人秘书"
         tray.Visible = True
+        # Win11 把新图标默认塞进「隐藏的图标」里，用户看不到 = "没有托盘图标"。
+        # 系统是**异步**登记这一条的，所以隔一会儿试几次。
+        import threading
+        import time as _time
+
+        def promote() -> None:
+            from ..runtime import desktop
+
+            for delay in (0.5, 1.5, 3.0):
+                _time.sleep(delay)
+                if desktop.promote_tray_icon():
+                    return
+
+        threading.Thread(target=promote, daemon=True).start()
         return tray
 
     @staticmethod
