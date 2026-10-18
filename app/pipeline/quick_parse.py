@@ -95,7 +95,12 @@ _TIME_PERIOD = r"(上午|下午|中午|晚上|晚|早上|早晨|凌晨|今晚|�
 # "下午3点开会"走的是另一条正则（带前缀），反而是对的。
 # 同一种意思两种写法，一个对一个错，这种不一致最难发现。
 _TIME_HM = re.compile(rf"{_TIME_PERIOD}\s*(\d{{1,2}})\s*[:：]\s*(\d{{2}})")
-_TIME_CN = re.compile(rf"{_TIME_PERIOD}\s*(\d{{1,2}})\s*[点時时]\s*(半|\d{{1,2}}\s*分)?")
+# 「2点20前集合」这种**不带"分"**的写法很常见（用户 2026-10-18 的原话：
+# "2点20前集合"被识别成 02:00，20 掉进了标题）。允许省掉"分"，
+# 但不能把后面的量词吞进来（"3点20个"不是时间）。
+_TIME_CN = re.compile(
+    rf"{_TIME_PERIOD}\s*(\d{{1,2}})\s*[点時时]\s*"
+    r"(半|\d{1,2}\s*分|\d{1,2}(?!\s*[个元岁号人份次天月周年]))?")
 
 # ---- 中文数字的时刻：「上午十点」「两点半」「下午三点二十」----
 # 手机上手写经常用中文数字，不转成阿拉伯数字会被当成"没有时间"。
@@ -117,7 +122,8 @@ _DATE_STRIP = re.compile(
 )
 _TIME_STRIP = re.compile(
     rf"(?:{_TIME_PERIOD}\s*\d{{1,2}}\s*[:：]\s*\d{{2}}"
-    rf"|{_TIME_PERIOD}\s*\d{{1,2}}\s*[点時时]\s*(?:半|\d{{1,2}}\s*分)?)"
+    rf"|{_TIME_PERIOD}\s*\d{{1,2}}\s*[点時时]\s*"
+    r"(?:半|\d{1,2}\s*分|\d{1,2}(?!\s*[个元岁号人份次天月周年]))?)"
     r"(?:以前|之前|前|后)?"
 )
 
@@ -323,20 +329,37 @@ def resolve_time(text: str) -> tuple[int, int, str] | None:
     """返回 (时, 分, 命中的原文)。"""
     m = _TIME_HM.search(text)
     if m:
-        hour = _apply_period(m.group(1), int(m.group(2)))
+        hour = _apply_period(m.group(1) or _nearby_period(text, m.start()), int(m.group(2)))
         minute = int(m.group(3))
         if 0 <= hour <= 23 and 0 <= minute <= 59:
             return hour, minute, m.group(0)
 
     m = _TIME_CN.search(text)
     if m:
-        period, hour_raw = m.group(1), int(m.group(2))
+        # 时间词前面没带"下午/晚上"时，看看同一行附近有没有 ——
+        # "今天下午拉练，2点20前集合"里，下午离"2点"隔着半句话。
+        period = m.group(1) or _nearby_period(text, m.start())
+        hour_raw = int(m.group(2))
         tail = (m.group(3) or "").strip()
         minute = 30 if tail.startswith("半") else int(re.sub(r"\D", "", tail) or 0)
         hour_raw = _apply_period(period, hour_raw)
         if 0 <= hour_raw <= 23 and 0 <= minute <= 59:
             return hour_raw, minute, m.group(0)
     return None
+
+
+def _nearby_period(text: str, index: int, span: int = 12) -> str | None:
+    """往前找最近的"下午/晚上…"，隔着几个字也算（同一句话里）。
+
+    ⚠️ 只在**前面**找：句子后半段说"晚上还有一场"不能反过来改前面的时间。
+    """
+    head = text[max(0, index - span):index]
+    best = None
+    for word in _PM_PERIODS + ("上午", "早上", "早晨", "凌晨"):
+        pos = head.rfind(word)
+        if pos >= 0 and (best is None or pos > best[0]):
+            best = (pos, word)
+    return best[1] if best else None
 
 
 # 「下午」类前缀 → 24 小时制。两种写法（"3:00" 和 "3点"）共用这一处逻辑，
@@ -456,6 +479,9 @@ def _clean_title(text: str) -> str:
     # 只有后面跟着冒号才当称呼切掉。
     text = re.sub(r"^(?:各位|大家)\s*同学们?\s*[:：,，]?\s*", "", text)
     text = re.sub(r"^(?:同学们?)\s*[:：,，]\s*", "", text)
+    # 时间词留在句首（"下午拉练，集合"）：它已经被当成截止时间了，
+    # 标题里再带一个"下午"只是噪音（用户 2026-10-18 那条就这么来的）。
+    text = re.sub(r"^\s*(?:上午|下午|中午|晚上|早上|早晨|凌晨)\s*[，,]?\s*", "", text)
     text = re.sub(r"^(?:和|及|与|以及|然后|并且|另外|还有|就|要|需|请|记得)[、,，]?\s*", "", text)
     return text.strip(" ，,。、；;：:-—·*|\t")
 

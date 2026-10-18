@@ -216,6 +216,22 @@ class TestTimeParsing(unittest.TestCase):
         self.assertEqual(draft.title, "集合")
         self.assertEqual(draft.location, "图书馆门口")
 
+    def test_bare_minutes_and_a_distant_pm_word(self):
+        """「今天下午拉练，2点20前集合」：分钟要认，下午隔着半句话也要生效。
+
+        用户 2026-10-18 报的原话：这条被识别成 02:00（凌晨两点），
+        而且标题开头还挂着"下午"。
+        """
+        draft = quick_parse.parse_line(
+            "今天下午拉练，2点20前集合，2点25整队完毕，超过25以后到的同学按缺勤处理")
+        self.assertIsNotNone(draft)
+        self.assertTrue(draft.due_at.endswith("14:20:00"), draft.due_at)
+        self.assertTrue(draft.title.startswith("拉练"), draft.title)
+
+        # 前面没有"下午"就不该硬加 12 小时
+        plain = quick_parse.parse_line("2点20前集合")
+        self.assertTrue(plain.due_at.endswith("02:20:00"), plain.due_at)
+
     def test_traditional_chinese_normalized(self):
         """繁简归一：不归一，繁体里的"點"认不出来，时间会全错。"""
         self.assertEqual(to_simplified("明天早上11點打遊戲"), "明天早上11点打游戏")
