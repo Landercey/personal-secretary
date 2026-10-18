@@ -488,6 +488,18 @@ details.adv[open] > summary::before { content: "▾ " }
   </section>
 </div>
 
+<!-- 应用内确认框：取代 window.confirm —— 原生那个会带 "127.0.0.1:59741 显示"
+     这种页面来源，看着像外部网页弹的，跟软件格格不入（用户 2026-10-18 截图）。 -->
+<div class="mask" id="askMask">
+  <div class="dialog" style="width:380px;padding:22px 24px">
+    <p id="askText" style="font-size:13.5px;color:var(--text);margin:0 0 18px;white-space:pre-line"></p>
+    <div class="acts">
+      <button class="primary" id="askOk">确定</button>
+      <button id="askCancel">取消</button>
+    </div>
+  </div>
+</div>
+
 <div class="mask" id="riskMask">
   <div class="dialog">
     <h2>挂 QQ 之前，先把这件事想清楚</h2>
@@ -613,6 +625,28 @@ async function call(name, ...args) {
 function esc(s) {
   return String(s ?? '').replace(/[&<>"]/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+/* 应用内确认框（返回 Promise<true/false>）。
+
+   为什么不用 window.confirm：WebView2 弹的是浏览器原生对话框，标题栏写着
+   "127.0.0.1:59741 显示" —— 用户 2026-10-18 截图说"格格不入"。
+   这个用的是软件自己的遮罩层，样式和风控弹窗一套。 */
+let askResolver = null;
+function askConfirm(text, okText = '确定', cancelText = '取消') {
+  return new Promise((resolve) => {
+    const mask = $('askMask');
+    if (!mask) { resolve(window.confirm(text)); return; }   // 兜底：页面没这段
+    $('askText').textContent = String(text || '');
+    $('askOk').textContent = okText;
+    $('askCancel').textContent = cancelText;
+    mask.classList.add('on');
+    askResolver = (value) => {
+      mask.classList.remove('on');
+      askResolver = null;
+      resolve(value);
+    };
+  });
 }
 
 /* ---------- 左侧导航 ---------- */
@@ -779,10 +813,10 @@ function renderPanel(force) {
   return drawDetail();
 }
 
-function closePanel() {
+async function closePanel() {
   // 设置页有没保存的改动就先问一句 —— 直接叉掉等于白改，用户会以为程序吞了
   if (panel === 'settings' && settingsDirty
-      && !window.confirm('改动还没保存，关掉就丢了。\n确定关掉吗？')) {
+      && !(await askConfirm('改动还没保存，关掉就丢了'))) {
     return;
   }
   settingsDirty = false;
@@ -873,8 +907,9 @@ function drawDetail() {
   if (fixTime) fixTime.onclick = () => editTask();
   if (completeAll) completeAll.onclick = async () => {
     // 问一句，默认"只完成这一条"——顺手把子项也做掉是好事，但得他说了算
-    const yes = window.confirm(
-      `这条下面还有 ${t.child_count} 条子项。\n\n确定 = 全部一起完成；取消 = 只完成这一条`);
+    const yes = await askConfirm(
+      `这条下面还有 ${t.child_count} 条子项\n一起完成吗？（取消 = 只完成这一条）`,
+      '一起完成', '只完成这条');
     if (!yes) { act('complete'); return; }
     const res = await call('complete_with_children', t.id);
     toast((res && res.message) || '完成了');
@@ -1079,8 +1114,7 @@ async function drawAttach() {
       const picked = pool.find(i => String(i.id) === row.dataset.pick);
       const name = (picked && picked.title) || '这一条';
       const verb = merging ? '合并到' : '归到';
-      if (!window.confirm(`${verb}「${name}」${merging ? '里' : '下面'}？\n\n${
-        merging ? '合并后这条会进废件箱，可以捡回来' : '之后它会挂在那条的详情里，随时能移出'}`)) {
+      if (!(await askConfirm(`${verb}「${name}」${merging ? '里' : '下面'}？`))) {
         return;
       }
       const r = merging
@@ -1855,9 +1889,9 @@ function drawSettings() {
       const name = sel && sel.value;
       if (!name || !name.startsWith('secretary-')) { toast('先选一份备份'); return; }
       // 这一步是覆盖数据，必须问一句；文案把"会先另存一份"也写上，用户才敢点
-      if (!window.confirm(`用 ${name} 覆盖现在的待办？\n\n` +
-                          '现在的待办/消息/废件箱会被替换成备份里那份。\n' +
-                          '（会先把现在这份另存为 before-restore-*.db，配置不动）')) return;
+      if (!(await askConfirm(
+        `用 ${name} 覆盖现在的待办？\n会先把你现在这份另存一份，配置不动`,
+        '覆盖', '取消'))) return;
       const box = b.parentElement.querySelector('[data-restoreresult]');
       b.disabled = true;
       b.textContent = '正在恢复…';
@@ -1972,8 +2006,8 @@ function drawSettings() {
       btn.dataset.doupdate = '1';
       btn.textContent = '一键更新（程序会自己关掉再打开）';
       btn.onclick = async () => {
-        if (!window.confirm('现在更新？程序会自己关掉，几秒后重新打开。\n' +
-                            '配置、待办、下好的 QQ 都不会动，也不用重新扫码')) return;
+        if (!(await askConfirm('现在更新？程序会关掉，几秒后重新打开\n配置、待办、QQ 都不用重新弄',
+                               '更新', '取消'))) return;
         btn.disabled = true;
         btn.textContent = '正在下载…（约 45 MB，别关窗口）';
         const done = await call('install_update');
@@ -2328,7 +2362,7 @@ async function drawQqPanel() {
   };
   $('btnQQStop').onclick = async () => {
     // 停掉之后收不到消息，也不会有推送里的新待办 —— 问一句再停
-    if (!window.confirm('停止后台？\n\n停了之后收不到群消息，也不会再自动推送；要恢复得再点一次「启动 QQ」')) {
+    if (!(await askConfirm('停止后台？停了收不到群消息，也不会再推送', '停止', '取消'))) {
       return;
     }
     const res = await call('stop_background');
@@ -2851,6 +2885,9 @@ async function refresh() {
 
 /* ---------- 接线 ---------- */
 window.addEventListener('pywebviewready', () => {
+  // 应用内确认框的两个按钮
+  $('askOk').onclick = () => { if (askResolver) askResolver(true); };
+  $('askCancel').onclick = () => { if (askResolver) askResolver(false); };
   $('btnSettings').onclick = () => {
     if (panel === 'settings') { setPanel(null); renderPanel(false); return; }
     openSettings(null);
