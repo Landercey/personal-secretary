@@ -497,9 +497,13 @@ class SqliteStore(Store):
     # ------------------------------------------------------------------ 子待办
     @_synchronized
     def children_of(self, parent_id: int) -> list[Task]:
-        """一个父待办下面的子项。做完的排后面，别把还没做的挤下去。"""
+        """一个父待办下面的子项。做完的排后面，别把还没做的挤下去。
+
+        **被合并掉的（status=dropped）不算** —— 它已经被并进别的待办里了，
+        还挂在父项下面会让人以为"这条还在"。
+        """
         rows = self.conn.execute(
-            "SELECT * FROM tasks WHERE parent_id=?"
+            "SELECT * FROM tasks WHERE parent_id=? AND status<>'dropped'"
             " ORDER BY (status<>'open'), (due_at IS NULL), due_at, task_id",
             (int(parent_id),)).fetchall()
         return [self._row_to_task(row) for row in rows]
@@ -581,8 +585,10 @@ class SqliteStore(Store):
     @_synchronized
     def descendant_counts(self) -> dict[int, int]:
         """{一级待办: 整棵树里一共多少条} —— 列表上的 "+N" 用这个数。"""
+        rows = self.conn.execute(
+            "SELECT task_id, parent_id FROM tasks WHERE status<>'dropped'").fetchall()
         parents = {int(r["task_id"]): (int(r["parent_id"]) if r["parent_id"] else None)
-                   for r in self.conn.execute("SELECT task_id, parent_id FROM tasks")}
+                   for r in rows}
         roots: dict[int, int] = {}
         for task_id in parents:
             cursor, guard = task_id, 0

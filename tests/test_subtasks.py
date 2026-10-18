@@ -174,3 +174,22 @@ class TestSplitAndMerge(Base):
         self.assertEqual(self.store.get_task(b.task_id).status, "dropped")
         self.assertIn("合并自：带身份证", self.store.get_task(a.task_id).detail)
         self.assertEqual([t.title for t in self.store.list_tasks("open")], ["领社保卡"])
+
+    def test_merging_a_child_into_its_parent_makes_it_disappear_from_the_tree(self):
+        """子项并进父项：并完之后不能再挂在父项下面（否则看着像还在）。"""
+        parent, kid = self.add("搬家"), self.add("借推车")
+        self.store.attach_child(kid.task_id, parent.task_id)
+        ok, why = self.store.merge_tasks(kid.task_id, parent.task_id)
+        self.assertTrue(ok, why)
+        self.assertEqual(self.store.children_of(parent.task_id), [])
+        self.assertEqual(self.store.descendant_counts().get(parent.task_id), None)
+        self.assertIn("合并自：借推车", self.store.get_task(parent.task_id).detail)
+        self.assertEqual(self.store.get_task(kid.task_id).status, "dropped")
+
+    def test_a_parent_cannot_be_merged_into_someone_else(self):
+        """带子项的不能直接并走 —— 子树会跟着搬家，层级就乱了。"""
+        parent, kid, other = self.add("搬家"), self.add("借推车"), self.add("期末")
+        self.store.attach_child(kid.task_id, parent.task_id)
+        ok, why = self.store.merge_tasks(parent.task_id, other.task_id)
+        self.assertFalse(ok)
+        self.assertIn("子项", why)

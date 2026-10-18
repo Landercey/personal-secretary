@@ -1036,6 +1036,8 @@ async function loadChildren(taskId) {
   });
   box.querySelectorAll('[data-kid-attach]').forEach(a => a.onclick = () => {
     attachTarget = Number(a.dataset.kidAttach);
+    // 这里只能"归到"，不是"合并" —— 不然上一次用过合并，这里会拿错模式
+    attachMode = 'attach';
     setPanel('attach');
     renderPanel(true);
   });
