@@ -1588,7 +1588,12 @@ function renderSection(sec, first) {
     : '';
   return `<details class="sec" data-section="${sec.name}"${open ? ' open' : ''}>
       <summary>${esc(sec.title)}<i>${esc(sec.desc)}</i></summary>${
-      common.map(f => renderField(sec.name, f)).join('')}${tester}${aitest}${restore}${picker}${updater}${tail}</details>`;
+      // 「读取我加的群」要紧贴「要监控的群号」那一格 —— 它俩是同一件事的
+      // 两种输入方式（手填 / 勾选）。以前挂在这一段的最后，中间隔着端口、
+      // 私聊、收件箱七八个框，用户根本不会往下翻到它。
+      common.map(f => renderField(sec.name, f) +
+        (sec.name === 'qq' && f.key === 'group_ids' ? picker : '')).join('')
+      }${tester}${aitest}${restore}${updater}${tail}</details>`;
 }
 
 function activateTab(name) {
