@@ -7,8 +7,8 @@
 /* =====================================================================
    设计取向：克制，不是花哨
    留白和层次感来自「间距 + 字重对比 + 极轻的阴影」，
-   不来自渐变、不来自大圆角、不来自动画特效。
-   配色只用一个强调色（靛蓝），其余全是中性灰。
+   不来自渐变、不来自大圆角、不来自动画特效
+   配色只用一个强调色（靛蓝），其余全是中性灰
    ===================================================================== */
 :root {
   --bg:        #f6f6f7;
@@ -75,7 +75,7 @@ nav .gap { height: 14px }
 .tools button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px }
 
 /* pre-line: 下面几行状态是拿 \n 拼的，默认会把换行吞成一个空格 */
-/* 左下角：**标签靠左、数值靠右**的两列，比一坨左对齐的小字好扫。
+/* 左下角：**标签靠左、数值靠右**的两列，比一坨左对齐的小字好扫
    最上面一行是"收消息的进程活着没"，带个状态点。 */
 .foot { padding: 8px 4px 0; font-size: 11px; color: var(--text-3) }
 .foot > * {
@@ -206,7 +206,7 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22
 .guide li.ok { color: var(--text-3) }
 .guide li.ok .mk { color: #16a34a }
 .guide li.todo .mk { color: var(--today) }
-/* 战报：一行，不许抢待办的位置。累计在后面括号里，主次一眼分得清。
+/* 战报：一行，不许抢待办的位置。累计在后面括号里，主次一眼分得清
    数字用等宽字形（tabular-nums），刷新时位数变化不会左右跳。 */
 .statline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px;
             font-size: 12px; color: var(--text-2) }
@@ -290,13 +290,18 @@ button:disabled { opacity: .5; cursor: default }
 .acts .two { display: flex; gap: 7px }
 .acts .two button { flex: 1 }
 .acts button.block { width: 100% }
-/* 「复制 / 这不是待办」这类次要动作：不画框，像链接一样安静。
+/* 「复制 / 这不是待办」这类次要动作：不画框，像链接一样安静
    以前详情页底下是四个等宽的大按钮，主次全被拉平了。 */
 .acts .quiet { display: flex; gap: 16px; justify-content: center; margin-top: 4px }
 .acts .quiet button { border: 0; background: none; padding: 4px 6px;
                       color: var(--text-3); font-size: 11.5px }
 .acts .quiet button:hover { color: var(--text-2); background: none; text-decoration: underline }
 .acts .quiet button.danger { color: var(--overdue) }
+/* 并排两个按钮、各自带说明：说明要落在**自己那个按钮正下方**。
+   之前说明排在整行下面，左边空着、右边挤着，看着像没对齐。 */
+.acts .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 12px }
+.acts .pair .cell { display: flex; flex-direction: column; gap: 4px }
+.acts .pair .hint { margin: 0; font-size: 11px; line-height: 1.5; word-break: break-all }
 /* 群列表勾选：一行一个群，左边方框、中间名字、右边群号 */
 .glist { margin-top: 2px; max-height: 240px; overflow: auto;
          border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px }
@@ -307,7 +312,7 @@ button:disabled { opacity: .5; cursor: default }
 /* ---------- 设置面板 ---------- */
 .panelhead { display: flex; align-items: center; gap: 10px; margin-bottom: 4px }
 .panelhead h2 { margin: 0; flex: 1 }
-/* 保存条贴在右栏**底部**。
+/* 保存条贴在右栏**底部**
    以前那个「保存」钉在标题旁边：既和右上角的关闭 ✕ 挤在一起，
    改完下面几段又得一路滚回顶上才点得到 —— 滚着滚着就忘了保存。 */
 .savebar {
@@ -484,22 +489,22 @@ details.adv[open] > summary::before { content: "▾ " }
 <div class="mask" id="riskMask">
   <div class="dialog">
     <h2>挂 QQ 之前，先把这件事想清楚</h2>
-    <!-- 防背锅的那段话放在最上面：倒卖者不会替我们说，只能让买家在这里看见。
+    <!-- 防背锅的那段话放在最上面：倒卖者不会替我们说，只能让买家在这里看见
          只加文字、不加拦截 —— 提醒到就够了，不能把正版用户也挡在外面。 -->
     <p style="background:var(--accent-bg);padding:9px 11px;border-radius:8px">
-      <b>先说清楚：这个软件是免费的、开源的。</b><br>
-      官方地址只有 <b>github.com/Landercey/personal-secretary</b>。
+      <b>先说清楚：这个软件是免费的、开源的</b><br>
+      官方地址只有 <b>github.com/Landercey/personal-secretary</b>
       如果你是<b>花钱</b>从别人那里买的（"整合包""代配置""会员版"），
-      你被多收了一笔钱 —— 正版在这里免费下，还会自动更新。
+      你被多收了一笔钱 —— 正版在这里免费下，还会自动更新
     </p>
     <p>这个程序要一直挂着你的 QQ 才能收消息。用哪个号，代价不一样 ——
        作者只能给你事实，不能给你保证：</p>
-    <p><b>· 程序已经帮你降到最轻了。</b>它只收不发：不发言、不加好友、不拉群成员名单，
-       只盯着你勾选的那几个会话。行为上比"正常挂机"轻得多。</p>
-    <p><b>· 但用大号长期挂着，风险始终比小号高。</b>这是腾讯那边的规则，不是这个程序能改的。
-       作者自己用的就是大号，到现在没出过事 —— 这只是"到现在"，不是承诺。</p>
-    <p><b>· 用哪个号你自己定。</b>怕出事的就用小号，前提是那个小号能进你要监控的群。
-       用小号的话，"发给自己小号"那条收件箱功能也顺便能用上。</p>
+    <p><b>· 程序已经帮你降到最轻了</b>它只收不发：不发言、不加好友、不拉群成员名单，
+       只盯着你勾选的那几个会话。行为上比"正常挂机"轻得多</p>
+    <p><b>· 但用大号长期挂着，风险始终比小号高</b>这是腾讯那边的规则，不是这个程序能改的
+       作者自己用的就是大号，到现在没出过事 —— 这只是"到现在"，不是承诺</p>
+    <p><b>· 用哪个号你自己定</b>怕出事的就用小号，前提是那个小号能进你要监控的群
+       用小号的话，"发给自己小号"那条收件箱功能也顺便能用上</p>
     <div class="acts">
       <button class="primary block" id="btnRiskOk">我知道了，别每次都提醒</button>
     </div>
@@ -513,7 +518,7 @@ details.adv[open] > summary::before { content: "▾ " }
 <script>
 /* =====================================================================
    和 Python 的桥：window.pywebview.api.xxx()
-   只有确认桥接好了才能调，所以全部逻辑挂在 pywebviewready 之后。
+   只有确认桥接好了才能调，所以全部逻辑挂在 pywebviewready 之后
    ===================================================================== */
 const VIEWS = [
   { id: 'today',    label: '今天' },
@@ -548,7 +553,7 @@ let drawnPanel = null;      // 已经画出来的是哪个，避免 5 秒轮询�
 let schema = null;          // 后端给的配置清单（分组 → 段 → 项）
 let openSection = null;     // 要跳过去并展开的那一段
 let activeGroup = null;     // 设置面板当前在哪个分组标签页
-/* 小白 / 大佬的总开关。默认关：只画"不填就用不了"的那几项。
+/* 小白 / 大佬的总开关。默认关：只画"不填就用不了"的那几项
    记在 localStorage 里 —— 大佬打开一次，以后每次都是打开的状态。 */
 let showAdvanced = false;
 try { showAdvanced = localStorage.getItem('showAdvanced') === '1'; } catch (e) {}
@@ -581,7 +586,7 @@ function toast(msg) {
   el._t = setTimeout(() => el.classList.remove('on'), 1800);
 }
 
-/* 把桥的错误显示出来。
+/* 把桥的错误显示出来
    为什么必须做：pywebview 里 Python 抛异常，JS 这边只会拿到一个 rejected promise，
    如果不管它，界面就是"点了没反应"—— 用户完全不知道发生了什么，
    只能来问"为什么没反应"。这个问题真发生过。 */
@@ -672,7 +677,7 @@ function renderList() {
       }
       if (e.target.dataset.done) return;
       // 废件箱那条的 id 是字符串（"task-7" / "text-3"），待办是数字，
-      // 所以统一按字符串找，别用 Number()。
+      // 所以统一按字符串找，别用 Number()
       const found = items.find(x => String(x.id) === row.dataset.id);
       if (!found) return;
       selected = found.id;
@@ -767,7 +772,7 @@ function renderPanel(force) {
 }
 
 function closePanel() {
-  // 设置页有没保存的改动就先问一句 —— 直接叉掉等于白改，用户会以为程序吞了。
+  // 设置页有没保存的改动就先问一句 —— 直接叉掉等于白改，用户会以为程序吞了
   if (panel === 'settings' && settingsDirty
       && !window.confirm('改动还没保存，关掉就丢了。\n确定关掉吗？')) {
     return;
@@ -792,7 +797,7 @@ function drawDetail() {
   if (editing) return drawEdit(t);
 
   // 废件箱里的东西：不推送、不进主列表。这里要能看出"它为什么在这儿"，
-  // 而且如果是用户自己点错的，得能给条回来的路。
+  // 而且如果是用户自己点错的，得能给条回来的路
   if (t.junk) {
     $('detailInner').innerHTML = `
       <h2>${esc(t.title)}</h2>
@@ -800,17 +805,17 @@ function drawDetail() {
       ${t.source ? `<div class="kv"><b>来源</b><span>${esc(t.source)}</span></div>` : ''}
       <p class="hint" style="margin-top:14px">
         这里的东西不推送、不进主列表。留着是为了让你回头看"这条为什么没变成待办"，
-        也是以后调规则的案例。</p>
+        也是以后调规则的案例</p>
       <div class="acts">
         ${t.junkKind === 'task'
           ? `<button class="primary block" id="btnRestore">移出「废件箱」</button>
              <p class="hint" style="margin-top:2px">移到「全部未完成」——
-               之后它在哪个分组，由截止时间自己决定（今天 / 本周 / 逾期…）。</p>`
+               之后它在哪个分组，由截止时间自己决定（今天 / 本周 / 逾期…）</p>`
           : `<div id="junkBody"><p class="hint">正在读它当时的样子…</p></div>
              <button class="primary block" id="btnPromote">这条其实有用 → 变成待办</button>
              <button class="block" id="btnForget">删掉它</button>
              <p class="hint" style="margin-top:2px">删掉只是把这条从废件箱里清走；
-               原始消息和附件都还留在库里。</p>`}
+               原始消息和附件都还留在库里</p>`}
       </div>`;
     const back = $('btnRestore');
     if (back) back.onclick = () => act('restore', t.junkId);
@@ -874,7 +879,7 @@ function drawDetail() {
   if (t.files && t.files.length) renderFiles(t);
 }
 
-/* 废件箱里那条"被规则拦下的原文"：**当时到底收到了什么**。
+/* 废件箱里那条"被规则拦下的原文"：**当时到底收到了什么**
    列表上只写一行 "[图片]" 是答不上来的 —— 用户要的是"这张图你给我读了什么、
    它还在不在"。这里把当时那条摊开：谁发的、正文、程序读到的结论、图本身。 */
 async function drawJunkBody(dropId) {
@@ -892,7 +897,7 @@ async function drawJunkBody(dropId) {
       ? `<div class="kv"><b>程序读到</b><span>${esc(res.notes.join('；'))}</span></div>` : ''}
     ${res.preview ? `<div class="file"><div class="fimg"><img src="${res.preview}" alt=""></div></div>` : ''}
     ${(res.files || []).length
-      ? `<p class="hint">跟着这条存下来的附件 ${res.files.length} 份（在 data/attachments 里）。</p>`
+      ? `<p class="hint">跟着这条存下来的附件 ${res.files.length} 份（在 data/attachments 里）</p>`
       : ''}`;
 }
 
@@ -904,8 +909,8 @@ function junkSummary(text) {
   return first.length > 42 ? first.slice(0, 42) + '…' : first;
 }
 
-/* 「提醒力度」：**勾选**，可以勾好几个（用户原话："要能实现多次提醒，不是只能选一个"）。
-   一个都不勾 = 默认（只在每日汇总里出现），所以这里没有一个叫"默认"的勾选项。
+/* 「提醒力度」：**勾选**，可以勾好几个（用户原话："要能实现多次提醒，不是只能选一个"）
+   一个都不勾 = 默认（只在每日汇总里出现），所以这里没有一个叫"默认"的勾选项
    当前选中的如果不在设置那张表里（用户后来把选项改小了），也补一个出来给他取消。 */
 function remindBox(t) {
   const chosen = (t.remind || []).map(Number).filter(n => n > 0);
@@ -928,13 +933,13 @@ function remindBox(t) {
       （可多选；一个都不点就是"只在每日汇总里出现"）</p>`;
 }
 
-/* 已完成 / 已归档的不在主列表里，所以动作只有一个：**移出**。
-   界面上必须说清楚"移到哪"，不然用户点完不知道它去哪了。
+/* 已完成 / 已归档的不在主列表里，所以动作只有一个：**移出**
+   界面上必须说清楚"移到哪"，不然用户点完不知道它去哪了
    答案：目标只有一个（全部未完成），剩下的分组由截止时间自己决定。 */
-// 复制这条待办：标题 + 截止 + 地点 + 来源 + 原话。
-// 为什么要有：往滴答清单/Notion 里贴的时候，电脑上复制比手机上长按顺手得多。
+// 复制这条待办：标题 + 截止 + 地点 + 来源 + 原话
+// 为什么要有：往滴答清单/Notion 里贴的时候，电脑上复制比手机上长按顺手得多
 // 截止用 due_raw（2026-10-23 23:59）而不是"明天 23:59" —— 清单软件的文本识别
-// 只认完整日期。
+// 只认完整日期
 function taskText(t) {
   const lines = [String(t.title || '')];
   const due = String(t.due_raw || t.due || '').replace('T', ' ');
@@ -946,7 +951,7 @@ function taskText(t) {
 }
 
 // WebView2 里 navigator.clipboard 要权限、还可能被策略挡掉；
-// 老办法（隐藏 textarea + execCommand）哪个版本都能用，所以先试它。
+// 老办法（隐藏 textarea + execCommand）哪个版本都能用，所以先试它
 function copyText(text) {
   const area = document.createElement('textarea');
   area.value = text;
@@ -967,8 +972,8 @@ function copyText(text) {
 
 function detailActions(t) {
   if (!t.done && !t.archived) {
-    // 主操作在最上，两个次要动作并排，复制和"不是待办"收成一行安静的字。
-    // 以前是四个等宽大按钮堆着，用户分不清哪个是"该点的那个"。
+    // 主操作在最上，两个次要动作并排，复制和"不是待办"收成一行安静的字
+    // 以前是四个等宽大按钮堆着，用户分不清哪个是"该点的那个"
     return `<div class="acts">
         <button class="primary block" onclick="act('complete')">标记完成</button>
         <div class="two">
@@ -987,7 +992,7 @@ function detailActions(t) {
       <button class="primary block" id="btnRestore">移出「${where}」</button>
       <p class="hint" style="margin-top:2px">移到「全部未完成」——
         之后它在哪个分组，由截止时间自己决定（今天 / 本周 / 逾期…）；
-        没写时间的就只在「全部未完成」里。</p>
+        没写时间的就只在「全部未完成」里</p>
       <div class="quiet"><button id="btnCopyTask">复制</button></div>
     </div>`;
 }
@@ -995,12 +1000,12 @@ function detailActions(t) {
 function drawEdit(t) {
   $('detailInner').innerHTML = `
     <div class="panelhead"><h2>改内容</h2></div>
-    <p class="note">解析错了就这儿改 —— 不用"判误判、再重新发一遍"。</p>
+    <p class="note">解析错了就这儿改 —— 不用"判误判、再重新发一遍"</p>
     <div class="field"><label for="eTitle">标题</label>
       <input type="text" id="eTitle" value="${esc(t.title)}"></div>
     <div class="field"><label for="eDue">截止时间</label>
       <input type="datetime-local" id="eDue" value="${esc(t.due_raw || '')}">
-      <p class="hint">留空 = 没有截止时间。改完这里，同一条消息再来也不会重复建。</p></div>
+      <p class="hint">留空 = 没有截止时间。改完这里，同一条消息再来也不会重复建</p></div>
     <div class="field"><label for="eLoc">地点</label>
       <input type="text" id="eLoc" value="${esc(t.location)}"></div>
     <div class="acts">
@@ -1083,8 +1088,8 @@ function showUndo(label) {
 function drawComposer() {
   $('detailInner').innerHTML = `
     <div class="panelhead"><h2>新建待办</h2></div>
-    <p class="note">写一句话就行，比如「明天下午三点在图书馆门口集合」。
-       时间和地点会自动认出来，不用按格式填。</p>
+    <p class="note">写一句话就行，比如「明天下午三点在图书馆门口集合」
+       时间和地点会自动认出来，不用按格式填</p>
     <div class="field">
       <textarea id="newText" placeholder="明天下午三点交作业"></textarea>
       <p class="hint">Ctrl + Enter 快速添加</p>
@@ -1092,7 +1097,7 @@ function drawComposer() {
     <div class="acts">
       <button class="primary block" id="btnAdd">添加</button>
     </div>
-    <p class="hint" style="margin-top:14px">也可以把这段话直接发给 QQ 小号，一样会进来。</p>`;
+    <p class="hint" style="margin-top:14px">也可以把这段话直接发给 QQ 小号，一样会进来</p>`;
 
   const add = async () => {
     const box = $('newText');
@@ -1160,7 +1165,7 @@ async function acceptDrop(file) {
   renderPanel(true);
 }
 
-/* 拖进来的是一段 Python 代码 —— 那就当插件装，不是待办。
+/* 拖进来的是一段 Python 代码 —— 那就当插件装，不是待办
    ⚠️ 界面上必须把"插件能干什么"说清楚：它跟你自己写的程序权限一样。 */
 function drawPluginDrop(d) {
   $('detailInner').innerHTML = `
@@ -1168,8 +1173,8 @@ function drawPluginDrop(d) {
     <p class="note">文件：<b>${esc(d.name)}</b>（${fmtSize(d.size)}）</p>
     <div class="guide warn" style="margin-bottom:14px">
       <p><b>装之前想清楚：</b>插件就是一段 Python 代码，跑起来跟你自己写的程序
-         <b>权限一样</b> —— 它能读你的待办、能联网、能删你的文件。
-         只装你信得过来源的东西，别装群里随手发的。</p>
+         <b>权限一样</b> —— 它能读你的待办、能联网、能删你的文件
+         只装你信得过来源的东西，别装群里随手发的</p>
     </div>
     <div class="acts">
       <button class="primary block" id="btnInstall">装成插件</button>
@@ -1215,9 +1220,9 @@ function drawDrop() {
       <button class="block" id="dropCancel">算了，不要了</button>
     </div>
     ${isFile ? `<p class="hint" style="margin-top:14px">
-       也可以直接把文件发给 QQ 小号，一样会进来。<br>
-       ${isShortcut(d.name) ? '这是一份快捷方式，会自动跟到它指向的文件。<br>' : ''}
-       超过 ${dropMaxMb} MB 的文件用 python run.py --file 路径。</p>` : ''}
+       也可以直接把文件发给 QQ 小号，一样会进来<br>
+       ${isShortcut(d.name) ? '这是一份快捷方式，会自动跟到它指向的文件<br>' : ''}
+       超过 ${dropMaxMb} MB 的文件用 python run.py --file 路径</p>` : ''}
     <div id="dropOut"></div>`;
 
   $('dropTodo').onclick = async () => {
@@ -1225,7 +1230,7 @@ function drawDrop() {
       const res = await call('ingest_drop', d.id);
       if (!res) return;
       // 没读出东西时**必须说清为什么** —— 只说"没读出待办"，
-      // 用户分不清是文件里没字、格式不支持、还是内容不像待办（用户报过）。
+      // 用户分不清是文件里没字、格式不支持、还是内容不像待办（用户报过）
       if (res.added) {
         toast(`已建 ${res.added} 条待办`);
         dropped = null; setPanel(null); refresh();
@@ -1266,7 +1271,7 @@ function drawDrop() {
       ? `<div class="quote">${source}<em>从文件里读出来的字（共 ${res.chars} 字，这里显示前 1500）</em>${
           esc(res.text)}</div>`
       : `<div class="quote">${source}<em>没读出文字</em>${
-          esc(res.note || '这个文件里确实没有文字。')}</div>`;
+          esc(res.note || '这个文件里确实没有文字')}</div>`;
   };
 
   $('dropCancel').onclick = async () => {
@@ -1336,17 +1341,17 @@ function renderField(sectionName, f) {
     input = `<input type="text" id="${id}" data-path="${path}" value="${esc(f.value)}"
                placeholder="留空 = 不用"${off}>`;
   }
-  // 记下"后端给的原始值"，保存时拿它比 —— 只提交**真改过**的字段。
+  // 记下"后端给的原始值"，保存时拿它比 —— 只提交**真改过**的字段
   // 为什么（2026-10-13 真丢过设置）：保存以前是把界面上**所有**字段打包写回去，
-  // 于是任何外部改动（另一个进程写进配置文件的、热读到的）都会被界面里那份旧值冲掉。
+  // 于是任何外部改动（另一个进程写进配置文件的、热读到的）都会被界面里那份旧值冲掉
   const was = f.kind === 'bool' ? String(!!f.value)
     : f.kind === 'list' ? (f.value || []).join(', ')
       : String(f.value ?? '');
   input = input.replace(`data-path="${path}"`,
                         `data-path="${path}" data-was="${esc(was)}"`);
 
-  // 锁住的项：说明换成"为什么锁"，并给一个明确的解锁入口。
-  // 只禁用不解释的话，用户只会觉得"这软件有 bug，改不了"。
+  // 锁住的项：说明换成"为什么锁"，并给一个明确的解锁入口
+  // 只禁用不解释的话，用户只会觉得"这软件有 bug，改不了"
   if (locked) {
     const { label } = fieldLabel(f);
     return `<div class="field locked">
@@ -1360,7 +1365,7 @@ function renderField(sectionName, f) {
   const { label, hint } = fieldLabel(f);
   const text = `${esc(label)}${hint ? `<p class="hint">${esc(hint)}</p>` : ''}`;
   // 勾选项：方框在左、说明在右（像设置面板该有的样子）；
-  // 其它项：标题在上、输入框在下。不要把所有控件都堆成一列方块。
+  // 其它项：标题在上、输入框在下。不要把所有控件都堆成一列方块
   return f.kind === 'bool'
     ? `<div class="field check">${input}<div><label for="${id}">${text}</label></div></div>`
     : `<div class="field"><label for="${id}">${esc(label)}</label>${input}${
@@ -1372,67 +1377,71 @@ function renderSection(sec, first) {
   const advanced = sec.keys.filter(k => k.level === 'advanced');
   const open = openSection ? sec.name === openSection : first;
   // 高级项折进段底部的「高级」里，默认收起 ——
-  // 一屏塞 60 个框，用户根本分不清哪个能碰、哪个碰了会出事。
-  // 小白模式下连这个折条都不画：要调参就把顶部「高级设置」打开。
+  // 一屏塞 60 个框，用户根本分不清哪个能碰、哪个碰了会出事
+  // 小白模式下连这个折条都不画：要调参就把顶部「高级设置」打开
   const tail = advanced.length && showAdvanced
     ? `<details class="adv"><summary>高级（一般不用动）</summary>${
         advanced.map(f => renderField(sec.name, f)).join('')}</details>`
     : '';
   // 推送那两段多一个「发一条测试推送」：刚填完地址的人没法知道通不通，
   // 只能等下一次定时推送（最长 12 小时）。钉钉的「关键词没对上」、
-  // token 抄错一位，都是点这一下就看得出来的事。
+  // token 抄错一位，都是点这一下就看得出来的事
   const tester = (sec.name === 'wecom_bot' || sec.name === 'push_webhook')
     ? `<div class="acts" style="margin-top:10px">
          <button class="block" data-testpush="${sec.name}">发一条测试推送（看手机响不响）</button>
-         <p class="hint" data-testresult>读的是<b>已经保存</b>的地址 —— 刚改完先点下面的「保存」再点这里。</p>
+         <p class="hint" data-testresult>读的是<b>已经保存</b>的地址 —— 刚改完先点下面的「保存」再点这里</p>
        </div>`
     : '';
   // QQ 段多一个「读取我加的群」：群号一个个手填是最烦的一步
-  // （还得先去 QQ 里找到群号）。后台问 QQ 要一份列表捎上来，这里做成勾选。
+  // （还得先去 QQ 里找到群号）。后台问 QQ 要一份列表捎上来，这里做成勾选
   const picker = sec.name === 'qq'
     ? `<div class="acts" style="margin-top:10px">
          <button class="block" data-loadgroups>读取我加的群（不用自己找群号）</button>
-         <p class="hint" data-groupstip>得先让后台跑起来并登录（「📱 QQ 接收」→ 启动 QQ），登录之后才读得到。</p>
+         <p class="hint" data-groupstip>得先让后台跑起来并登录（「📱 QQ 接收」→ 启动 QQ），登录之后才读得到</p>
          <div class="glist" data-grouplist style="display:none"></div>
        </div>`
     : '';
   // 「界面与更新」那段多一个检查更新的按钮。**一键更新只覆盖 exe 和 _internal**，
-  // 配置、待办、插件、下好的 QQ 都在别的文件夹里 —— 所以不用重新扫码登录。
+  // 配置、待办、插件、下好的 QQ 都在别的文件夹里 —— 所以不用重新扫码登录
   const updater = sec.name === 'ui'
     ? `<div class="acts" style="margin-top:10px">
          <div class="two">
            <button data-checkupdate>检查更新</button>
            <button data-about>关于</button>
          </div>
-         <p class="hint" data-updateresult>点一下问 GitHub 有没有新版。更新不碰配置和待办，也不用重新扫码。</p>
+         <p class="hint" data-updateresult>点一下问 GitHub 有没有新版。更新不碰配置和待办，也不用重新扫码</p>
        </div>`
     : '';
   // AI 段多一个「试一下」：填完地址/模型/密钥之后没法知道对不对 ——
-  // 要么干等群里来一条 40 字以上的长通知，要么盯着左下角那行状态猜。
-  // 这一下只发一句固定的话，不碰用户的待办，所以不需要先开「允许上传」。
+  // 要么干等群里来一条 40 字以上的长通知，要么盯着左下角那行状态猜
+  // 这一下只发一句固定的话，不碰用户的待办，所以不需要先开「允许上传」
   const aitest = sec.name === 'ai'
     ? `<div class="acts" style="margin-top:10px">
          <button class="block" data-testai>试一下 AI 连接（发一句"收到"）</button>
-         <p class="hint" data-aitestresult>读的是<b>已经保存</b>的配置 —— 刚改完先点下面的「保存」再点这里。</p>
+         <p class="hint" data-aitestresult>读的是<b>已经保存</b>的配置 —— 刚改完先点下面的「保存」再点这里</p>
        </div>`
     : '';
-  // 「数据保留」那段多一个恢复入口：每天自动备份已经有，但没入口等于白备。
+  // 「数据保留」那段多一个恢复入口：每天自动备份已经有，但没入口等于白备
   const restore = sec.name === 'store'
     ? `<div class="acts" style="margin-top:10px">
          <select class="block" data-backupsel><option>正在读备份列表…</option></select>
          <button class="block" data-restore>恢复这份备份</button>
-         <p class="hint" data-restoreresult>会把现在的待办换成备份里那份（先自动另存一份，配置不动）。</p>
-         <div class="two">
-           <button data-exportical>导出日历（.ics）</button>
-           <button data-fullbackup>完整备份</button>
+         <p class="hint" data-restoreresult>会把现在的待办换成备份里那份（先自动另存一份，配置不动）</p>
+         <div class="pair">
+           <div class="cell">
+             <button data-exportical>导出日历（.ics）</button>
+             <p class="hint" data-icalresult>只导出了时间的待办</p>
+           </div>
+           <div class="cell">
+             <button data-fullbackup>完整备份</button>
+             <p class="hint" data-fullbackupresult>含推送地址和 token，别外发</p>
+             <p class="hint" data-fullbackupmsg></p>
+           </div>
          </div>
-         <p class="hint" data-icalresult>只导出了时间的待办。</p>
-         <p class="hint" data-fullbackupmsg style="margin-bottom:0"></p>
-         <p class="hint" data-fullbackupresult>含推送地址和 token，别外发。</p>
          <details class="adv"><summary>备份到底备了什么</summary>
            <p class="hint">每天的自动备份只有数据库（待办、消息、废件箱、推送记录、
              累计数据都在里面）。图片和文档在 data\attachments，要换电脑就点上面的
-             「完整备份」——打成一个 zip 放进 data\backups，留最近 3 份。
+             「完整备份」——打成一个 zip 放进 data\backups，留最近 3 份
              <span data-attinfo></span></p>
          </details>
        </div>`
@@ -1443,8 +1452,8 @@ function renderSection(sec, first) {
 }
 
 function activateTab(name) {
-  // ⚠️ 必须记下来：设置面板每次保存后会整块重画，而重画时要靠它决定"停在哪个标签"。
-  // 以前它只读不写（永远是 null），于是**一保存就跳回第一个标签**（用户报的）。
+  // ⚠️ 必须记下来：设置面板每次保存后会整块重画，而重画时要靠它决定"停在哪个标签"
+  // 以前它只读不写（永远是 null），于是**一保存就跳回第一个标签**（用户报的）
   activeGroup = name;
   $('detailInner').querySelectorAll('.tab').forEach(b =>
     b.classList.toggle('on', b.dataset.g === name));
@@ -1460,16 +1469,16 @@ function wireUnlock() {
       const el = $('detailInner').querySelector(`[data-path="${path}"]`);
       if (el) el.disabled = false;
       link.className = 'warn';
-      link.textContent = '已解锁。改完必须让 NapCat 那边也对得上，否则 QQ 收不到消息。';
+      link.textContent = '已解锁。改完必须让 NapCat 那边也对得上，否则 QQ 收不到消息';
     };
   });
 }
 
 /* ---------- 群勾选 ---------- */
 // 群号那格是配置项自动生成的普通文本框，勾选**直接改写它** ——
-// 保存、脏标记、"改完要重启"的提醒就全都复用现成那一套，不用另开一条路。
+// 保存、脏标记、"改完要重启"的提醒就全都复用现成那一套，不用另开一条路
 // 按 data-path 找，别按 id 找：那格的 id 是 `${section}_${key}` 拼出来的，
-// 写死一个 id 等于把"界面怎么生成 id"抄了一遍（页面上一改就悄悄失联）。
+// 写死一个 id 等于把"界面怎么生成 id"抄了一遍（页面上一改就悄悄失联）
 function groupIdsInput() {
   const panel = $('detailInner');
   return panel ? panel.querySelector('[data-path="qq.group_ids"]') : null;
@@ -1488,7 +1497,7 @@ function syncGroupIds() {
   const ids = [...box.querySelectorAll('[data-gid]')]
     .filter(cb => cb.checked).map(cb => Number(cb.dataset.gid));
   // 自己手填过、但这份列表里没有的群号要留着 ——
-  // 不然点一下勾选就把它悄悄抹掉了（那是用户自己敲进去的）。
+  // 不然点一下勾选就把它悄悄抹掉了（那是用户自己敲进去的）
   const keep = chosenGroupIds().filter(id => !box.querySelector(`[data-gid="${id}"]`));
   el.value = [...keep, ...ids].join(', ');
   el.dispatchEvent(new Event('input', { bubbles: true }));   // 触发"改过没保存"的提醒
@@ -1520,14 +1529,14 @@ function drawSettings() {
   }
 
   // 有人点「去设置」跳到邮箱/OCR 这种整段调参的段：先把高级打开，
-  // 否则跳过去是一片空白，看起来像没做这个功能。
+  // 否则跳过去是一片空白，看起来像没做这个功能
   if (openSection && !showAdvanced
       && (schema.groups || []).some(g => g.sections.some(
            s => s.name === openSection && s.advanced))) {
     showAdvanced = true;
     try { localStorage.setItem('showAdvanced', '1'); } catch (e) {}
   }
-  // 小白模式：整段都是调参的那种（OCR / 邮箱连接 / 内存阈值）直接不画。
+  // 小白模式：整段都是调参的那种（OCR / 邮箱连接 / 内存阈值）直接不画
   const groups = (schema.groups || [])
     .map(g => ({ ...g, sections: g.sections.filter(s => showAdvanced || !s.advanced) }))
     .filter(g => g.sections.length);
@@ -1543,13 +1552,13 @@ function drawSettings() {
   // "要重启才生效"这件事由**后端**说了算（比后台启动时记下的那份配置）：
   //   · 保存那一刻的提醒（pendingRestart）刚存完就显示，带具体是哪几项；
   //   · 之后不管用户用哪种方式重启的后台，这句都会自己消失 ——
-  //     以前顶部那句是死文案，永远挂着，用户看到的是"每次重启完他还在"。
+  //     以前顶部那句是死文案，永远挂着，用户看到的是"每次重启完他还在"
   const restartText = pendingRestart
     || (schema.restart_needed ? '后台还在用上次启动时读的配置（你改过「要重启」的那几项）' : '');
   $('detailInner').innerHTML = `
     <div class="panelhead"><h2>设置</h2></div>
     <p class="savepath">${esc(schema.version || '')}｜改动写回：${esc(schema.path)}<br>
-       保存后马上生效；极少数要重启后台的项，会单独提醒你。</p>
+       保存后马上生效；极少数要重启后台的项，会单独提醒你</p>
     <label class="advtoggle"><input type="checkbox" id="advToggle"${
       showAdvanced ? ' checked' : ''}> 显示高级设置（OCR、邮箱连接、内存阈值这些调参项）</label>
     <div class="tabs">${tabs}</div>
@@ -1557,7 +1566,7 @@ function drawSettings() {
     ${restartText ? `<div class="guide warn" id="restartWarn" style="margin-top:14px">
          <p><b>⚠️ 还没生效</b>：${esc(restartText)}</p>
          <p class="hint">QQ 那段（端口/令牌/收哪些群）是在后台启动时读的，
-           NapCat 也不热读配置 —— 所以要重启一次后台。</p>
+           NapCat 也不热读配置 —— 所以要重启一次后台</p>
          <div class="acts" style="margin-top:8px">
            <button class="block" id="btnRestartNow">现在重启后台（几秒钟）</button>
          </div>
@@ -1574,14 +1583,14 @@ function drawSettings() {
     try { localStorage.setItem('showAdvanced', showAdvanced ? '1' : '0'); } catch (err) {}
     renderPanel(true);          // 重画一次：藏起来的段和折条立刻消失/出现
     // 光"变了"不够：常用的那个标签页里可能一个变化都看不见（比如推送那页），
-    // 用户会以为点了没用。说清楚加了多少项。
+    // 用户会以为点了没用。说清楚加了多少项
     const n = advancedCount();
     toast(showAdvanced ? `已显示高级设置（多了 ${n} 项）` : '已切回常用设置');
   };
   $('btnSave').onclick = saveSettings;
   // 测试推送：结果**写在这段里面**，不能只用 toast ——
   // 失败时对方会回一串错误码（errcode 310000 这种），toast 两秒就没了，
-  // 用户想照着搜都来不及。
+  // 用户想照着搜都来不及
   $('detailInner').querySelectorAll('[data-testpush]').forEach(b => {
     b.onclick = async () => {
       const box = b.parentElement.querySelector('[data-testresult]');
@@ -1601,7 +1610,7 @@ function drawSettings() {
     };
   });
   // 试 AI：和测试推送同样的套路 —— 结果写在按钮下面（模型名抄错、
-  // 免费模型改名、地址少个 /v1，这些字符串两秒就忘，得留在屏幕上）。
+  // 免费模型改名、地址少个 /v1，这些字符串两秒就忘，得留在屏幕上）
   $('detailInner').querySelectorAll('[data-testai]').forEach(b => {
     b.onclick = async () => {
       const box = b.parentElement.querySelector('[data-aitestresult]');
@@ -1620,7 +1629,7 @@ function drawSettings() {
     };
   });
   // 「读取我加的群」：列表是后台问 QQ 要来的（界面开不了那个口子），
-  // 关于：把"正版免费"和"数据在哪"摊开说 —— 倒卖者不会替我们说这句话。
+  // 关于：把"正版免费"和"数据在哪"摊开说 —— 倒卖者不会替我们说这句话
   $('detailInner').querySelectorAll('[data-about]').forEach(b => {
     b.onclick = async () => {
       const info = await call('about');
@@ -1634,7 +1643,7 @@ function drawSettings() {
         <div class="kv"><b>构建</b><span>${esc(info.build || '（源码运行）')}</span></div>
         <div class="kv"><b>来源</b><span>${badge}</span></div>
         <div class="kv"><b>官方</b><span>${esc(info.repo)}<br>
-          <b>本软件免费开源</b>；花钱从别人那里买到的，都是别人在卖免费的代码。</span></div>
+          <b>本软件免费开源</b>；花钱从别人那里买到的，都是别人在卖免费的代码</span></div>
         <div class="kv"><b>数据</b><span style="word-break:break-all">${esc(info.data)}</span></div>
         <div class="kv"><b>程序</b><span style="word-break:break-all">${esc(info.root)}</span></div>
         <div class="acts">
@@ -1642,15 +1651,15 @@ function drawSettings() {
           <button class="block" id="btnBackSettings">返回设置</button>
         </div>
         <p class="hint">一句话来历：本项目的作者是个学生，之前被"AI 自动挖漏洞"的课
-          忽悠了 580 块，后来想明白了 —— 与其追那种躺赚，不如写个自己天天用的小工具。
-          打赏不解锁任何功能，只是让他少喝一瓶自来水。</p>
+          忽悠了 580 块，后来想明白了 —— 与其追那种躺赚，不如写个自己天天用的小工具
+          打赏不解锁任何功能，只是让他少喝一瓶自来水</p>
         <p class="hint">待办库、配置、备份都在「数据」那个文件夹里 ——
-          换电脑时把整个文件夹拷走就行。</p>`;
+          换电脑时把整个文件夹拷走就行</p>`;
       $('btnSupport').onclick = () => call('open_url', 'https://afdian.com/a/landercey');
       $('btnBackSettings').onclick = () => { setPanel('settings'); renderPanel(true); };
     };
   });
-  // 这里只负责勾选和把结果写回群号那一格。
+  // 这里只负责勾选和把结果写回群号那一格
   // 备份列表：画完面板再异步填（和"读取我加的群"一个套路）
   const backupSel = $('detailInner').querySelector('[data-backupsel]');
   if (backupSel) {
@@ -1660,8 +1669,8 @@ function drawSettings() {
       const info = $('detailInner').querySelector('[data-attinfo]');
       if (info) {
         info.innerHTML = att.count
-          ? `现在有 <b>${att.count}</b> 个附件（约 ${att.mb} MB）。`
-          : '现在没有附件。';
+          ? `现在有 <b>${att.count}</b> 个附件（约 ${att.mb} MB）`
+          : '现在没有附件';
       }
       const rows = (res && res.items) || [];
       if (!rows.length) {
@@ -1705,11 +1714,11 @@ function drawSettings() {
       b.textContent = '正在导出…';
       const res = await call('export_ical');
       b.disabled = false;
-      b.textContent = '导出到手机日历（.ics）';
+      b.textContent = '导出日历（.ics）';
       const ok = res && res.ok;
       if (box) {
         box.innerHTML = ok
-          ? `✅ ${esc(res.message)}：<b>${esc(res.path)}</b>`
+          ? `✅ ${esc(res.message)}`
           : `⚠️ ${esc((res && res.message) || '没成功')}`;
         box.style.color = ok ? '' : 'var(--overdue)';
       }
@@ -1722,11 +1731,11 @@ function drawSettings() {
       b.textContent = '正在打包…（附件多的话要一会儿）';
       const res = await call('full_backup');
       b.disabled = false;
-      b.textContent = '导出完整备份（库 + 配置 + 附件）';
+      b.textContent = '完整备份';
       if (!box) return;
       const ok = res && res.ok;
       box.innerHTML = ok
-        ? `✅ ${esc(res.message)}：<b>${esc(res.path)}</b>`
+        ? `✅ ${esc(res.message)}`
         : `⚠️ ${esc((res && res.message) || '没成功')}`;
       box.style.color = ok ? '' : 'var(--overdue)';
     };
@@ -1744,12 +1753,12 @@ function drawSettings() {
       if (!groups.length) {
         box.style.display = 'none';
         tip.innerHTML = (res && res.alive)
-          ? 'QQ 那边这会儿没给出列表（刚连上时要等几秒）。过一会儿再点一次。'
-          : '读不到 —— <b>后台没在跑</b>。先去「📱 QQ 接收」点「启动 QQ」扫码登录，再回来点这里。';
+          ? 'QQ 那边这会儿没给出列表（刚连上时要等几秒）。过一会儿再点一次'
+          : '读不到 —— <b>后台没在跑</b>。先去「📱 QQ 接收」点「启动 QQ」扫码登录，再回来点这里';
         return;
       }
       const chosen = chosenGroupIds();
-      tip.textContent = `读到你加了 ${groups.length} 个群，勾上要收的就行（记得点下面的保存）。`;
+      tip.textContent = `读到你加了 ${groups.length} 个群，勾上要收的就行（记得点下面的保存）`;
       box.style.display = '';
       box.innerHTML = groups.map(g => `<label class="gitem">
           <input type="checkbox" data-gid="${g.id}"${chosen.includes(g.id) ? ' checked' : ''}>
@@ -1758,7 +1767,7 @@ function drawSettings() {
     };
   });
   // 检查更新 / 一键更新：只覆盖 exe 和 _internal，配置、待办、下好的 QQ 都不动，
-  // 也不用重新扫码 —— 所以更新完程序自己重新打开就能接着用。
+  // 也不用重新扫码 —— 所以更新完程序自己重新打开就能接着用
   $('detailInner').querySelectorAll('[data-checkupdate]').forEach(b => {
     b.onclick = async () => {
       const box = b.parentElement.querySelector('[data-updateresult]');
@@ -1784,7 +1793,7 @@ function drawSettings() {
       btn.textContent = '一键更新（程序会自己关掉再打开）';
       btn.onclick = async () => {
         if (!window.confirm('现在更新？程序会自己关掉，几秒后重新打开。\n' +
-                            '配置、待办、下好的 QQ 都不会动，也不用重新扫码。')) return;
+                            '配置、待办、下好的 QQ 都不会动，也不用重新扫码')) return;
         btn.disabled = true;
         btn.textContent = '正在下载…（约 45 MB，别关窗口）';
         const done = await call('install_update');
@@ -1801,8 +1810,8 @@ function drawSettings() {
       b.parentElement.appendChild(btn);
     };
   });
-  // 一键重启后台：QQ 那段配置改完必须重启才读得到。
-  // 复用「重新出码」那套（停 → 等它真退下去 → 起动），不另写一套。
+  // 一键重启后台：QQ 那段配置改完必须重启才读得到
+  // 复用「重新出码」那套（停 → 等它真退下去 → 起动），不另写一套
   const restartNow = $('btnRestartNow');
   if (restartNow) restartNow.onclick = async () => {
     restartNow.disabled = true;
@@ -1812,7 +1821,7 @@ function drawSettings() {
       await new Promise(r => setTimeout(r, 500));
       const now = await call('qq_panel');
       // 等它**真的**退下去：问那把独占锁（running），别用心跳 ——
-      // 心跳有 60 秒宽限，等它等不到，后面 start_qq 还会因此拒绝启动。
+      // 心跳有 60 秒宽限，等它等不到，后面 start_qq 还会因此拒绝启动
       if (now && now.running === false) break;
     }
     const res = await call('start_qq');
@@ -1820,25 +1829,25 @@ function drawSettings() {
     toast((res && res.message) || '重启完了，改动生效');
     drawSettings();
   };
-  // 记下"要重启才生效"那几项的原值 —— 保存时比一下，变了就竖提醒。
+  // 记下"要重启才生效"那几项的原值 —— 保存时比一下，变了就竖提醒
   // （用户原话："要重启的提醒力度小"。）
   restartKeys = {};
   for (const g of groups) for (const sec of g.sections) for (const k of sec.keys) {
     if (!k.restart) continue;
     // 只要第一句：像「监听端口。和 NapCat 那边配的端口要一致。」这种提示，
-    // 整句塞进警告里读着别扭。
-    const label = fieldLabel(k).label.split('。')[0];
+    // 整句塞进警告里读着别扭
+    const label = fieldLabel(k).label.split('')[0];
     restartKeys[`${sec.name}.${k.key}`] = { label, was: k.value };
   }
-  // 有改动就提醒 —— 这句是给"滚下去改完、直接叉掉窗口"那种情况准备的。
-  // 用委托：设置项的输入框是动态生成的，一个个挂监听容易漏。
+  // 有改动就提醒 —— 这句是给"滚下去改完、直接叉掉窗口"那种情况准备的
+  // 用委托：设置项的输入框是动态生成的，一个个挂监听容易漏
   $('detailInner').addEventListener('input', updateSettingsDirty);
   $('detailInner').addEventListener('change', updateSettingsDirty);
   settingsDirty = false;
   wireUnlock();
 
-  // 「推送到手机」那一页底部挂一条推送记录。
-  // 用户问"我手机上怎么没收到"时第一眼看这里 —— 而不是让他去命令行敲 --next-push。
+  // 「推送到手机」那一页底部挂一条推送记录
+  // 用户问"我手机上怎么没收到"时第一眼看这里 —— 而不是让他去命令行敲 --next-push
   const pushPane = $('detailInner').querySelector('.tabpane[data-g="group_push"]');
   if (pushPane) {
     pushPane.insertAdjacentHTML('beforeend',
@@ -1852,12 +1861,12 @@ function drawSettings() {
         ? rows.map(r => `<div class="kv"><b>${r.ok ? '✓' : '✗'}</b><span>${
             esc(r.at.slice(5, 16))}｜${esc(r.channel)}｜${
             esc(r.message || r.batch)}</span></div>`).join('')
-        : '<p class="hint">还没推过。到点会自动推。</p>';
+        : '<p class="hint">还没推过。到点会自动推</p>';
     });
   }
 
-  // 「数据与资源」那一页底部：装在哪儿、怎么卸干净。
-  // 用户问过"是不是全在一个文件夹里、好不好卸" —— 直接把答案摆出来。
+  // 「数据与资源」那一页底部：装在哪儿、怎么卸干净
+  // 用户问过"是不是全在一个文件夹里、好不好卸" —— 直接把答案摆出来
   const dataPane = $('detailInner').querySelector('.tabpane[data-g="group_data"]');
   if (dataPane) {
     dataPane.insertAdjacentHTML('beforeend', '<div id="placeBox"></div>');
@@ -1868,12 +1877,12 @@ function drawSettings() {
           <h3>装在哪儿 · 怎么卸干净</h3>
           <p>程序、你的数据、NapCat 全在<b>一个文件夹</b>里：<br>
              <code>${esc(res.root)}</code></p>
-          <p><b>卸载 = ① 关掉开机自启 ② 删掉这个文件夹</b>，就这两步，不留东西。
+          <p><b>卸载 = ① 关掉开机自启 ② 删掉这个文件夹</b>，就这两步，不留东西
              ${res.autostart
-               ? '⚠️ 开机自启现在还开着 —— 先去左侧「📱 QQ 接收」把它关掉，再删文件夹。'
+               ? '⚠️ 开机自启现在还开着 —— 先去左侧「📱 QQ 接收」把它关掉，再删文件夹'
                : '（开机自启现在是关着的）'}</p>
           <p>想留证据就先把 <code>data</code>（你的待办）拷走；
-             QQ 本体在 <code>napcat</code>，删了下次会重新下。</p>
+             QQ 本体在 <code>napcat</code>，删了下次会重新下</p>
         </div>`;
     });
   }
@@ -1890,8 +1899,8 @@ function drawSettings() {
     }
   }
 
-  // 设置面板最底下挂一个反馈入口 —— 用着不爽的时候第一反应就是来设置里找。
-  // ⚠️ 必须插在**保存条前面**：保存条是 sticky 的，插在它后面会被压在底下。
+  // 设置面板最底下挂一个反馈入口 —— 用着不爽的时候第一反应就是来设置里找
+  // ⚠️ 必须插在**保存条前面**：保存条是 sticky 的，插在它后面会被压在底下
   const savebar = $('detailInner').querySelector('.savebar');
   (savebar || $('detailInner')).insertAdjacentHTML(savebar ? 'beforebegin' : 'beforeend',
     `<p class="hint" style="margin-top:18px;text-align:center">
@@ -1907,14 +1916,14 @@ async function saveSettings() {
   const updates = {};
   $('detailInner').querySelectorAll('[data-path]').forEach(el => {
     // 只送**真改过**的。全量写回会把外面刚改的（比如另一个进程写进配置文件的）
-    // 一起冲掉 —— 2026-10-13 真丢过一次设置。
+    // 一起冲掉 —— 2026-10-13 真丢过一次设置
     const now = el.type === 'checkbox' ? String(el.checked) : String(el.value);
     if (now.toLowerCase() === String(el.dataset.was || '').toLowerCase()) return;
     updates[el.dataset.path] = el.type === 'checkbox' ? el.checked : el.value;
   });
-  // 比一下"要重启才生效"的那几项有没有真被改动 —— 改了就等会儿竖提醒。
+  // 比一下"要重启才生效"的那几项有没有真被改动 —— 改了就等会儿竖提醒
   // 为什么不能只看"保存里有这个键"：保存是把**所有**字段打包送出去的，
-  // 那样每次保存都会喊"要重启"，喊多了就等于没喊。
+  // 那样每次保存都会喊"要重启"，喊多了就等于没喊
   const touched = [];
   $('detailInner').querySelectorAll('[data-path]').forEach(el => {
     const info = restartKeys[el.dataset.path];
@@ -1938,11 +1947,11 @@ async function saveSettings() {
   refresh();
 }
 
-/** 重新算一遍"到底有没有改动、改了哪几项"。
+/** 重新算一遍"到底有没有改动、改了哪几项"
  *
  *  以前的写法是"输入框一响就标脏"：点进去再点出来、把值删了又打回原来的，
  *  全都算"改过了"，然后关窗口问"要不要保存" —— 用户的原话是
- *  "有时候没改他也说我改了"。现在按 data-was 真比一遍，并且把改了哪几项写出来。
+ *  "有时候没改他也说我改了"。现在按 data-was 真比一遍，并且把改了哪几项写出来
  */
 function updateSettingsDirty() {
   const hint = $('saveHint');
@@ -1972,7 +1981,7 @@ function updateSettingsDirty() {
 function openSettings(section) {
   openSection = section || null;
   // 每次都重新拉一遍。缓存着不动的话，用户在记事本里改完 config.toml
-  // 再点「保存」，会拿旧的界面值把他刚改的盖回去 —— 那是真丢东西。
+  // 再点「保存」，会拿旧的界面值把他刚改的盖回去 —— 那是真丢东西
   schema = null;
   setPanel('settings');
   renderPanel(true);
@@ -1986,25 +1995,25 @@ async function drawQqPanel() {
   const receiver = data.receiver || {};
   const qr = data.qr || {};
   // 点过「重新出码」之后**旧码一律不显示** —— 用户报过"点了重新出码，
-  // 之前的码没消失，也不知道啥时候刷新的"。判据是"这张码比点击那一刻还新"。
+  // 之前的码没消失，也不知道啥时候刷新的"。判据是"这张码比点击那一刻还新"
   const sinceClick = Date.now() - qrWaiting;
   const qrIsFresh = !!qr.image && qr.age_seconds != null
     && qr.age_seconds * 1000 < sinceClick;
   if (qrWaiting && (qrIsFresh || sinceClick > 300000)) qrWaiting = 0;
   const showQr = !!qr.image && !qrWaiting;
-  // 第一次会先下 NapCat、再下 QQ（约 300 MB，好几分钟）。
-  // **这几分钟界面上必须动** —— 什么都不动的话用户会以为卡死，然后反复点。
+  // 第一次会先下 NapCat、再下 QQ（约 300 MB，好几分钟）
+  // **这几分钟界面上必须动** —— 什么都不动的话用户会以为卡死，然后反复点
   const progress = data.progress || {};
   const waited = progress.started
     ? Math.max(0, Math.round(Date.now() / 1000 - progress.started)) : 0;
   const waitedText = waited >= 60
     ? `${Math.floor(waited / 60)} 分 ${waited % 60} 秒` : `${waited} 秒`;
   // 心跳里的 detail 是"登录号 xxx｜收到 N"就说明真连上了；
-  // 是"等扫码登录"就说明进程在跑、但还没登上。
+  // 是"等扫码登录"就说明进程在跑、但还没登上
   const connected = String(receiver.detail || '').startsWith('登录号');
-  // running 是"那个进程真的还在吗"（后端直接去问那把独占锁）。
+  // running 是"那个进程真的还在吗"（后端直接去问那把独占锁）
   // 比心跳的 alive 精确：心跳有 60 秒宽限，进程退了它还能 True 一分钟 ——
-  // 重启流程就栽在这上面（旧码不消失 / 显示后台没在跑）。
+  // 重启流程就栽在这上面（旧码不消失 / 显示后台没在跑）
   const running = data.running !== false;
   const status = running
     ? (connected
@@ -2016,35 +2025,35 @@ async function drawQqPanel() {
 
   const qrBlock = showQr
     ? `<img class="qr" src="${qr.image}" alt="登录二维码">
-       <p class="hint">用手机 QQ 扫它。约 2 分钟过期，过期了点下面的「重新出码」。</p>`
+       <p class="hint">用手机 QQ 扫它。约 2 分钟过期，过期了点下面的「重新出码」</p>`
     : (qrWaiting
-        ? `<p class="hint">⏳ 正在等新的二维码……已经把你点之前那张撤下来了。
-              NapCat 起来之后十几秒才写出图，这一页会自己刷新。</p>`
+        ? `<p class="hint">⏳ 正在等新的二维码……已经把你点之前那张撤下来了
+              NapCat 起来之后十几秒才写出图，这一页会自己刷新</p>`
     : (qr.ready
         ? `<p class="hint">二维码已经 ${Math.max(1, Math.round((qr.age_seconds || 0) / 60))} 分钟了，
-             多半过期了。点「重新出码」拿一张新的。</p>`
+             多半过期了。点「重新出码」拿一张新的</p>`
         : (progress.active
             ? `<p class="hint">装完它才会出二维码 —— 上面那块进度走完就有了，
-                 那时候这一页会自己刷新。</p>`
+                 那时候这一页会自己刷新</p>`
             : (running
             ? `<p class="hint">⏳ 正在等新的二维码……NapCat 起来之后十几秒才写出图，
-                 这一页会自己刷新（旧码在重启时已经删掉了，不会拿一张过期的糊弄你）。</p>`
-            : '<p class="hint">还没出二维码。点下面「启动 QQ」—— 第一次会先自动下载安装 NapCat（约几分钟）。</p>'))));
+                 这一页会自己刷新（旧码在重启时已经删掉了，不会拿一张过期的糊弄你）</p>`
+            : '<p class="hint">还没出二维码。点下面「启动 QQ」—— 第一次会先自动下载安装 NapCat（约几分钟）</p>'))));
 
-  // 登上了却一条消息都不来 —— 十有八九是"一个群都没勾"。
-  // 这时候最该说的不是"正在收消息"，而是"你现在什么都收不到，去勾群"。
+  // 登上了却一条消息都不来 —— 十有八九是"一个群都没勾"
+  // 这时候最该说的不是"正在收消息"，而是"你现在什么都收不到，去勾群"
   const scope = data.scope || {};
   const scopeBlock = (scope.empty && running && connected)
     ? `<div class="guide warn" style="margin:0 0 12px">
          <p><b>⚠️ 已经登录上了，但一个群、一个私聊、一个收件箱都没勾</b> ——
-           所以现在任何消息都不会进来（左下角会显示"收到 0"）。</p>
+           所以现在任何消息都不会进来（左下角会显示"收到 0"）</p>
          <p>去「⚙ 设置 → 收消息 → QQ 接入」勾上要收的群，
-           <b>改完点保存再重启一次后台</b>（NapCat 不热读配置）。</p>
+           <b>改完点保存再重启一次后台</b>（NapCat 不热读配置）</p>
        </div>`
     : '';
 
   // 登录失败的原因**必须摆出来**。NapCat 只把它写在自己日志里，
-  // 不给用户看的话，他看到的就是"扫了码、点了确认、然后什么都没有"。
+  // 不给用户看的话，他看到的就是"扫了码、点了确认、然后什么都没有"
   const napcatError = String(data.napcat_error || '');
   const napcatBlock = (!connected && napcatError)
     ? `<div class="guide warn" style="margin:0 0 12px">
@@ -2054,7 +2063,7 @@ async function drawQqPanel() {
     : '';
 
   // 启动之前必须满足的条件。**不提前说的话，用户点完只会看到"卡住"** ——
-  // 没有登录号时程序会跳过整套 NapCat 部署、直接去等一个永远不来的连接。
+  // 没有登录号时程序会跳过整套 NapCat 部署、直接去等一个永远不来的连接
   const blockers = data.blockers || [];
   const blockerBlock = blockers.length
     ? `<div class="guide warn" style="margin:0 0 12px">
@@ -2078,9 +2087,9 @@ async function drawQqPanel() {
             : ''}
          <p class="hint">已经等了 ${waitedText}。${
            progress.percent != null
-             ? `安装器自己报的进度是 ${progress.percent}%（下 QQ 那一步走完还有解压）。`
-             : '这一段它不报数，等下一段就有进度条了。'}<b>别关窗口、别重复点</b>，
-           装完这一块会自己消失。</p>
+             ? `安装器自己报的进度是 ${progress.percent}%（下 QQ 那一步走完还有解压）`
+             : '这一段它不报数，等下一段就有进度条了'}<b>别关窗口、别重复点</b>，
+           装完这一块会自己消失</p>
        </div>`
     : '';
 
@@ -2105,21 +2114,21 @@ async function drawQqPanel() {
     <p class="hint" style="margin-top:14px">
       开机自启：<a id="btnAuto" data-on="${data.autostart ? 1 : 0}">${
         data.autostart ? '已开启，点一下关掉' : '点一下开启'}</a><br>
-      开启后每次开机它自己在后台跑（一个进程干两件事）。
-      不开机自启的话，每天得自己点一次「启动 QQ」。</p>
+      开启后每次开机它自己在后台跑（一个进程干两件事）
+      不开机自启的话，每天得自己点一次「启动 QQ」</p>
     <p class="hint" style="margin-top:10px">
       要登录的 QQ 号在「⚙ 设置 → 收消息 → QQ 接入」里填。${
-        data.account ? `现在是 <b>${data.account}</b>。` : '⚠️ 现在还没填，启动前先填上。'}<br>
+        data.account ? `现在是 <b>${data.account}</b>` : '⚠️ 现在还没填，启动前先填上'}<br>
       ${(!connected && data.account)
         ? '⚠️ <b>这个号必须先从电脑上那个 QQ 里退出登录</b> —— 同一个号不能同时登两个电脑端，' +
-          '不退的话扫码会被拒（手机上的登录不算冲突，可以继续登着）。<br>'
+          '不退的话扫码会被拒（手机上的登录不算冲突，可以继续登着）<br>'
         : ''}
       现在在收：<b>${esc(scope.text || '（读不到）')}</b>${scope.empty
         ? ' —— <b>空的，什么都收不到</b>' : ''}</p>`;
   $('detailInner').insertAdjacentHTML('beforeend',
     `<p class="hint" style="margin-top:10px">
        ⓘ <b>关掉这个窗口不影响后台</b> —— 后台是另一个进程，
-       会继续收消息、照常推送。想让它也停，点上面的「停止后台」。</p>`);
+       会继续收消息、照常推送。想让它也停，点上面的「停止后台」</p>`);
   $('detailInner').insertAdjacentHTML('beforeend', logBlock);
 
   $('btnQQStart').onclick = async () => {
@@ -2140,8 +2149,8 @@ async function drawQqPanel() {
     toast(res.message || '让它收工了');
     setTimeout(drawQqPanel, 3000);
   };
-  // 二维码约 2 分钟过期，而 NapCat 不会自己刷新 —— 只能重启一次。
-  // 这就是为什么必须给一个「重新出码」：不然用户对着一个扫不上的码干瞪眼。
+  // 二维码约 2 分钟过期，而 NapCat 不会自己刷新 —— 只能重启一次
+  // 这就是为什么必须给一个「重新出码」：不然用户对着一个扫不上的码干瞪眼
   const restart = $('btnQQRestart');
   if (restart) restart.onclick = async () => {
     toast('正在重启后台，几秒钟…');
@@ -2165,8 +2174,8 @@ async function drawQqPanel() {
     drawQqPanel();
   };
 
-  // 二维码是 NapCat 启动几十秒后才写出来的，所以得自己盯着点。
-  // 面板一关就停 —— 别让一个看不见的定时器一直在那儿敲桥。
+  // 二维码是 NapCat 启动几十秒后才写出来的，所以得自己盯着点
+  // 面板一关就停 —— 别让一个看不见的定时器一直在那儿敲桥
   clearTimeout(qqTimer);
   qqTimer = setTimeout(async () => {
     if (panel !== 'qq') return;
@@ -2175,35 +2184,35 @@ async function drawQqPanel() {
 }
 
 /* ---------- 上手清单 ---------- */
-/* 意见反馈：生成一段**自动脱敏**的话，用户复制走。
+/* 意见反馈：生成一段**自动脱敏**的话，用户复制走
    不做"帮我直接发出去" —— 没有服务器，而且自动上报会带走用户的群名和原文。 */
-/* 能干什么：一页把"这软件有哪些本事、怎么触发"说清楚。
+/* 能干什么：一页把"这软件有哪些本事、怎么触发"说清楚
    为什么要有：用户的原话是"功能不知道有什么，比如我下完了发送一个 PPT，
    结果什么都没有读取"—— 功能发现全靠猜，等于没做。放在设置最底下和
    空列表提示里各一个入口。 */
 function drawFeaturesPanel() {
   const rows = [
-    ['📋 三个入口', '左边「＋ 新建待办」粘一句话；把文件/一段字直接拖进窗口；发到你的 QQ 小号。'],
-    ['🔍 自动认时间', '「明天下午三点交作业」「周五前交到学习通」都会自己变成带时间的待办（规则识别，不联网）。'],
-    ['📄 文件也读', 'Word / PPT / Excel / PDF / 图片（系统 OCR）/ zip / xmind 拖进来就能读。读不出会告诉你为什么。'],
-    ['🖼️ 附件跟手机', '待办带着的图/文件会一起推到企业微信，手机上点开就能看。'],
-    ['⏰ 定时汇总', '默认早 07:30、晚 21:30 各推一次（设置里能改）；没收到还能看「最近推过什么」。'],
-    ['🧹 重复和噪声', '同一件事重复发只留一条；"哈哈""收到"这类闲聊不会变成待办；判错的在「废件箱」里能找到。'],
-    ['✅ 完成 / 归档 / 找回', '打勾进「已完成」，还能撤销；删错的去「废件箱」恢复。'],
-    ['🔌 插件', '课表（iCal/CSV/JSON）、AI 增强（长通知交给 AI 挑待办）已经自带；插件就是把 .py 拖进窗口。'],
-    ['🤖 小号当收件箱', '微信/短信里的通知截图发给小号，就自动变成待办（不过滤、连图里读出来的字也算）。'],
-    ['📱 QQ 接收', '左下角「📱 QQ 接收」：启动/停止后台、扫登录码、开机自启都在那儿。'],
+    ['📋 三个入口', '左边「＋ 新建待办」粘一句话；把文件/一段字直接拖进窗口；发到你的 QQ 小号'],
+    ['🔍 自动认时间', '「明天下午三点交作业」「周五前交到学习通」都会自己变成带时间的待办（规则识别，不联网）'],
+    ['📄 文件也读', 'Word / PPT / Excel / PDF / 图片（系统 OCR）/ zip / xmind 拖进来就能读。读不出会告诉你为什么'],
+    ['🖼️ 附件跟手机', '待办带着的图/文件会一起推到企业微信，手机上点开就能看'],
+    ['⏰ 定时汇总', '默认早 07:30、晚 21:30 各推一次（设置里能改）；没收到还能看「最近推过什么」'],
+    ['🧹 重复和噪声', '同一件事重复发只留一条；"哈哈""收到"这类闲聊不会变成待办；判错的在「废件箱」里能找到'],
+    ['✅ 完成 / 归档 / 找回', '打勾进「已完成」，还能撤销；删错的去「废件箱」恢复'],
+    ['🔌 插件', '课表（iCal/CSV/JSON）、AI 增强（长通知交给 AI 挑待办）已经自带；插件就是把 .py 拖进窗口'],
+    ['🤖 小号当收件箱', '微信/短信里的通知截图发给小号，就自动变成待办（不过滤、连图里读出来的字也算）'],
+    ['📱 QQ 接收', '左下角「📱 QQ 接收」：启动/停止后台、扫登录码、开机自启都在那儿'],
   ];
   $('detailInner').innerHTML = `
     <div class="panelhead"><h2>能干什么</h2></div>
-    <p class="note">都是已经能用的功能。用不上的不用管，不装插件也照常用。</p>
+    <p class="note">都是已经能用的功能。用不上的不用管，不装插件也照常用</p>
     ${rows.map(([title, body]) => `
       <div class="guide" style="margin:0 0 10px">
         <h3>${esc(title)}</h3><p>${esc(body)}</p>
       </div>`).join('')}
     <p class="hint" style="margin-top:14px">
       详细教程（从零到手机上收到第一条推送）在软件文件夹里的
-      <code>说明</code> 和 GitHub 的 README 里。</p>`;
+      <code>说明</code> 和 GitHub 的 README 里</p>`;
 }
 
 
@@ -2211,7 +2220,7 @@ function drawFeedbackPanel() {
   $('detailInner').innerHTML = `
     <div class="panelhead"><h2>意见反馈</h2></div>
     <p class="note">哪儿不对、哪儿想要，写在这儿。点「生成反馈」之后
-      下面会出现一整段话，<b>复制走</b>贴到 QQ 群或者 GitHub Issue 里就行。</p>
+      下面会出现一整段话，<b>复制走</b>贴到 QQ 群或者 GitHub Issue 里就行</p>
     <div class="field">
       <label for="fbNote">我想说的</label>
       <textarea id="fbNote" placeholder="比如：今天下午那条群通知没变成待办，
@@ -2220,8 +2229,8 @@ function drawFeedbackPanel() {
     <div class="field check">
       <input type="checkbox" id="fbJunk">
       <div><label for="fbJunk">附带最近 5 条被拦下的原文
-        <p class="hint">⚠️ 这里面会有群名和消息内容 —— 只在发给我一个人时勾。
-          不勾也能排查大部分问题（上面那段会自动带上版本、状态和后台日志）。</p>
+        <p class="hint">⚠️ 这里面会有群名和消息内容 —— 只在发给我一个人时勾
+          不勾也能排查大部分问题（上面那段会自动带上版本、状态和后台日志）</p>
       </label></div>
     </div>
     <div class="acts">
@@ -2232,7 +2241,7 @@ function drawFeedbackPanel() {
     <div id="fbOut"></div>
     <p class="hint" style="margin-top:12px">
       <b>号码会自动打码</b>（QQ 号、群号只留后 4 位，Webhook 的 key 全打掉）——
-      复制之前程序已经替你处理过了。</p>`;
+      复制之前程序已经替你处理过了</p>`;
 
   $('fbMake').onclick = async () => {
     const res = await call('feedback_report', $('fbNote').value, $('fbJunk').checked);
@@ -2244,8 +2253,8 @@ function drawFeedbackPanel() {
     $('fbText').focus();
     $('fbText').select();
   };
-  // 诊断包：文字反馈只有概况，这个 zip 里带**完整的结构化错误日志**（含堆栈）。
-  // 用户说"点了没反应"时，靠这份才查得动。
+  // 诊断包：文字反馈只有概况，这个 zip 里带**完整的结构化错误日志**（含堆栈）
+  // 用户说"点了没反应"时，靠这份才查得动
   $('fbZip').onclick = async () => {
     const btn = $('fbZip');
     btn.disabled = true;
@@ -2258,7 +2267,7 @@ function drawFeedbackPanel() {
       $('fbOut').innerHTML =
         `<div class="field"><label>诊断包已保存</label>
          <textarea id="fbText" rows="2" readonly>${esc(res.path)}</textarea>
-         <p class="hint">在 data 文件夹里。发给我之前自己扫一眼 —— 里面有群名和日志。</p></div>`;
+         <p class="hint">在 data 文件夹里。发给我之前自己扫一眼 —— 里面有群名和日志</p></div>`;
       $('fbCopy').disabled = false;
     }
   };
@@ -2295,19 +2304,19 @@ async function drawPluginsPanel() {
   $('detailInner').innerHTML = `
     <h2>插件</h2>
     <p class="note">${list.length
-      ? `装了 ${list.length} 个。插件是可选的，不装也照常用。`
-      : '一个插件都没装。插件是可选的，不装也照常用。'}</p>
+      ? `装了 ${list.length} 个。插件是可选的，不装也照常用`
+      : '一个插件都没装。插件是可选的，不装也照常用'}</p>
     ${cards || `<p class="hint">把插件文件（.py）丢进下面这个文件夹就装好了，
-                       删掉就是卸载，不用重启电脑。</p>`}
+                       删掉就是卸载，不用重启电脑</p>`}
     <div class="quote"><em>插件文件夹</em>${esc(data.folder || '')}</div>
     <div class="acts" style="margin-top:12px">
       <button class="block" id="btnPluginFolder">打开插件文件夹</button>
     </div>
     <p class="hint" style="margin-top:10px">
       <b>装插件不用找设置</b>：把那个 .py 文件直接拖进这个窗口就行，
-      程序会当场试着加载一次，坏的就当场告诉你哪儿坏了。<br>
-      插件坏了不影响主程序 —— 上面会标红，其余功能照常。
-      <b>装完要重开一次程序才生效。</b></p>`;
+      程序会当场试着加载一次，坏的就当场告诉你哪儿坏了<br>
+      插件坏了不影响主程序 —— 上面会标红，其余功能照常
+      <b>装完要重开一次程序才生效</b></p>`;
 
   $('detailInner').querySelectorAll('[data-sec]').forEach(button => {
     button.onclick = () => openSettings(button.dataset.sec);
@@ -2320,7 +2329,7 @@ async function drawPluginsPanel() {
 
 function wireGuide() {
   // 只绑**带跳转目标**的提示条。战报那一行也是 .guide.tip，
-  // 以前点它会被当成"去设置"，结果跳进一个没选中的设置页。
+  // 以前点它会被当成"去设置"，结果跳进一个没选中的设置页
   $('guide').querySelectorAll('li.todo, .guide.tip[data-section], .guide.tip[data-panel]')
     .forEach(node => {
     node.onclick = () => {
@@ -2359,7 +2368,7 @@ async function renderGuide() {
   const parts = [];
 
   // 战报：**一行**。用户的原话是"做的太大了，待办才是主角" ——
-  // 这几格数据是旁证，不是主角，别让它占掉第一屏。
+  // 这几格数据是旁证，不是主角，别让它占掉第一屏
   const [stats, total] = await Promise.all([call('today_stats'), call('total_stats')]);
   const num = n => Number(n || 0).toLocaleString('zh-CN');
   if ((total && (total.received || total.kept || total.junk))
@@ -2376,8 +2385,8 @@ async function renderGuide() {
       </div></div>`);
   }
 
-  // 启动自检的结果：库坏了/盘满了/进了安全模式/配置读坏了。
-  // 不说出来的话，用户看到的就是"设置怎么全没了""怎么打不开了"。
+  // 启动自检的结果：库坏了/盘满了/进了安全模式/配置读坏了
+  // 不说出来的话，用户看到的就是"设置怎么全没了""怎么打不开了"
   if ((state.notes || []).length) {
     parts.push(`<div class="guide warn">${
       state.notes.map(n => `<p>${n.level === 'error' ? '⛔' : '⚠️'} ${esc(n.message)}</p>`)
@@ -2385,7 +2394,7 @@ async function renderGuide() {
   }
 
   // 拉课表时冒出来的提醒。不说出来的话，用户永远不知道有节课时间排错了，
-  // 只会觉得"这软件算得不准"。
+  // 只会觉得"这软件算得不准"
   if (syncNotes.length) {
     parts.push(`<div class="guide warn">${
       syncNotes.map(note => `<p>⚠️ ${esc(note)}</p>`).join('')}</div>`);
@@ -2407,17 +2416,17 @@ async function renderGuide() {
     parts.push(`<div class="guide">
         <h3>还没弄完这几步</h3>
         <p>前几条是把配置填上，然后<b>先启动 QQ 扫码登录，再去选群</b> ——
-           顺序反了会读不到群列表（那个按钮要登录后才读得到）。
-           点哪一条都能直接跳过去。</p>
+           顺序反了会读不到群列表（那个按钮要登录后才读得到）
+           点哪一条都能直接跳过去</p>
         <ul>${rows}</ul>
       </div>`);
   } else if (!state.pushed_once) {
     // 全打勾 ≠ 已经收到过东西。第一份汇总可能要等到晚上 ——
-    // 中间这半天用户只会干等，所以这里直接给一个"当场验一次"的入口。
+    // 中间这半天用户只会干等，所以这里直接给一个"当场验一次"的入口
     const times = (state.push_times || []).join(' / ') || '每天的推送时间';
     parts.push(`<div class="guide tip">
-        <span>都弄好了。接下来等 <b>${esc(times)}</b> 的第一份汇总，手机会响。
-          想现在确认能不能收到，点右边。</span>
+        <span>都弄好了。接下来等 <b>${esc(times)}</b> 的第一份汇总，手机会响
+          想现在确认能不能收到，点右边</span>
         <span class="go" id="guideTestPush">发一条试试 ›</span></div>`);
   }
 
@@ -2440,7 +2449,7 @@ async function refresh() {
   // 搜索优先：搜的时候不管当前停在哪个分组
   if (keyword) {
     // **只在当前分组里搜**。用户报过：在「今天」里搜，已完成/已归档/
-    // 下个月的全冒出来了 ——"不搜索没事，一搜全出来了"。
+    // 下个月的全冒出来了 ——"不搜索没事，一搜全出来了"
     const res = await load(['search', keyword, current]);
     if (mine !== refreshToken) return;      // 有人抢先刷新了，我这份作废
     items = (res && res.items) || [];
@@ -2449,12 +2458,12 @@ async function refresh() {
     msgHits = [];
     const res = await load(['dropped']);
     if (mine !== refreshToken) return;
-    // 废件箱是**两样东西合起来的**：你标成误判的待办 + 被规则拦下的原文。
-    // 以前只显示后者，所以点了"这不是待办"那条就找不回来了。
+    // 废件箱是**两样东西合起来的**：你标成误判的待办 + 被规则拦下的原文
+    // 以前只显示后者，所以点了"这不是待办"那条就找不回来了
     items = ((res && res.items) || []).map(d => ({
       id: `junk-${d.kind}-${d.id}`, junkId: d.id, junkKind: d.kind,
       // 列表上只给一行摘要：拦下的原文可能是一整段（海报 OCR 32 行），
-      // 整段铺在列表里就没法看了。全文在详情里。
+      // 整段铺在列表里就没法看了。全文在详情里
       title: junkSummary(d.text), due: d.reason, urgency: 'later', location: '',
       source: d.source || '', sender: '', quoted: '', detail: '',
       attachments: 0, files: [], junk: true,
@@ -2470,8 +2479,8 @@ async function refresh() {
   if (mine !== refreshToken) return;
   counts = c || counts;
 
-  // 第一眼别给一片白：默认落在「今天」，要是今天空着，自动退到「全部未完成」。
-  // 只在**第一次**这么做 —— 之后用户自己点回「今天」，就别再把他弹走。
+  // 第一眼别给一片白：默认落在「今天」，要是今天空着，自动退到「全部未完成」
+  // 只在**第一次**这么做 —— 之后用户自己点回「今天」，就别再把他弹走
   if (!jumped && !keyword) {
     jumped = true;
     if (current === 'today' && !items.length && (counts.open || 0) > 0) {
@@ -2500,14 +2509,14 @@ async function refresh() {
   const list = (plug && plug.items) || [];
   const bad = list.filter(p => !p.ok);
   if (env.drop_max_mb) dropMaxMb = Number(env.drop_max_mb) || dropMaxMb;
-  // 左下角：**每一行都能点，点哪儿跳哪儿**。
+  // 左下角：**每一行都能点，点哪儿跳哪儿**
   // 只放主要的（后台活没活 / 企微配好没 / 内存 / 推送时间 / 几个群 / 插件），
-  // 再多就眼杂了 —— 想看细节去「⚙ 设置」。
+  // 再多就眼杂了 —— 想看细节去「⚙ 设置」
   const lines = [];        // {text, go}；go 为空 = 不可点
   const titles = [];
 
-  // ① 收消息的进程活着没 —— 最要紧的一条，点它去「📱 QQ 接收」。
-  //    带个状态点：绿的=正常，橙的=出事了。扫一眼就知道。
+  // ① 收消息的进程活着没 —— 最要紧的一条，点它去「📱 QQ 接收」
+  //    带个状态点：绿的=正常，橙的=出事了。扫一眼就知道
   const receiver = env.receiver || {};
   let receiverBad = false;
   let statusLine;
@@ -2521,14 +2530,14 @@ async function refresh() {
   } else if (receiver.alive) {
     // "登录号 1137532133｜收到 1234" —— **数字要拆到 value 那一栏**：
     // .value 是 flex:none、不参与省略，数字再大也看得见。整个塞进 label 的话，
-    // 收到几百条之后就会被截成"登录号 113753…"（用户报的"数字会省略"）。
+    // 收到几百条之后就会被截成"登录号 113753…"（用户报的"数字会省略"）
     const parts = String(receiver.detail || '').split('｜');
     statusLine = {label: parts[0] || 'QQ 接收中',
                   value: parts.length > 1 ? parts.slice(1).join('｜') : undefined,
                   dot: 'ok', go: 'panel:qq'};
   } else {
-    // 走到这儿 = 进程还在（running 没说是 false），但心跳断了。
-    // 那不是"没在跑"，是**卡住了** —— 两句话不一样，别混。
+    // 走到这儿 = 进程还在（running 没说是 false），但心跳断了
+    // 那不是"没在跑"，是**卡住了** —— 两句话不一样，别混
     receiverBad = true;
     const waited = Math.max(1, Math.round((receiver.age_seconds || 0) / 60));
     statusLine = {label: receiver.age_seconds == null
@@ -2537,9 +2546,9 @@ async function refresh() {
   }
   const status = statusLine;
 
-  // ② 推送没配好 —— **只在没配好时出现**（配好了不占地方）。
-  // 光填地址不开开关，推送会退回控制台：用户以为配好了，手机上永远没有。
-  // 企业微信和「通用推送地址」都算；点它跳到还没弄完的那一段。
+  // ② 推送没配好 —— **只在没配好时出现**（配好了不占地方）
+  // 光填地址不开开关，推送会退回控制台：用户以为配好了，手机上永远没有
+  // 企业微信和「通用推送地址」都算；点它跳到还没弄完的那一段
   if (!env.push_ready) {
     lines.push({label: '推送还没配好', value: '点这里',
                 go: env.push_section || 'wecom_bot'});
@@ -2575,7 +2584,7 @@ async function refresh() {
 
   // ⑦ AI 增强接上了没。**只在开着时显示**（关着不占地方）；
   //    开了但缺东西必须说清楚缺哪一样 —— 否则就是"开了等于没开"，
-  //    用户从界面上根本查不出来（2026-10-14 真发生过）。
+  //    用户从界面上根本查不出来（2026-10-14 真发生过）
   if (env.ai_enabled) {
     if (env.ai_ready) {
       lines.push({label: 'AI 增强', value: env.ai_model, go: 'ai'});
@@ -2588,7 +2597,7 @@ async function refresh() {
   }
 
   // 有新版本就摆一行（点它跳到下载页）。**只在真有新版时出现** ——
-  // 平时不占地方，也不会天天唠叨。
+  // 平时不占地方，也不会天天唠叨
   const upd = env.update || {};
   if (upd.has_new) {
     lines.push({label: `🆕 有新版本 v${upd.latest}`, value: '点这里下载',
@@ -2599,7 +2608,7 @@ async function refresh() {
   $('foot').title = titles.join('\n');
   const row = (line) => `<span class="label">${esc(line.label)}</span>${
     line.value === undefined ? '' : `<b class="value">${esc(line.value)}</b>`}`;
-  // 状态行也可以带一个数值（比如"收到 1234"）：它在 .value 里，永远不会被省略。
+  // 状态行也可以带一个数值（比如"收到 1234"）：它在 .value 里，永远不会被省略
   const statusValue = status.value === undefined ? ''
     : `<b class="value">${esc(status.value)}</b>`;
   $('foot').innerHTML =
@@ -2615,7 +2624,7 @@ async function refresh() {
       const go = node.dataset.go;
       // "panel:xxx" = 打开右栏那个独立面板（QQ / 插件）；
       // "update" = 有新版本那一行，去浏览器打开下载页；
-      // 其余都当设置里的一段名，跳过去并展开。
+      // 其余都当设置里的一段名，跳过去并展开
       if (go.startsWith('panel:')) {
         setPanel(go.slice('panel:'.length));
         renderPanel(true);
@@ -2687,7 +2696,7 @@ window.addEventListener('pywebviewready', () => {
     if (!res) return;
     toast(res.added ? `同步完成，新增 ${res.added} 条` : '同步完成，没有新的');
     // 同步带回来的提醒要留在界面上，不能只用一句飘过去的提示 ——
-    // 用户正在看别的地方，一条 toast 两秒就没了，等于没说。
+    // 用户正在看别的地方，一条 toast 两秒就没了，等于没说
     syncNotes = Array.isArray(res.notes) ? res.notes : [];
     refresh();
   };
@@ -2714,9 +2723,9 @@ window.addEventListener('pywebviewready', () => {
   };
 
   refresh();
-  // 后台收了新消息时自动刷新：定时重取，比做推送通道简单得多。
+  // 后台收了新消息时自动刷新：定时重取，比做推送通道简单得多
   // 但**窗口最小化 / 被挡住时不刷** —— 那会儿没人看，
-  // 每 5 秒白跑一遍（500 条待办约 40ms + 143KB）纯属浪费电。
+  // 每 5 秒白跑一遍（500 条待办约 40ms + 143KB）纯属浪费电
   setInterval(() => {
     if (document.hidden) return;
     refresh();
@@ -2727,7 +2736,7 @@ window.addEventListener('pywebviewready', () => {
   });
 });
 
-/* F5 / Ctrl+R 重新载入页面。
+/* F5 / Ctrl+R 重新载入页面
    WebView2 会把先前打开的页面缓存住，改了 index.html 之后老窗口不会自己变，
    以前只能把程序关掉重开。加个刷新键省这一步。 */
 document.addEventListener('keydown', (e) => {

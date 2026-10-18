@@ -343,7 +343,8 @@ class Api:
             return {"ok": False, "message": "没能导出（库读不到？看看磁盘还剩多少）"}
         mb = max(1, round(path.stat().st_size / 1048576))
         return {"ok": True, "path": str(path), "mb": mb,
-                "message": f"完整备份打好了（{mb} MB）"}
+                # 只报文件名：整条路径塞在半宽的格子里会折成三四行
+                "message": f"已打包 {path.name}（{mb} MB）"}
 
     @tracked
     def restore_backup(self, name: str) -> dict:
@@ -1695,7 +1696,7 @@ class Api:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(build(rows), encoding="utf-8")
         return {"ok": True, "path": str(path), "count": len(rows),
-                "message": f"已导出 {len(rows)} 条"}
+                "message": f"已导出 {len(rows)} 条 → {path.name}"}
 
     def open_url(self, url: str) -> dict:
         """用系统浏览器打开一个链接（目前只给「有新版本」那一行用）。

@@ -187,7 +187,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "token": "",
         # ===== 收哪些消息（默认一个都不收，必须显式勾选）=====
         # 群里闲聊太多，默认不接收是对的：不勾就一条都不进。
-        "group_ids": [],                  # 要监控的群号，例如 [123456, 789012]
+        "group_ids": [],                  # 要监控的群号，例如 123456, 789012（界面上直接写数字）
         "receive_all": False,             # true = 所有群都收（不推荐，噪声和费用都会失控）
         "private_ids": [],                # 要监控的私聊对象 QQ 号
         "receive_private_all": False,
@@ -316,7 +316,7 @@ KEY_COMMENTS: dict[str, str] = {
                              "#   有人说碎片其实是暗号（学号、房间号），那就改 off。",
     "parse.merge_window_seconds": "同一个人在同一个群里，这个秒数内连续发的东西算一件事。",
     "parse.due_default_hour": "只说了哪天、没说几点时，算当天的几点。默认当天最后一分钟。",
-    "parse.my_names": "你自己的名字/昵称，写成 [\"张三\", \"小张\"]。\n"
+    "parse.my_names": "你自己的名字/昵称，直接用逗号分开（例：张三, 小张；不加引号不加中括号）\n"
                       "#   值班表、排班表里含这些词的行会被单独拎出来一条，\n"
                       "#   你不用在整张表里找「我周几值日」。",
     "parse.merge_window_seconds": "同一个人在同一个会话里，这么多秒内连发的东西算一件事。\n"
@@ -348,14 +348,14 @@ KEY_COMMENTS: dict[str, str] = {
     "push.quote_max_chars": "推送里附带的原文片段长度（方便你看它为什么被判成待办）。",
     "push.fallback_text_chars": "AI 用不了时，推送原文的前多少字作为保底。",
     # [remind] 提醒力度
-    "remind.options": "待办详情里「提醒力度」那个下拉能选的档（分钟），写成 [60, 30, 10, 3]。\n"
+    "remind.options": "待办详情里「提醒力度」能选的档（分钟），直接写数字、逗号分开（例：60, 30, 10, 3）\n"
                       "#   1440 = 提前一天。想加「提前 5 分钟」就添个 5。\n"
                       "#   不用写 0：下拉里永远有一个「默认」，\n"
                       "#   默认 = 不单独提醒，只在每日汇总里出现（没选的就是这个）。",
-    "remind.default_leads": "新待办默认带哪几档提醒，默认 [60, 30, 10, 3]（全选）。\n"
+    "remind.default_leads": "新待办默认带哪几档提醒，默认 60, 30, 10, 3（全选）\n"
                             "#   留空 [] = 新待办一声不响，只在每日汇总里出现。\n"
                             "#   嫌吵就删几档，比如 [30, 10]；每条还能在详情里单独改。",
-    "remind.timetable_leads": "课表单独一套提醒，默认 [10]：上课前 10 分钟响一次。\n"
+    "remind.timetable_leads": "课表单独一套提醒，默认 10：上课前 10 分钟响一次\n"
                               "#   一天好几节课，档位配太多会变成轰炸；不想提醒就留空 []。",
     # [ai]
     "ai.enabled": "打开之后，长消息会交给 AI 挑待办。默认关闭 ——\n"
@@ -410,9 +410,11 @@ KEY_COMMENTS: dict[str, str] = {
     "qq.bind_port": "监听端口。和 NapCat 那边配的端口要一致。",
     "qq.path": "监听路径。和 NapCat 那边配的路径要一致。",
     "qq.token": "访问令牌。首次启用时程序会自动生成一串，照抄到 NapCat 配置里。",
-    "qq.group_ids": "要监控的群号，写成 [123456, 789012]。不填就一个群都不收。",
+    "qq.group_ids": "要监控的群号，直接写数字，用逗号分开（例：123456, 789012）\n"
+                    "#   不要加中括号 —— 那是配置文件里的写法，界面上直接写数字就行\n"
+                    "#   不填 = 一个群都不收",
     "qq.receive_all": "true = 所有群都收。不推荐：闲聊噪声多，接 AI 的话费用也会失控。",
-    "qq.private_ids": "要监控的私聊对象 QQ 号，写法同上。",
+    "qq.private_ids": "要监控的私聊对象 QQ 号，写法和上面一样（数字，逗号分开，不加中括号）",
     "qq.receive_private_all": "true = 所有私聊都收。",
     "qq.inbox_ids": "小号收件箱：你自己发给这些会话的消息也变成待办。\n"
                     "#   把微信/短信截图转发到这个会话，就等于丢进收件箱。\n"
@@ -694,6 +696,11 @@ def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _trim_period(text: str) -> str:
+    """界面上的一句话结尾不要句号 —— 满屏句号读着像公文，用户提过。"""
+    return re.sub(r"。(?=\s*$)", "", str(text or "").rstrip())
+
+
 class Config:
     """读配置。`cfg["parse"]["filter_strength"]` 或 `cfg.get("parse", "filter_strength")`。
 
@@ -840,7 +847,7 @@ class Config:
                 "key": key,
                 "value": self.get(section, key),
                 "kind": _kind(DEFAULTS[section][key]),
-                "hint": KEY_COMMENTS.get(full, ""),
+                "hint": _trim_period(KEY_COMMENTS.get(full, "")),
                 "level": "advanced" if full in ADVANCED_KEYS else "common",
                 "locked": LOCKED_KEYS.get(full, ""),
                 # 改完要重启才生效的项：界面保存后会竖一条明显的提醒
