@@ -134,3 +134,18 @@ class TestChildrenElsewhere(Base):
         accepted = refiner.submit(self.message, [self.store.get_task(kid.task_id)])
         self.assertTrue(accepted, "子项被拒在精修队列外了")
         refiner.stop()
+
+
+class TestGuessedTime(Base):
+    def test_the_flag_survives_storage_and_edit_clears_it(self):
+        """存进来带着"时间待补"，用户改完时间就该清掉。"""
+        from app.ui.bridge import Api
+
+        task = self.store.save_drafts(
+            self.message, [TaskDraft(title="交报名表", due_at="2026-10-20 23:59:00",
+                                     time_guess=True)])[0]
+        self.assertTrue(self.store.get_task(task.task_id).time_guess)
+        api = Api(self.store, [], {}, notices=[])
+        self.assertTrue(api.edit_task(task.task_id, "交报名表", "2026-10-20T09:00", "")["ok"])
+        self.assertFalse(self.store.get_task(task.task_id).time_guess)
+        self.assertEqual(self.store.get_task(task.task_id).due_at, "2026-10-20 09:00:00")

@@ -585,6 +585,8 @@ def parse_line(line: str) -> TaskDraft | None:
         location=location,
         priority=_priority(raw, due_at is not None),
         source_kind=SOURCE_MANUAL,
+        # 只认到日期、没说几点：23:59 是程序补的，界面要提醒用户改
+        time_guess=bool(date_part and not time_part),
     )
 
 

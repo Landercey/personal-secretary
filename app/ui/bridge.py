@@ -309,6 +309,8 @@ class Api:
             # 后台 AI 正在精修这条（规则版先入库，AI 回来再改写标题）
             "ai": bool(getattr(task, "ai_pending", False)),
             "parent_id": getattr(task, "parent_id", None),
+            # 时间只认到日期（几点是程序补的）—— 详情里要提醒用户去改
+            "time_guess": bool(getattr(task, "time_guess", False)),
         }
 
     @tracked
@@ -677,6 +679,8 @@ class Api:
             "title": clean[:limit],
             "due_at": _normalize_due(due) or None,
             "location": str(location or "").strip()[:100] or None,
+            # 用户亲手改过时间了，就不再是"猜的"
+            "time_guess": 0,
         })
         self._revision += 1
         return {"ok": True}

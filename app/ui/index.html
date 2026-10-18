@@ -662,6 +662,7 @@ function renderList() {
           ${t.location ? `<i class="sep"></i><span>${esc(t.location)}</span>` : ''}
           ${t.source ? `<i class="sep"></i><span>${esc(t.source)}</span>` : ''}
           ${t.attachments ? `<span class="clip">📎${t.attachments}</span>` : ''}
+          ${t.time_guess ? '<span class="clip" style="color:var(--today)">时间待补</span>' : ''}
           ${t.child_count ? `<span class="clip">+${t.child_count} 子项</span>` : ''}
           ${t.ai ? '<span class="aipending">AI 整理中…</span>' : ''}
         </div>
@@ -844,7 +845,9 @@ function drawDetail() {
 
   $('detailInner').innerHTML = `
     <h2>${esc(t.title)}</h2>
-    <div class="kv"><b>时间</b><span>${esc(t.due)}</span></div>
+    <div class="kv"><b>时间</b><span>${esc(t.due)}${
+      t.time_guess ? ` <span style="color:var(--today)">· 只认到日期，几点是补的</span>
+        <a id="btnFixTime" style="color:var(--accent);cursor:pointer;margin-left:6px">补上几点 ›</a>` : ''}</span></div>
     ${t.location ? `<div class="kv"><b>地点</b><span>${esc(t.location)}</span></div>` : ''}
     ${t.source ? `<div class="kv"><b>来源</b><span>${esc(t.source)}${t.sender ? ' · ' + esc(t.sender) : ''}</span></div>` : ''}
     <div class="kv"><b>提醒力度</b><span>${remindBox(t)}
@@ -863,6 +866,8 @@ function drawDetail() {
   if (copy) copy.onclick = () => copyText(taskText(t));
   if (t.child_count) loadChildren(t.id);
   const completeAll = $('btnCompleteAll');
+  const fixTime = $('btnFixTime');
+  if (fixTime) fixTime.onclick = () => editTask();
   if (completeAll) completeAll.onclick = async () => {
     // 问一句，默认"只完成这一条"——顺手把子项也做掉是好事，但得他说了算
     const yes = window.confirm(
@@ -1106,7 +1111,9 @@ function drawEdit(t) {
       <input type="text" id="eTitle" value="${esc(t.title)}"></div>
     <div class="field"><label for="eDue">截止时间</label>
       <input type="datetime-local" id="eDue" value="${esc(t.due_raw || '')}">
-      <p class="hint">留空 = 没有截止时间。改完这里，同一条消息再来也不会重复建</p></div>
+      <p class="hint">${t.time_guess
+        ? '<b style="color:var(--today)">这条的时间只认到日期</b>，23:59 是程序补的 —— 补上具体几点再保存'
+        : '留空 = 没有截止时间'}。改完这里，同一条消息再来也不会重复建</p></div>
     <div class="field"><label for="eLoc">地点</label>
       <input type="text" id="eLoc" value="${esc(t.location)}"></div>
     <div class="acts">

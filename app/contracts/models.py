@@ -132,6 +132,9 @@ class TaskDraft:
     # 到时候由它来说"这条我有多确定"。
     confidence: float = 1.0
     quoted: str = ""                            # 原始消息片段，推送时带上
+    # 时间只认到"哪天"、没写几点（用了默认 23:59）。界面要提醒用户去改 ——
+    # 用户的原话是"如果时间只识别一点可以提醒来改"。
+    time_guess: bool = False
 
 
 @dataclass(slots=True)
@@ -171,6 +174,7 @@ class Task:
     # 子待办：指向父待办。**只允许一层**（父的 parent_id 必须是空），
     # 再往下就变成另一个 Notion，跟"极简"冲突。
     parent_id: int | None = None
+    time_guess: bool = False
 
 
 @dataclass(slots=True)

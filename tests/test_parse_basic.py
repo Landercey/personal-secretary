@@ -232,6 +232,13 @@ class TestTimeParsing(unittest.TestCase):
         plain = quick_parse.parse_line("2点20前集合")
         self.assertTrue(plain.due_at.endswith("02:20:00"), plain.due_at)
 
+    def test_date_only_is_flagged_as_a_guessed_time(self):
+        """只说"10月20号前"：23:59 是程序补的，得让用户知道去改。"""
+        guessed = quick_parse.parse_line("10 月 20 号前交报名表")
+        self.assertTrue(guessed.time_guess)
+        exact = quick_parse.parse_line("明天下午三点交实验报告")
+        self.assertFalse(exact.time_guess)
+
     def test_traditional_chinese_normalized(self):
         """繁简归一：不归一，繁体里的"點"认不出来，时间会全错。"""
         self.assertEqual(to_simplified("明天早上11點打遊戲"), "明天早上11点打游戏")

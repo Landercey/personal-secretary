@@ -124,6 +124,8 @@ def _add_missing_columns(conn: sqlite3.Connection) -> None:
     if "parent_id" not in columns:
         # 子待办：指向父待办。老库加一列就行，不用动别的数据。
         conn.execute("ALTER TABLE tasks ADD COLUMN parent_id INTEGER")
+    if "time_guess" not in columns:
+        conn.execute("ALTER TABLE tasks ADD COLUMN time_guess INTEGER NOT NULL DEFAULT 0")
 
 
 def _normalize_remind_unit(conn: sqlite3.Connection) -> None:
@@ -337,8 +339,9 @@ class SqliteStore(Store):
                    (title, detail, due_at, location, remind_level, remind_leads,
                     priority,
                     source_kind, source_name, sender, origin_msg_id, confidence,
-                    quoted, status, is_archived, dedup_key, created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
+                    quoted, time_guess, status, is_archived, dedup_key,
+                    created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
                    ON CONFLICT(dedup_key) WHERE dedup_key <> '' DO NOTHING""",
                 (draft.title, draft.detail, draft.due_at, draft.location,
                  int(draft.remind_level),
@@ -351,6 +354,7 @@ class SqliteStore(Store):
                  draft.sender or message.sender,
                  draft.origin_msg_id or message.msg_id,
                  float(draft.confidence), draft.quoted,
+                 1 if getattr(draft, "time_guess", False) else 0,
                  STATUS_OPEN, key, stamp, stamp),
             )
             if not cursor.rowcount:
@@ -692,7 +696,7 @@ class SqliteStore(Store):
         以后没人说得清"这条到底被谁改过什么"。
         """
         allowed = ("title", "detail", "due_at", "location", "remind_level",
-                   "remind_leads")
+                   "remind_leads", "time_guess")
         changes = {key: value for key, value in (fields or {}).items() if key in allowed}
         if not changes:
             return
@@ -891,6 +895,7 @@ class SqliteStore(Store):
             drop_reason=row["drop_reason"],
             ai_pending=bool(row["ai_pending"]),
             parent_id=(int(row["parent_id"]) if row["parent_id"] else None),
+            time_guess=bool(row["time_guess"]),
         )
 
     # ------------------------------------------------------------------ 状态

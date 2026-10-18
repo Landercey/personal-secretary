@@ -66,6 +66,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     ai_pending    INTEGER NOT NULL DEFAULT 0
     -- 子待办：指向父待办。只允许一层（父的 parent_id 必须是空）。
     ,parent_id    INTEGER
+    -- 1 = 截止时间只认到日期，几点是程序补的 23:59（界面要提示用户去改）
+    ,time_guess   INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, is_archived);
 CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_at);
