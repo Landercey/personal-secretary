@@ -86,7 +86,8 @@ def _excerpt_line(task: Task) -> str:
 
 
 def build_digest(tasks: list[Task], title: str = "待办汇总",
-                 max_attachments: int = 5, rest: int = 0) -> PushPayload:
+                 max_attachments: int = 5, rest: int = 0,
+                 children: dict[int, list[Task]] | None = None) -> PushPayload:
     """一批待办 → 一条汇总推送。
 
     `max_attachments` 是安全阀：群机器人每分钟只能发 20 条，
@@ -100,7 +101,17 @@ def build_digest(tasks: list[Task], title: str = "待办汇总",
         body = "这段时间没有要做的。" + (f"\n（更远的还有 {rest} 条，界面里能看到）"
                                          if rest else "")
     else:
-        lines = [format_task_line(t, i + 1) for i, t in enumerate(tasks)]
+        lines = []
+        for i, task in enumerate(tasks):
+            lines.append(format_task_line(task, i + 1))
+            # 有子项的，紧跟着写一行"现在轮到哪一条" —— 用户的原话是
+            # "列出总任务，现在轮到做 XX"。子项不单独占编号，它们是这件事的步骤。
+            kids = [k for k in (children or {}).get(task.task_id, [])
+                    if getattr(k, "status", "open") == "open"]
+            if kids:
+                nxt = kids[0]
+                when = human_due(nxt.due_at)[0]
+                lines.append(f"    └ 现在轮到：{nxt.title}（{when}）")
         quotes = [line for line in (_excerpt_line(t) for t in tasks) if line]
         tail = [""] + quotes if quotes else []
         # 有一条是 AI 归纳的，就在末尾说清楚（合同里写明必须标）

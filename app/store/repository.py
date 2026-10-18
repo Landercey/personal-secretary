@@ -442,17 +442,31 @@ class SqliteStore(Store):
 
     # ------------------------------------------------------------------ 查询
     @_synchronized
-    def list_tasks(self, view: str = "open", limit: int = 200) -> list[Task]:
+    def list_tasks(self, view: str = "open", limit: int = 200,
+                   include_children: bool = False) -> list[Task]:
         where, params = self._view_filter(view)
         # 子待办只在父待办的详情里出现，不进任何分组 ——
         # 否则「今天」里会混进一堆"借书""填表"，把主线冲掉。
-        where = f"({where}) AND parent_id IS NULL"
+        # 提醒那边例外：子项也有自己的时间，到点也得响（include_children=True）。
+        if not include_children:
+            where = f"({where}) AND parent_id IS NULL"
         sql = (
             "SELECT * FROM tasks WHERE " + where +
             " ORDER BY (due_at IS NULL), due_at, priority, task_id DESC LIMIT ?"
         )
         rows = self.conn.execute(sql, (*params, int(limit))).fetchall()
         return [self._row_to_task(row) for row in rows]
+
+    @_synchronized
+    def parent_titles(self, task_ids: Iterable[int]) -> dict[int, str]:
+        """{父待办编号: 标题} —— 搜索结果里给子项标上"属于哪条"。"""
+        ids = [int(x) for x in task_ids if x]
+        if not ids:
+            return {}
+        marks = ",".join("?" * len(ids))
+        rows = self.conn.execute(
+            f"SELECT task_id, title FROM tasks WHERE task_id IN ({marks})", ids).fetchall()
+        return {int(row["task_id"]): str(row["title"]) for row in rows}
 
     @_synchronized
     def count_tasks(self, view: str = "open") -> int:

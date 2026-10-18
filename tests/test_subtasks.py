@@ -78,3 +78,34 @@ class TestChildren(Base):
         ok, why = self.store.attach_child(kid.task_id, b.task_id)
         self.assertFalse(ok)
         self.assertIn("已经是", why)
+
+    def test_children_can_be_included_when_asked(self):
+        """提醒那边要拿到子项（它们也有自己的时间），列表默认不要。"""
+        parent, kid = self.add("搬家"), self.add("借推车")
+        self.store.attach_child(kid.task_id, parent.task_id)
+        self.assertEqual(len(self.store.list_tasks("open")), 1)
+        self.assertEqual(len(self.store.list_tasks("open", include_children=True)), 2)
+
+
+class TestChildrenElsewhere(Base):
+    def test_the_digest_tells_you_what_to_do_next(self):
+        """推送：先列总任务，再写一行"现在轮到"。"""
+        from app.sinks.console import build_digest
+
+        parent = self.add("搬家")
+        a = self.add("借推车")
+        b = self.add("订车")
+        self.store.attach_child(a.task_id, parent.task_id)
+        self.store.attach_child(b.task_id, parent.task_id)
+        rows = self.store.list_tasks("open")
+        payload = build_digest(rows, children={parent.task_id: self.store.children_of(parent.task_id)})
+        self.assertIn("搬家", payload.body)
+        self.assertIn("现在轮到", payload.body)
+
+    def test_search_shows_which_parent_a_child_belongs_to(self):
+        from app.ui.bridge import Api
+
+        parent, kid = self.add("搬家"), self.add("借推车")
+        self.store.attach_child(kid.task_id, parent.task_id)
+        items = Api(self.store, [], {}, notices=[]).search("借推车", "all")["items"]
+        self.assertEqual(items[0]["parent"], "搬家")

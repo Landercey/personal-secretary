@@ -354,7 +354,15 @@ class Api:
         # （"班长说的截止几号"），提炼后的标题不一定留着那个数字。
         # 原文搜索结果单独一组，不混进待办列表。
         found = self.store.search_messages(keyword, limit=20)
-        return {"items": [self._task_dict(t) for t in rows],
+        # 子项被搜到时要能看出"它属于哪条" —— 不然界面上突然冒出一条
+        # 列表里从来没有过的待办，用户只会以为程序串数据了。
+        titles = self.store.parent_titles([t.parent_id for t in rows if t.parent_id])
+        items = []
+        for task in rows:
+            item = self._task_dict(task)
+            item["parent"] = titles.get(task.parent_id, "") if task.parent_id else ""
+            items.append(item)
+        return {"items": items,
                 "messages": [
                     {"at": item["at"], "source": item["source"],
                      "kind": item["kind"], "sender": item["sender"],
@@ -1794,8 +1802,14 @@ class Api:
         from ..runtime.config import default_data_dir
         from ..sinks.ical import build
 
-        rows = [t for t in self.store.list_tasks("open", limit=2000)
+        # 子项也有时间，导日历当然要带上；标题前面补上级，日历里才看得懂
+        rows = [t for t in self.store.list_tasks("open", limit=2000,
+                                                include_children=True)
                 if (t.due_at or "").strip()]
+        titles = self.store.parent_titles([t.parent_id for t in rows if t.parent_id])
+        for task in rows:
+            if task.parent_id and titles.get(task.parent_id):
+                task.title = f"{titles[task.parent_id]} → {task.title}"
         if not rows:
             return {"ok": False, "message": "还没有写了时间的待办 —— 日历里放不下「没时间」的事"}
         path = default_data_dir() / f"待办-{dt.date.today():%Y%m%d}.ics"

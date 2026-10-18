@@ -658,6 +658,7 @@ function renderList() {
         <div class="meta">
           <span class="due ${t.urgency}">${esc(t.due)}</span>
           ${t.conflict ? '<span class="conflict" title="同一时间还有别的待办">时间撞车</span>' : ''}
+          ${t.parent ? `<span class="clip" style="color:var(--text-3)">属于：${esc(t.parent)}</span>` : ''}
           ${t.location ? `<i class="sep"></i><span>${esc(t.location)}</span>` : ''}
           ${t.source ? `<i class="sep"></i><span>${esc(t.source)}</span>` : ''}
           ${t.attachments ? `<span class="clip">📎${t.attachments}</span>` : ''}

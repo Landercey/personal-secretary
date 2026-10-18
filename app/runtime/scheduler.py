@@ -288,7 +288,8 @@ def due_reminders(store, now: datetime | None = None,
     """
     moment = now or datetime.now()
     found: list[tuple[object, int]] = []
-    for task in store.list_tasks("open", limit=200):
+    # 子项也有自己的时间：到点得响（以前只遍历一级，子项的提醒永远不发）
+    for task in store.list_tasks("open", limit=200, include_children=True):
         leads = task_leads(task)
         if not leads or not task.due_at:
             continue
@@ -367,8 +368,12 @@ class Scheduler:
         everything = self.store.list_tasks("open", limit=50)
         horizon = slot_horizon(slot.when)
         tasks = [t for t in everything if within_horizon(t, slot.when, horizon)]
+        # 子项：跟着父待办一起露一行"现在轮到"，不单独占编号
+        kids = {t.task_id: self.store.children_of(t.task_id) for t in tasks}
+        kids = {key: value for key, value in kids.items() if value}
         payload = build_digest(tasks, title=slot.title,
-                               rest=len(everything) - len(tasks))
+                               rest=len(everything) - len(tasks),
+                               children=kids)
         payload.channel = getattr(self.sink, "name", "console")
 
         # 收消息那边没连上（没登录/后台没跑）时，才在推送尾巴上说一句。
@@ -426,7 +431,14 @@ class Scheduler:
         """单独推一条"快到点了"。内容朴素：就这一件事，不夹带别的。"""
         from ..contracts.models import PushPayload
 
-        body = [f"【{task.title}】"]
+        # 子项提醒要带上上级：「搬家 → 借推车」。只发"借推车"的话，
+        # 手机上一时想不起这是哪件事的一部分。
+        title = task.title
+        if getattr(task, "parent_id", None):
+            parent = self.store.get_task(int(task.parent_id))
+            if parent is not None:
+                title = f"{parent.title} → {task.title}"
+        body = [f"【{title}】"]
         if task.due_at:
             body.append(f"截止：{task.due_at}")
         if task.location:
@@ -441,7 +453,7 @@ class Scheduler:
 
         payload = PushPayload(
             channel=getattr(self.sink, "name", "console"), kind="text",
-            title=f"⏰ 还有 {human_minutes(minutes)}：{task.title}",
+            title=f"⏰ 还有 {human_minutes(minutes)}：{title}",
             body="\n".join(body))
         result = self._send(batch, payload)
         ok = bool(result and result.ok)
