@@ -866,8 +866,10 @@ class SqliteStore(Store):
             # 会记三行，以前"拦下 291 条"其实只有 104 条消息。
             "junk": one("SELECT COUNT(DISTINCT CASE WHEN msg_id='' THEN drop_id"
                         " ELSE msg_id END) FROM dropped_items WHERE dropped_at LIKE ?"),
-            "merged": one("SELECT COUNT(*) FROM task_events WHERE kind='merged'"
-                          " AND created_at LIKE ?"),
+            # 按**待办**数，不按事件行数：改版前补收重放给同一条待办记过几十次
+            # "合并重复"，按行数会显示成"今天重复了 104 次"（用户 2026-10-18 问的）。
+            "merged": one("SELECT COUNT(DISTINCT task_id) FROM task_events"
+                          " WHERE kind='merged' AND created_at LIKE ?"),
             "pushed": one("SELECT COUNT(*) FROM push_records WHERE pushed_at LIKE ?"),
         }
 

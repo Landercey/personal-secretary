@@ -94,6 +94,18 @@ class TestUndo(Base):
         flags = {i["title"]: i["conflict"] for i in self.api().tasks("open")["items"]}
         self.assertEqual(flags, {"开会": True, "交表": True, "跑步": False})
 
+    def test_date_only_tasks_do_not_collide_at_2359(self):
+        """只说了"哪天"的两条不算撞车 —— 23:59 是程序补的，不是真的排在一起。
+
+        用户 2026-10-18 的原话："怎么那么多时间撞车"。
+        """
+        self.store.save_drafts(self.message, [TaskDraft(
+            title="交报名表", due_at="2026-10-18 23:59:00", time_guess=True)])
+        self.store.save_drafts(self.message, [TaskDraft(
+            title="学理论", due_at="2026-10-18 23:59:00", time_guess=True)])
+        flags = [i["conflict"] for i in self.api().tasks("open")["items"]]
+        self.assertEqual(flags, [False, False])
+
     def test_completing_one_can_be_undone(self):
         task = self.add("交作业")
         api = self.api()

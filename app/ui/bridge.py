@@ -63,6 +63,20 @@ def tracked(fn):
     return wrapper
 
 
+def _real_slot(item: dict) -> str:
+    """这一条占的是不是**真实的时间点**（用来判断"时间撞车"）。
+
+    只说了"哪天"的，截止时间是程序补的 23:59；一堆这种任务会全撞在 23:59 上，
+    看着像"到处都是冲突"。已完成/已归档的也不占你接下来的时间。
+    """
+    raw = str(item.get("due_raw") or "")
+    if not raw or item.get("done") or item.get("archived"):
+        return ""
+    if item.get("time_guess") or raw.endswith("T23:59"):
+        return ""
+    return raw
+
+
 def _normalize_due(text: str) -> str:
     """把界面上的日期时间值变成库里统一的写法。
 
@@ -264,14 +278,18 @@ class Api:
         for item in items:
             item["child_count"] = kids.get(item["id"], 0)
         # 「时间撞车」：同一天同一分钟有好几条 —— 多半是两件事排到一起了。
-        # 在这里算而不是每条查一次库：500 条 × 1 次查询会让列表卡住。
+        # 只算**真写了钟点**的、还没做的那些：
+        #   · 只说了"哪天"的，截止时间会被补成 23:59，一堆任务全撞在 23:59 上，
+        #     那是假撞车（用户 2026-10-18 报的"怎么那么多时间撞车"）；
+        #   · 已完成/已归档的不算 —— 它们不占你接下来的时间。
         seen: dict[str, int] = {}
         for item in items:
-            key = item["due_raw"]
+            key = _real_slot(item)
             if key:
                 seen[key] = seen.get(key, 0) + 1
         for item in items:
-            item["conflict"] = bool(item["due_raw"]) and seen[item["due_raw"]] > 1
+            key = _real_slot(item)
+            item["conflict"] = bool(key) and seen.get(key, 0) > 1
         return {"items": items, "revision": self._revision}
 
     @staticmethod
