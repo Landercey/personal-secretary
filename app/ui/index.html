@@ -290,6 +290,13 @@ button:disabled { opacity: .5; cursor: default }
 .acts .two { display: flex; gap: 7px }
 .acts .two button { flex: 1 }
 .acts button.block { width: 100% }
+/* 「复制 / 这不是待办」这类次要动作：不画框，像链接一样安静。
+   以前详情页底下是四个等宽的大按钮，主次全被拉平了。 */
+.acts .quiet { display: flex; gap: 16px; justify-content: center; margin-top: 4px }
+.acts .quiet button { border: 0; background: none; padding: 4px 6px;
+                      color: var(--text-3); font-size: 11.5px }
+.acts .quiet button:hover { color: var(--text-2); background: none; text-decoration: underline }
+.acts .quiet button.danger { color: var(--overdue) }
 /* 群列表勾选：一行一个群，左边方框、中间名字、右边群号 */
 .glist { margin-top: 2px; max-height: 240px; overflow: auto;
          border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px }
@@ -838,7 +845,6 @@ function drawDetail() {
     ${t.quoted ? `<div class="quote"><em>原始消息（判错了你能看出为什么）</em>${esc(t.quoted)}</div>` : ''}
     ${t.detail ? `<div class="quote">${esc(t.detail)}</div>` : ''}
     ${(t.files && t.files.length) ? '<div class="files" id="files"></div>' : ''}
-    <button class="block" id="btnCopyTask">复制这条（标题 + 时间 + 原话 + 来源）</button>
     ${detailActions(t)}`;
   const back = $('btnRestore');
   if (back) back.onclick = () => act('restore', t.id);
@@ -961,13 +967,18 @@ function copyText(text) {
 
 function detailActions(t) {
   if (!t.done && !t.archived) {
+    // 主操作在最上，两个次要动作并排，复制和"不是待办"收成一行安静的字。
+    // 以前是四个等宽大按钮堆着，用户分不清哪个是"该点的那个"。
     return `<div class="acts">
         <button class="primary block" onclick="act('complete')">标记完成</button>
         <div class="two">
           <button onclick="editTask()">改内容</button>
           <button onclick="act('archive')">归档</button>
         </div>
-        <button class="block" onclick="act('drop')">这不是待办</button>
+        <div class="quiet">
+          <button id="btnCopyTask">复制</button>
+          <button class="danger" onclick="act('drop')">这不是待办</button>
+        </div>
       </div>`;
   }
   // 归档优先：一条既完成又归档的，只会出现在「已归档」里
@@ -977,6 +988,7 @@ function detailActions(t) {
       <p class="hint" style="margin-top:2px">移到「全部未完成」——
         之后它在哪个分组，由截止时间自己决定（今天 / 本周 / 逾期…）；
         没写时间的就只在「全部未完成」里。</p>
+      <div class="quiet"><button id="btnCopyTask">复制</button></div>
     </div>`;
 }
 
@@ -1388,14 +1400,11 @@ function renderSection(sec, first) {
   // 配置、待办、插件、下好的 QQ 都在别的文件夹里 —— 所以不用重新扫码登录。
   const updater = sec.name === 'ui'
     ? `<div class="acts" style="margin-top:10px">
-         <button class="block" data-checkupdate>检查更新</button>
+         <div class="two">
+           <button data-checkupdate>检查更新</button>
+           <button data-about>关于</button>
+         </div>
          <p class="hint" data-updateresult>点一下问 GitHub 有没有新版。更新不碰配置和待办，也不用重新扫码。</p>
-       </div>`
-    : '';
-  // 关于：版本、构建签名、官方地址、数据在哪。给"花钱买到别人打包版"的人看的。
-  const about = sec.name === 'ui'
-    ? `<div class="acts" style="margin-top:10px">
-         <button class="block" data-about>关于（版本 / 来源 / 数据在哪）</button>
        </div>`
     : '';
   // AI 段多一个「试一下」：填完地址/模型/密钥之后没法知道对不对 ——
@@ -1413,9 +1422,11 @@ function renderSection(sec, first) {
          <select class="block" data-backupsel><option>正在读备份列表…</option></select>
          <button class="block" data-restore>恢复这份备份</button>
          <p class="hint" data-restoreresult>会把现在的待办换成备份里那份（先自动另存一份，配置不动）。</p>
-         <button class="block" data-exportical>导出到手机日历（.ics）</button>
+         <div class="two">
+           <button data-exportical>导出日历（.ics）</button>
+           <button data-fullbackup>完整备份</button>
+         </div>
          <p class="hint" data-icalresult>只导出了时间的待办。</p>
-         <button class="block" data-fullbackup>导出完整备份（库 + 配置 + 附件）</button>
          <p class="hint" data-fullbackupmsg style="margin-bottom:0"></p>
          <p class="hint" data-fullbackupresult>含推送地址和 token，别外发。</p>
          <details class="adv"><summary>备份到底备了什么</summary>
@@ -1428,7 +1439,7 @@ function renderSection(sec, first) {
     : '';
   return `<details class="sec" data-section="${sec.name}"${open ? ' open' : ''}>
       <summary>${esc(sec.title)}<i>${esc(sec.desc)}</i></summary>${
-      common.map(f => renderField(sec.name, f)).join('')}${tester}${aitest}${restore}${picker}${updater}${about}${tail}</details>`;
+      common.map(f => renderField(sec.name, f)).join('')}${tester}${aitest}${restore}${picker}${updater}${tail}</details>`;
 }
 
 function activateTab(name) {
@@ -2085,10 +2096,11 @@ async function drawQqPanel() {
       <button class="primary block" id="btnQQStart"${
         running || blockers.length || progress.active ? ' disabled' : ''}>
         启动 QQ（后台常驻，收消息 + 定时推送）</button>
-      ${running && !connected
-        ? '<button class="block" id="btnQQRestart">重新出码（重启一次后台）</button>' : ''}
-      <button class="block" id="btnQQStop"${running ? '' : ' disabled'}>
-        停止后台</button>
+      <div class="two">
+        ${running && !connected
+          ? '<button id="btnQQRestart">重新出码</button>' : ''}
+        <button id="btnQQStop"${running ? '' : ' disabled'}>停止后台</button>
+      </div>
     </div>
     <p class="hint" style="margin-top:14px">
       开机自启：<a id="btnAuto" data-on="${data.autostart ? 1 : 0}">${
