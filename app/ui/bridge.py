@@ -1129,6 +1129,8 @@ class Api:
             "data": str(default_data_dir()),
             "root": str(root),
             "frozen": bool(getattr(sys, "frozen", False)),
+            # 早期帮着在真环境里跑、把坑一条条报回来的人 —— 名字留在这儿
+            "testers": "darkfox909、篱下",
         }
 
     @tracked
