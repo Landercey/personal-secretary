@@ -2006,11 +2006,14 @@ function drawSettings() {
       const box = $('pushLog');
       if (!box) return;
       const rows = (res && res.items) || [];
-      box.innerHTML = rows.length
+      const next = res && res.next
+        ? `<p class="hint">下一次：<b>${esc(res.next)}</b>（每天 ${
+            esc((res.times || []).join(' / '))}）</p>` : '';
+      box.innerHTML = next + (rows.length
         ? rows.map(r => `<div class="kv"><b>${r.ok ? '✓' : '✗'}</b><span>${
             esc(r.at.slice(5, 16))}｜${esc(r.channel)}｜${
             esc(r.message || r.batch)}</span></div>`).join('')
-        : '<p class="hint">还没推过。到点会自动推</p>';
+        : '<p class="hint">还没推过。到点会自动推</p>');
     });
   }
 

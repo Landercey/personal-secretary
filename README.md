@@ -62,6 +62,24 @@
 有新版就在左下角出一行「🆕 有新版本」，点一下跳到上面那个下载页。
 不想让它问：设置 → **界面与更新** → 关掉「启动时问一下有没有新版本」。
 
+### 打不开 GitHub？用镜像下（不用梯子）
+
+把 Release 文件的地址前面加上镜像前缀就行，文件是同一个：
+
+| 镜像 | 用法 |
+|---|---|
+| ghfast.top | `https://ghfast.top/` + 原地址 |
+| gh-proxy.com | `https://gh-proxy.com/` + 原地址 |
+| moeyy | `https://github.moeyy.xyz/` + 原地址 |
+
+例（换成你那个版本号）：
+
+```
+https://ghfast.top/https://github.com/Landercey/personal-secretary/releases/download/v4.1.9/personal-secretary-v4.1.9-full.zip
+```
+
+程序里下 NapCat 用的也是这几个镜像 —— 它们在国内通常直连可用。
+
 ---
 
 ## 不用企业微信也能收

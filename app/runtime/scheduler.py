@@ -323,6 +323,14 @@ class Scheduler:
         return bool(config.get("push", "enabled", True))
 
     def _say(self, text: str) -> None:
+        # 同时写进结构化日志：窗口模式下 print 是看不见的，
+        # 用户报"没推送"时只能靠这份日志回答"到底推没推、为什么没推"。
+        try:
+            from . import logger
+
+            logger.note("info", "PUSH.LOG", stage="push", detail=str(text)[:200])
+        except Exception:                                 # noqa: BLE001
+            pass
         if self.on_event is not None:
             try:
                 self.on_event(text)
@@ -471,10 +479,13 @@ class Scheduler:
         except Exception as exc:
             self.store.log_push(batch, payload.channel, False,
                                 f"{type(exc).__name__}: {exc}")
-            self._say(f"{batch} 推送异常：{type(exc).__name__}")
+            self._say(f"{batch} 推送异常：{type(exc).__name__}: {exc}")
             return None
 
         self.store.log_push(batch, payload.channel, result.ok, result.message)
+        if not result.ok:
+            # 失败必须进日志：推送记录只留 8 小时也看不见（界面只显示最近的）
+            self._say(f"{batch} 推送失败：{result.message}")
         return result
 
     # ------------------------------------------------------------------ 循环

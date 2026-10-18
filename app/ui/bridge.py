@@ -727,13 +727,24 @@ class Api:
 
     def push_history(self) -> dict:
         """最近推过什么。用户问"手机上怎么没收到"时，第一眼看这里。"""
+        from ..runtime.scheduler import parse_times
+        from ..runtime.config import config
+
+        planned = parse_times(config.get("push", "times", ["07:30", "21:30"]))
+        now = datetime.now()
+        upcoming = [label for label in planned
+                    if now.replace(hour=int(label[:2]), minute=int(label[3:]),
+                                   second=0, microsecond=0) > now]
         return {"items": [{
             "batch": str(row.get("batch") or ""),
             "channel": str(row.get("channel") or ""),
             "at": str(row.get("pushed_at") or ""),
             "ok": bool(row.get("ok")),
             "message": str(row.get("message") or "")[:120],
-        } for row in self.store.recent_pushes(limit=20)]}
+        } for row in self.store.recent_pushes(limit=20)],
+            # 下次什么时候推 —— 用户问"怎么不推"时，先看这个数
+            "next": upcoming[0] if upcoming else (planned[0] if planned else ""),
+            "times": planned}
 
     # ------------------------------------------------------------------ 附件
     def attachment_preview(self, task_id: int, path: str) -> dict:
