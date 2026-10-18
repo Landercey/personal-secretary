@@ -1075,6 +1075,14 @@ async function drawAttach() {
         <span style="color:var(--text-3);white-space:nowrap">${esc(i.due || '')}</span>
       </div>`).join('') : '<p class="note">没找到这条 —— 换个词试试</p>';
     box.querySelectorAll('[data-pick]').forEach(row => row.onclick = async () => {
+      // 点一条就执行是危险的（手指一滑就归错了），先问一句
+      const picked = pool.find(i => String(i.id) === row.dataset.pick);
+      const name = (picked && picked.title) || '这一条';
+      const verb = merging ? '合并到' : '归到';
+      if (!window.confirm(`${verb}「${name}」${merging ? '里' : '下面'}？\n\n${
+        merging ? '合并后这条会进废件箱，可以捡回来' : '之后它会挂在那条的详情里，随时能移出'}`)) {
+        return;
+      }
       const r = merging
         ? await call('merge_tasks', Number(attachTarget), Number(row.dataset.pick))
         : await call('attach_child', Number(attachTarget), Number(row.dataset.pick));
@@ -1916,12 +1924,26 @@ function drawSettings() {
         return;
       }
       const chosen = chosenGroupIds();
-      tip.textContent = `读到你加了 ${groups.length} 个群，勾上要收的就行（记得点下面的保存）`;
+      // 记下打开列表那一刻的选择：勾错了能一键退回去
+      const before = [...chosen];
+      tip.innerHTML = `读到你加了 ${groups.length} 个群，勾上要收的就行（记得点下面的保存）
+        <a data-undo-groups style="color:var(--accent);cursor:pointer;margin-left:6px">撤销这次勾选</a>`;
       box.style.display = '';
       box.innerHTML = groups.map(g => `<label class="gitem">
           <input type="checkbox" data-gid="${g.id}"${chosen.includes(g.id) ? ' checked' : ''}>
           <span>${esc(g.name || '这个群没有名字')}</span><em>${g.id}</em></label>`).join('');
       box.querySelectorAll('[data-gid]').forEach(cb => { cb.onchange = syncGroupIds; });
+      const undo = tip.querySelector('[data-undo-groups]');
+      if (undo) undo.onclick = () => {
+        const el = groupIdsInput();
+        if (!el) return;
+        el.value = before.join(', ');
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        box.querySelectorAll('[data-gid]').forEach(cb => {
+          cb.checked = before.includes(Number(cb.dataset.gid));
+        });
+        toast('已撤销这次勾选');
+      };
     };
   });
   // 检查更新 / 一键更新：只覆盖 exe 和 _internal，配置、待办、下好的 QQ 都不动，
@@ -2305,6 +2327,10 @@ async function drawQqPanel() {
     drawQqPanel();
   };
   $('btnQQStop').onclick = async () => {
+    // 停掉之后收不到消息，也不会有推送里的新待办 —— 问一句再停
+    if (!window.confirm('停止后台？\n\n停了之后收不到群消息，也不会再自动推送；要恢复得再点一次「启动 QQ」')) {
+      return;
+    }
     const res = await call('stop_background');
     if (!res) return;
     toast(res.message || '让它收工了');
