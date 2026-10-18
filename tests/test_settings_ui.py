@@ -177,8 +177,14 @@ class TestSchema(unittest.TestCase):
     def test_tuning_only_sections_are_marked_advanced(self):
         """小白模式下这几段整段不显示 —— 不填也不影响第一次用。"""
         by_name = {s["name"]: s for g in self.groups for s in g["sections"]}
-        for name in ("mail", "extract", "title", "resource", "ui"):
+        for name in ("mail", "extract", "title", "resource"):
             self.assertTrue(by_name[name].get("advanced"), name)
+        # 「软件更新」不能藏：用户要能一眼找到"有没有新版本"
+        self.assertFalse(by_name["ui"].get("advanced"))
+        ui_keys = {k["key"]: k["level"] for k in by_name["ui"]["keys"]}
+        self.assertEqual(ui_keys["update_check"], "common")
+        for key in ("update_source", "update_hours", "drop_max_mb"):
+            self.assertEqual(ui_keys[key], "advanced", key)
         # 这四段必须留在常用里：推送、收消息、看懂了什么、数据保留（挂着备份按钮）
         for name in ("wecom_bot", "push_webhook", "push", "qq", "parse", "ai", "store"):
             self.assertFalse(by_name[name].get("advanced"), name)

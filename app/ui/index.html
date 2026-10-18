@@ -38,6 +38,9 @@ body {
   overflow: hidden;
   user-select: none;
 }
+/* 正文里的 <b> 一律减一档：微软雅黑的 700 在 12~13px 上又黑又挤，
+   满屏都是粗体看着累。需要强调的地方靠颜色和位置，不靠加粗。 */
+b, strong { font-weight: 500 }
 input, textarea { user-select: text; font: inherit; }
 
 .app { display: flex; height: 100%; }
@@ -833,7 +836,7 @@ function drawDetail() {
     </span></div>
     ${t.attachments ? `<div class="kv"><b>附件</b><span>${t.attachments} 个</span></div>` : ''}
     ${t.quoted ? `<div class="quote"><em>原始消息（判错了你能看出为什么）</em>${esc(t.quoted)}</div>` : ''}
-    ${t.detail ? `<div class="quote">${esc(t.detail).slice(0, 800)}</div>` : ''}
+    ${t.detail ? `<div class="quote">${esc(t.detail)}</div>` : ''}
     ${(t.files && t.files.length) ? '<div class="files" id="files"></div>' : ''}
     <button class="block" id="btnCopyTask">复制这条（标题 + 时间 + 原话 + 来源）</button>
     ${detailActions(t)}`;
@@ -1408,19 +1411,19 @@ function renderSection(sec, first) {
   const restore = sec.name === 'store'
     ? `<div class="acts" style="margin-top:10px">
          <select class="block" data-backupsel><option>正在读备份列表…</option></select>
-         <button class="block" data-restore>从这份备份恢复</button>
-         <p class="hint" data-restoreresult>恢复会<b>替换现在的待办</b>（消息、废件箱、推送记录一起），
-           但会先把现在这份另存一份；<b>config.toml 不动</b>。</p>
-         <button class="block" style="margin-top:10px" data-exportical>导出到手机日历（.ics）</button>
-         <p class="hint" data-icalresult>只导出<b>写了时间</b>的待办。
-           导完去「数据」文件夹双击那个 .ics，手机日历 / Outlook 会问你要不要导入。</p>
-         <button class="block" style="margin-top:10px" data-fullbackup>导出完整备份（库 + 配置 + 附件）</button>
+         <button class="block" data-restore>恢复这份备份</button>
+         <p class="hint" data-restoreresult>会把现在的待办换成备份里那份（先自动另存一份，配置不动）。</p>
+         <button class="block" data-exportical>导出到手机日历（.ics）</button>
+         <p class="hint" data-icalresult>只导出了时间的待办。</p>
+         <button class="block" data-fullbackup>导出完整备份（库 + 配置 + 附件）</button>
          <p class="hint" data-fullbackupmsg style="margin-bottom:0"></p>
-         <p class="hint" data-fullbackupresult>每天的自动备份<b>只有数据库</b>（待办、消息、废件箱、
-           推送记录、累计数据都在里面）；图片和文档在 <b>data\attachments</b>，要换电脑就点这个，
-           打成一个 zip 放进 <b>data\backups</b>，留最近 3 份。
-           <span data-attinfo></span><br>
-           ⚠️ 里面有 config.toml（推送地址、token），别随手发别人。</p>
+         <p class="hint" data-fullbackupresult>含推送地址和 token，别外发。</p>
+         <details class="adv"><summary>备份到底备了什么</summary>
+           <p class="hint">每天的自动备份只有数据库（待办、消息、废件箱、推送记录、
+             累计数据都在里面）。图片和文档在 data\attachments，要换电脑就点上面的
+             「完整备份」——打成一个 zip 放进 data\backups，留最近 3 份。
+             <span data-attinfo></span></p>
+         </details>
        </div>`
     : '';
   return `<details class="sec" data-section="${sec.name}"${open ? ' open' : ''}>
@@ -1818,8 +1821,8 @@ function drawSettings() {
   }
   // 有改动就提醒 —— 这句是给"滚下去改完、直接叉掉窗口"那种情况准备的。
   // 用委托：设置项的输入框是动态生成的，一个个挂监听容易漏。
-  $('detailInner').addEventListener('input', markSettingsDirty);
-  $('detailInner').addEventListener('change', markSettingsDirty);
+  $('detailInner').addEventListener('input', updateSettingsDirty);
+  $('detailInner').addEventListener('change', updateSettingsDirty);
   settingsDirty = false;
   wireUnlock();
 
@@ -1924,14 +1927,34 @@ async function saveSettings() {
   refresh();
 }
 
-function markSettingsDirty() {
-  settingsDirty = true;
+/** 重新算一遍"到底有没有改动、改了哪几项"。
+ *
+ *  以前的写法是"输入框一响就标脏"：点进去再点出来、把值删了又打回原来的，
+ *  全都算"改过了"，然后关窗口问"要不要保存" —— 用户的原话是
+ *  "有时候没改他也说我改了"。现在按 data-was 真比一遍，并且把改了哪几项写出来。
+ */
+function updateSettingsDirty() {
   const hint = $('saveHint');
   const button = $('btnSave');
-  if (hint && !hint.dataset.on) {
-    hint.dataset.on = '1';
-    hint.innerHTML = '<span class="dirtytext">有改动还没保存</span>';
+  const changed = [];
+  $('detailInner').querySelectorAll('[data-path]').forEach(el => {
+    const was = String(el.dataset.was ?? '').trim().toLowerCase();
+    const now = (el.type === 'checkbox' ? String(el.checked) : String(el.value ?? ''))
+      .trim().toLowerCase();
+    if (now === was) return;
+    const label = el.closest('.field')?.querySelector('label')?.firstChild?.textContent;
+    changed.push((label || el.dataset.path).trim());
+  });
+  settingsDirty = changed.length > 0;
+  if (!hint) return;
+  if (!settingsDirty) {
+    hint.innerHTML = '改完点右边保存';
+    if (button) button.classList.remove('dirty');
+    return;
   }
+  const names = [...new Set(changed)];
+  hint.innerHTML = `<span class="dirtytext">有 ${names.length} 项没保存：${
+    esc(names.slice(0, 3).join('、'))}${names.length > 3 ? ' 等' : ''}</span>`;
   if (button) button.classList.add('dirty');
 }
 

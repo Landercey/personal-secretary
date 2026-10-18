@@ -6,6 +6,7 @@
   改"哪些消息严判、哪些宽判"  → `_strict()`（这是最容易改错的一处）
   改解析规则本身              → 去 quick_parse.py，这个文件不含规则
   改推送里带的原文片段长度    → config.toml 的 [push] quote_max_chars
+  改库里存多少原文            → 下面的 STORE_QUOTE_CHARS（详情页显示的是它）
   改"碎片记不记进废件箱"      → `_record_dropped()`
 
 =====================================================================
@@ -21,6 +22,10 @@ from ..contracts.models import SOURCE_QQ_INBOX, Message, TaskDraft
 from ..runtime.config import config
 from . import quick_parse
 from .actionable import is_actionable
+
+# 库里存多少原文。详情页的「原始消息」直接显示它，所以给得宽一点；
+# 推送里只带一小段（见 scheduler / console），两件事别混成一个上限。
+STORE_QUOTE_CHARS = 1200
 
 
 class RuleParseEnricher(DraftEnricher):
@@ -51,7 +56,10 @@ class RuleParseEnricher(DraftEnricher):
             found = [draft for draft in found
                      if is_actionable(draft.title)[0]]
         self._record_dropped(message, text)
-        quote_len = int(config.get("push", "quote_max_chars", 80))
+        # 库里存的是**给人看的原文**，不是推送卡片。
+        # 以前这里用推送用的 80 字上限，详情页"原始消息"永远只有两行，
+        # 用户看到的就是"显示不全"。推送要短是推送的事，见 scheduler。
+        quote_len = STORE_QUOTE_CHARS
         for draft in found:
             draft.source_kind = message.source_kind
             draft.source_name = message.source_name

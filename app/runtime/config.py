@@ -554,6 +554,10 @@ ADVANCED_KEYS: frozenset[str] = frozenset({
     # 掉线自救的等待时长（默认 5 分钟）也不用动。
     "qq.auto_restart_minutes", "qq.restart_cap_per_day",
     "title.max_len", "title.min_meaningful_chars",
+    # 「软件更新」只留一个"自动检查"开关在外面；来源、频率、拖拽上限是调参。
+    "ui.update_source", "ui.update_hours", "ui.drop_max_mb",
+    # 废件箱留多久：不填也能用（默认 30 天），属调参。
+    "store.keep_dropped_days",
 })
 
 # 整段都是"调参"的：小白模式下直接不显示（设置 → 右上角「高级」打开才出现）。
@@ -563,7 +567,7 @@ ADVANCED_SECTIONS: frozenset[str] = frozenset({
     "title",        # 标题截多长、最短几个字才算待办
     "extract",      # OCR 引擎、PDF 最多几页、渲染倍率
     "resource",     # 内存超过多少就不干活
-    "ui",           # 检查更新的来源和频率
+    # ui 不整段藏：用户要能一眼找到"有没有新版本"，只把它的三个调参项归到高级。
     "mail",         # 邮箱插件那一堆连接参数
 })
 

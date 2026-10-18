@@ -78,7 +78,7 @@ class TestWiring(unittest.TestCase):
         叉掉窗口前会问一句。
         """
         for anchor in (".savebar", 'id="btnSave"', 'id="saveHint"',
-                       "settingsDirty", "markSettingsDirty", "window.confirm"):
+                       "settingsDirty", "updateSettingsDirty", "window.confirm"):
             self.assertIn(anchor, self.html)
         # 保存按钮不能再出现在设置页的标题行里
         self.assertNotIn('<h2>设置</h2><button', self.html)

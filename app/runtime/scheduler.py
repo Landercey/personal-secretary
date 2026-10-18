@@ -434,7 +434,10 @@ class Scheduler:
         if task.source_name:
             body.append(f"来自：{task.source_name}")
         if task.quoted:
-            body.append(f"\n原话：{task.quoted}")
+            # 库里存的是整段原文（详情页要看全）；提醒卡片只带一小段。
+            limit = int(config.get("push", "quote_max_chars", 80) or 80)
+            quote = " ".join(str(task.quoted).split())
+            body.append(f"\n原话：{quote[:limit]}{'…' if len(quote) > limit else ''}")
 
         payload = PushPayload(
             channel=getattr(self.sink, "name", "console"), kind="text",
