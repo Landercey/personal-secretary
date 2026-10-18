@@ -604,6 +604,37 @@ class SqliteStore(Store):
                 self._event(int(child_id), "detach", "从父待办下面移出来了")
             return bool(cursor.rowcount)
 
+    @_synchronized
+    def merge_tasks(self, source_id: int, target_id: int) -> tuple[bool, str]:
+        """把一条待办**并进**另一条：附件搬过去、正文追加、自己进废件箱。
+
+        和"归到下面"不一样：那是层级，这是把两件事合成一件事
+        （"领社保卡"和"带身份证"本来就是同一条通知拆出来的）。
+        被并掉的那条进废件箱，随时能捡回来。
+        """
+        source_id, target_id = int(source_id), int(target_id)
+        if source_id == target_id:
+            return False, "不能并到自己身上"
+        source = self.get_task(source_id)
+        target = self.get_task(target_id)
+        if source is None or target is None:
+            return False, "有一条找不到了"
+        if self.children_of(source_id):
+            return False, "这条下面还有子项，先移出来再合并"
+        extra = f"合并自：{source.title}"
+        if source.detail:
+            extra += f"\n{source.detail}"
+        with self.conn:
+            self.conn.execute(
+                "UPDATE tasks SET detail=?, updated_at=? WHERE task_id=?",
+                (((target.detail or "").strip() + "\n\n" + extra).strip(),
+                 now_text(), target_id))
+            self.conn.execute(
+                "UPDATE attachments SET task_id=? WHERE task_id=?", (target_id, source_id))
+            self.set_status(source_id, STATUS_DROPPED, f"已合并到「{target.title}」")
+            self._event(source_id, "merged_into", f"合并到「{target.title}」")
+        return True, ""
+
     def _view_filter(self, view: str) -> tuple[str, tuple[Any, ...]]:
         """把界面上的分组名翻译成 SQL 条件。
 

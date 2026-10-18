@@ -102,6 +102,9 @@ _TIME_CN = re.compile(
     rf"{_TIME_PERIOD}\s*(\d{{1,2}})\s*[点時时]\s*"
     r"(半|\d{1,2}\s*分|\d{1,2}(?!\s*[个元岁号人份次天月周年]))?")
 
+# 一行超过这么多字，就按句号再切一刀（一句话里塞两件事的情况）
+SENTENCE_SPLIT_MIN = 40
+
 # ---- 中文数字的时刻：「上午十点」「两点半」「下午三点二十」----
 # 手机上手写经常用中文数字，不转成阿拉伯数字会被当成"没有时间"。
 _CN_DIGIT = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
@@ -738,7 +741,19 @@ def parse_text(text: str, strict: bool = False,
     body = to_simplified(text or "").strip()
     if not body:
         return []
-    lines = [line for line in body.splitlines() if line.strip()]
+    lines: list[str] = []
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        # 一行里塞了两件事（"下午2:30拉练……明晚在寝室学习理论"）：
+        # 按句号/叹号/分号再切一刀，每句各自认时间和地点。
+        # 短句不切 —— "买牛奶"不该被拆成两条。
+        if len(line) >= SENTENCE_SPLIT_MIN:
+            parts = [p.strip() for p in re.split(r"(?<=[。！？!?；;])", line) if p.strip()]
+            lines.extend(parts if len(parts) > 1 else [line])
+        else:
+            lines.append(line)
     pairs = [(line, parse_line(line)) for line in lines]
     drafted = [draft for _line, draft in pairs if draft]
 
@@ -758,8 +773,12 @@ def parse_text(text: str, strict: bool = False,
             # 逐行再问一遍"这行自己像不像一件事"。
             # 真踩过的坑：一份 Word 里的"字数不少于 2000 字"、
             # 一张海报 OCR 出来的"成都理工大学"，都是这么漏进来的。
+            #
+            # ⚠️ 但**带时间的行要留**：用户 2026-10-18 那条通知里
+            # "明晚在寝室内学习线上理论…" 因为句子长、像在讲道理被挡掉了。
+            # 明确写了"哪天/几点"的，本身就已经是"一件事"。
             ok, _why = is_actionable(line)
-            if not ok:
+            if not ok and not draft.due_at:
                 continue
         key = f"{draft.title}|{draft.due_at or ''}"
         if key in seen:          # 同一段文字里的重复行只取一条

@@ -149,3 +149,28 @@ class TestGuessedTime(Base):
         self.assertTrue(api.edit_task(task.task_id, "交报名表", "2026-10-20T09:00", "")["ok"])
         self.assertFalse(self.store.get_task(task.task_id).time_guess)
         self.assertEqual(self.store.get_task(task.task_id).due_at, "2026-10-20 09:00:00")
+
+
+class TestSplitAndMerge(Base):
+    def test_one_message_with_two_events_becomes_two_todos(self):
+        """一条通知里两件事（拉练 + 晚上学习理论），各有各的时间地点。"""
+        from app.pipeline import quick_parse
+
+        text = ("明天（10月18日）下午2:30进行校内拉练，（1、2营从西区操场到东区操场，"
+                "3、4营从东区操场到西区操场，附路线图），两条路线同时进行，请辅导员做好拉练前的动员。"
+                "拉练前，医生和巡逻的电话会发群里。"
+                "明晚上训练时间在寝室内学习线上理论，目前学习情况不够理想，合格人数很少，"
+                "绝大部分学生都没有开始学习，请大家抓紧时间学习！")
+        drafts = quick_parse.parse_text(text, strict=True)
+        self.assertEqual(len(drafts), 2, [d.title for d in drafts])
+        self.assertTrue(drafts[0].due_at.endswith("14:30:00"), drafts[0].due_at)
+        self.assertEqual(drafts[1].location, "寝室")
+
+    def test_merging_two_todos_keeps_attachments_and_drops_the_source(self):
+        a = self.add("领社保卡")
+        b = self.add("带身份证")
+        ok, why = self.store.merge_tasks(b.task_id, a.task_id)
+        self.assertTrue(ok, why)
+        self.assertEqual(self.store.get_task(b.task_id).status, "dropped")
+        self.assertIn("合并自：带身份证", self.store.get_task(a.task_id).detail)
+        self.assertEqual([t.title for t in self.store.list_tasks("open")], ["领社保卡"])

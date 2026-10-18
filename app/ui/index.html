@@ -554,6 +554,7 @@ let schema = null;          // 后端给的配置清单（分组 → 段 → 项
 let openSection = null;     // 要跳过去并展开的那一段
 let activeGroup = null;     // 设置面板当前在哪个分组标签页
 let attachTarget = null;    // 正在给哪条待办找"父待办"（归到…面板用）
+let attachMode = 'attach';  // attach = 归到下面；merge = 并进另一条
 /* 小白 / 大佬的总开关。默认关：只画"不填就用不了"的那几项
    记在 localStorage 里 —— 大佬打开一次，以后每次都是打开的状态。 */
 let showAdvanced = false;
@@ -882,6 +883,14 @@ function drawDetail() {
   const attach = $('btnAttach');
   if (attach) attach.onclick = () => {
     attachTarget = t.id;
+    attachMode = 'attach';
+    setPanel('attach');
+    renderPanel(true);
+  };
+  const merge = $('btnMerge');
+  if (merge) merge.onclick = () => {
+    attachTarget = t.id;
+    attachMode = 'merge';
     setPanel('attach');
     renderPanel(true);
   };
@@ -1037,9 +1046,12 @@ async function drawAttach() {
   const res = await call('tasks', 'open');
   const pool = ((res && res.items) || [])
     .filter(i => String(i.id) !== String(attachTarget));
+  const merging = attachMode === 'merge';
   $('detailInner').innerHTML = `
-    <div class="panelhead"><h2>归到哪条下面</h2></div>
-    <p class="note">点一条就是它的上级。最多三层，子项只在上级的详情里出现</p>
+    <div class="panelhead"><h2>${merging ? '合并到哪一条' : '归到哪条下面'}</h2></div>
+    <p class="note">${merging
+      ? '两件事其实是一件时用它：附件和正文并过去，这条自己进废件箱（能捡回来）'
+      : '点一条就是它的上级。最多三层，子项只在上级的详情里出现'}</p>
     <input id="attachSearch" type="search" placeholder="搜标题，挑一条当上级…"
            style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:7px">
     <div id="attachList" style="margin-top:10px;max-height:360px;overflow:auto"></div>
@@ -1059,11 +1071,12 @@ async function drawAttach() {
         <span style="color:var(--text-3);white-space:nowrap">${esc(i.due || '')}</span>
       </div>`).join('') : '<p class="note">没找到这条 —— 换个词试试</p>';
     box.querySelectorAll('[data-pick]').forEach(row => row.onclick = async () => {
-      const r = await call('attach_child', Number(attachTarget), Number(row.dataset.pick));
+      const r = merging
+        ? await call('merge_tasks', Number(attachTarget), Number(row.dataset.pick))
+        : await call('attach_child', Number(attachTarget), Number(row.dataset.pick));
       toast((r && r.message) || (r && r.ok ? '归好了' : '没归成'));
       if (r && r.ok) {
-        setPanel('detail');
-        renderPanel(true);
+        if (merging) { setPanel(null); } else { setPanel('detail'); renderPanel(true); }
         refresh();
       }
     });
@@ -1084,6 +1097,7 @@ function detailActions(t) {
         <div class="two">
           <button onclick="editTask()">改内容</button>
           <button id="btnAttach">归到…</button>
+          <button id="btnMerge">合并…</button>
           <button onclick="act('archive')">归档</button>
         </div>
         <div class="quiet">

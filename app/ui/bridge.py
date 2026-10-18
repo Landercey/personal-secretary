@@ -346,6 +346,15 @@ class Api:
         return {"ok": True, "message": "移出来了"}
 
     @tracked
+    def merge_tasks(self, source_id: int, target_id: int) -> dict:
+        """把这条并进另一条（附件搬过去、正文追加，自己进废件箱）。"""
+        ok, why = self.store.merge_tasks(int(source_id), int(target_id))
+        if not ok:
+            return {"ok": False, "message": why}
+        self._revision += 1
+        return {"ok": True, "message": "合并好了，被并的那条在废件箱里，能捡回来"}
+
+    @tracked
     def complete_with_children(self, task_id: int) -> dict:
         """连整棵子树一起完成（勾父待办时用户点了"一起完成"）。"""
         ids = [t.task_id for t, _depth in self.store.descendants_of(int(task_id))
