@@ -261,10 +261,14 @@ def forward_text(data: dict[str, Any]) -> str:
                 found.append(str(inner))
         if found:
             break                      # 找到一个能读的字段就够了
-    joined = " ".join(part.strip() for part in found if part and part.strip())
+    # ⚠️ 用换行拼，不要用空格：一份聊天记录里是**一条一条**的消息，
+    # 拍成一整行之后切分那层只能在行尾切，整包只会出一坨标题
+    # （真事：用户转了一整段通知，结果生成一条
+    #  "[合并转发] 56班班长帮我看看…注意：进去需要买实验服…" 的巨型待办）。
+    joined = "\n".join(part.strip() for part in found if part and part.strip())
     if not joined:
         return "[合并转发]"
-    return "[合并转发] " + joined[:_FORWARD_KEEP]
+    return joined[:_FORWARD_KEEP]
 
 
 def card_text(data: dict[str, Any]) -> str:

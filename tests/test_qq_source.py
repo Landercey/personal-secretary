@@ -172,6 +172,21 @@ class TestFlattenMessage(unittest.TestCase):
             {"type": "forward", "data": {"content": [inner]}}]}, SELF)
         self.assertIn("[合并转发]", text)
 
+    def test_each_forwarded_message_stays_on_its_own_line(self):
+        """一条转发里是**好几句不同的话**，必须按行分开。
+
+        真事（2026-10-18）：用空格拍成一行之后，切分只能切出一坨
+        "[合并转发] 56班班长帮我看看…注意：进去需要买实验服…" 的巨型待办。
+        """
+        nodes = {"content": [
+            {"message": [{"type": "text", "data": {"text": "明天下午三点交实验报告"}}]},
+            {"message": [{"type": "text", "data": {"text": "10 月 20 号前交报名表"}}]},
+        ]}
+        text, *_ = flatten_message({"message": [
+            {"type": "forward", "data": nodes}]}, SELF)
+        self.assertEqual(len(text.split("\n")), 2, text)
+        self.assertTrue(text.startswith("明天下午三点"), text)
+
 class TestChatIdentity(unittest.TestCase):
     def test_group(self):
         self.assertEqual(chat_identity({"message_type": "group", "group_id": GROUP})[0],
