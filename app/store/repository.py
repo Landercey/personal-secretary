@@ -632,9 +632,15 @@ class SqliteStore(Store):
             extra += f"\n{source.detail}"
         with self.conn:
             self.conn.execute(
-                "UPDATE tasks SET detail=?, updated_at=? WHERE task_id=?",
+                # 谁先谁后：**留下的那条（target）是正文**，被并的那条跟在后面，
+                # 用"合并自："标出出处 —— 这样读起来还是他那条待办，不是两段拼接。
+                # 时间/地点：target 没有就补上 source 的（"领社保卡"没时间、
+                # "带身份证"说了时间，合并后就该带上）。
+                "UPDATE tasks SET detail=?,"
+                " due_at=COALESCE(due_at, ?), location=COALESCE(location, ?),"
+                " updated_at=? WHERE task_id=?",
                 (((target.detail or "").strip() + "\n\n" + extra).strip(),
-                 now_text(), target_id))
+                 source.due_at, source.location, now_text(), target_id))
             self.conn.execute(
                 "UPDATE attachments SET task_id=? WHERE task_id=?", (target_id, source_id))
             self.set_status(source_id, STATUS_DROPPED, f"已合并到「{target.title}」")

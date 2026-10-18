@@ -18,6 +18,18 @@ from datetime import datetime
 from ..contracts.models import TIME_FORMAT
 
 
+def short_title(text: str, limit: int = 40) -> str:
+    """推送里用的短标题：一句话的**开头**，超了加省略号。
+
+    长通知的标题常常是整段话，整段塞进手机通知栏只会被系统乱截，
+    不如我们自己截得体面一点（用户 2026-10-18："太长……只要标出出在哪就行"）。
+    """
+    body = " ".join(str(text or "").split())
+    if len(body) <= limit:
+        return body
+    return body[:limit].rstrip("，,。；; ") + "…"
+
+
 def human_due(due_at: str | None) -> tuple[str, str]:
     """到期时间 → (人话, 紧急程度)。
 

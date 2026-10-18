@@ -1527,12 +1527,9 @@ function renderSection(sec, first) {
   // 推送那两段多一个「发一条测试推送」：刚填完地址的人没法知道通不通，
   // 只能等下一次定时推送（最长 12 小时）。钉钉的「关键词没对上」、
   // token 抄错一位，都是点这一下就看得出来的事
-  const tester = (sec.name === 'wecom_bot' || sec.name === 'push_webhook')
-    ? `<div class="acts" style="margin-top:10px">
-         <button class="block" data-testpush="${sec.name}">发一条测试推送（看手机响不响）</button>
-         <p class="hint" data-testresult>读的是<b>已经保存</b>的地址 —— 刚改完先点下面的「保存」再点这里</p>
-       </div>`
-    : '';
+  // 测试推送不再挂在每一段里（以前两段各一个，用户根本找不到在哪）。
+  // 统一放到「推送到手机」这一页的顶部，见 drawSettings。
+  const tester = '';
   // QQ 段多一个「读取我加的群」：群号一个个手填是最烦的一步
   // （还得先去 QQ 里找到群号）。后台问 QQ 要一份列表捎上来，这里做成勾选
   const picker = sec.name === 'qq'
@@ -1687,6 +1684,11 @@ function drawSettings() {
       esc(g.title)}</button>`).join('');
   const panes = groups.map(g => `<div class="tabpane ${g.name === active ? 'on' : ''}" data-g="${g.name}">
       <p class="groupdesc">${esc(g.desc)}</p>
+      ${g.name === 'group_push'
+        ? `<div class="acts" style="margin:0 0 12px">
+             <button class="block" data-testpush="push">发一条测试推送（看手机响不响）</button>
+             <p class="hint" data-testresult>读的是<b>已经保存</b>的地址 —— 刚改完先点下面的「保存」再点这里</p>
+           </div>` : ''}
       ${g.name === 'group_plugins'
         ? `<div class="acts" style="margin:0 0 10px">
              <button class="block" data-manage-plugins>管理插件（开关 / 状态 / 打开文件夹）</button>

@@ -369,6 +369,9 @@ class TestScheduler(unittest.TestCase):
         self.assertEqual(len(self.sink.sent), 1)
         self.assertIn("三点开会", self.sink.sent[0].title)
         self.assertIn("还有 1 小时", self.sink.sent[0].title)
+        # 提醒要短：正文只留"截止/地点/来自"，原话在软件里看
+        self.assertNotIn("原话", self.sink.sent[0].body)
+        self.assertIn("截止", self.sink.sent[0].body)
         # 下一轮还在窗口里 —— 不能再推一遍
         self.assertEqual(self.scheduler.run_once(at("2026-10-09 14:02")), [])
         self.assertEqual(len(self.sink.sent), 1)

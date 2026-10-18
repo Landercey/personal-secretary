@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from ..contracts.interfaces import Sink, SinkResult
 from ..contracts.models import SOURCE_QQ_GROUP, PushPayload, Task
-from ..runtime.humanize import human_due
+from ..runtime.humanize import human_due, short_title
 
 
 class ConsoleSink(Sink):
@@ -57,10 +57,12 @@ def format_task_line(task: Task, index: int = 0) -> str:
     when = human_due(task.due_at)[0]
     where = f" · {task.location}" if task.location else ""
     head = f"{index}. " if index else ""
+    # 标题截到 38 字：长通知的标题是一整段话，整段塞进推送只会被手机系统乱截
+    title = short_title(task.title, 38)
     # confidence < 1 = 这条是 AI 归纳出来的，不是规则算出来的。
     # 必须让用户在推送里就看得出来，不然他没法判断"这是原文说的还是模型补的"。
     ai = "【AI】" if float(getattr(task, "confidence", 1.0) or 1.0) < 1 else ""
-    parts = [f"{head}{task.title}{ai}", f"{when}{where}"]
+    parts = [f"{head}{title}{ai}", f"{when}{where}"]
     if task.source_kind == SOURCE_QQ_GROUP and task.source_name:
         parts.append(_short_source(str(task.source_name)))
     return "｜".join(parts)

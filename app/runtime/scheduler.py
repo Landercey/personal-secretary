@@ -55,6 +55,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from .config import config
+from .humanize import short_title as _short_title
 
 # 多久检查一次。30 秒足够精确到分钟级，又不会白耗 CPU。
 DEFAULT_TICK = 30.0
@@ -437,33 +438,39 @@ class Scheduler:
         return done
 
     def _deliver_reminder(self, task, minutes: int, batch: str) -> bool:
-        """单独推一条"快到点了"。内容朴素：就这一件事，不夹带别的。"""
+        """单独推一条"快到点了"。
+
+        **只写三行**：一件事、什么时候、在哪 / 哪个群来的。
+        用户 2026-10-18 的原话："太长而且原话被省略……只要标出出在哪就行，
+        推送就按软件里的显示那样"。所以：
+          · 标题行最多 40 字（手机通知栏能整行显示）；
+          · 正文不重复标题、不带原话（原文在软件里随时能看）；
+          · 群消息才写来源，自己录入的不写。
+        """
         from ..contracts.models import PushPayload
 
-        # 子项提醒要带上上级：「搬家 → 借推车」。只发"借推车"的话，
-        # 手机上一时想不起这是哪件事的一部分。
         title = task.title
         if getattr(task, "parent_id", None):
             parent = self.store.get_task(int(task.parent_id))
             if parent is not None:
                 title = f"{parent.title} → {task.title}"
-        body = [f"【{title}】"]
+        short = _short_title(title, 30)
+        body = []
         if task.due_at:
-            body.append(f"截止：{task.due_at}")
+            body.append(f"截止 {str(task.due_at)[5:16]}")
         if task.location:
-            body.append(f"地点：{task.location}")
-        if task.source_name:
-            body.append(f"来自：{task.source_name}")
-        if task.quoted:
-            # 库里存的是整段原文（详情页要看全）；提醒卡片只带一小段。
-            limit = int(config.get("push", "quote_max_chars", 80) or 80)
-            quote = " ".join(str(task.quoted).split())
-            body.append(f"\n原话：{quote[:limit]}{'…' if len(quote) > limit else ''}")
+            body.append(f"地点 {task.location}")
+        # 只标"从哪来的"：群名/自己录入。收件箱那种 "私聊 123456（我发的）"
+        # 对手机上的他没有任何信息量。
+        if task.source_kind and task.source_kind != "manual" and task.source_name:
+            body.append(f"来自 {task.source_name}")
+        if float(getattr(task, "confidence", 1.0) or 1.0) < 1:
+            body.append("【AI 整理，可能有误】")
 
         payload = PushPayload(
             channel=getattr(self.sink, "name", "console"), kind="text",
-            title=f"⏰ 还有 {human_minutes(minutes)}：{title}",
-            body="\n".join(body))
+            title=f"⏰ 还有 {human_minutes(minutes)}：{short}",
+            body="\n".join(body) or " ")
         result = self._send(batch, payload)
         ok = bool(result and result.ok)
         self._say(f"{batch} 临期提醒{'已推送' if ok else '没发出去'}（{task.title}）")
