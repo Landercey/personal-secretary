@@ -973,10 +973,37 @@ class Api:
 
         return {"items": [
             {"name": p.name, "title": p.title, "ok": p.ok, "error": p.error,
+             "disabled": bool(getattr(p, "disabled", False)),
              "section": getattr(p, "section", ""),
              "description": getattr(p, "description", "")}
             for p in self._plugins
         ], "folder": str(plugin_dir(_plugin_root()))}
+
+    @tracked
+    def set_plugin(self, name: str, enabled: bool) -> dict:
+        """开/关一个插件。只写配置，真正生效要重开一次程序。
+
+        为什么不热加载：插件是启动时装配进管线的（它们会往注册表里塞零件），
+        运行中把它拔出来，正在跑的那条消息就会少一道工序 —— 那是最难查的坏法。
+        """
+        from ..runtime import plugins as plugin_module
+        from ..runtime.config import config
+
+        target = str(name or "").strip()
+        if not target:
+            return {"ok": False, "message": "没说要动哪个插件"}
+        known = {p.name for p in self._plugins}
+        if target not in known:
+            return {"ok": False, "message": "没有这个插件"}
+        current = [str(x) for x in (config.get("plugins", "disabled", []) or [])]
+        if enabled:
+            current = [x for x in current if x != target]
+        elif target not in current:
+            current.append(target)
+        config.set("plugins", "disabled", current)
+        self._revision += 1
+        return {"ok": True, "name": target, "enabled": bool(enabled),
+                "message": f"{'开回来了' if enabled else '已停用'}，重开一次程序生效"}
 
     # ------------------------------------------------------------------ 设置
     def settings(self) -> dict:

@@ -188,7 +188,11 @@ def build(database: str | Path | None = None, safe_mode: bool = False):
 
     registry = Registry()
     if not safe_mode:
-        load_plugins(ROOT, registry)     # 加载结果记在 registry.status 上
+        # 用户自己在界面上关掉的插件不加载（配置里存的是文件名）
+        from app.runtime.config import config as _cfg
+
+        load_plugins(ROOT, registry,
+                     disabled=_cfg.get("plugins", "disabled", []) or [])
     # 安全模式：一个插件都不加载。它只在"连续几次没起来"时自动触发，
     # 目的是让用户至少能进界面把配置改回来。
 
@@ -1559,7 +1563,10 @@ def _selftest() -> int:
 
     # 插件：坏插件不该拦住启动，但自检必须把它摆出来 —— 否则用户
     # 只会觉得"我装的那个插件怎么好像没反应"。
-    plugins = load_plugins(ROOT, Registry())
+    from app.runtime.config import config as _cfg2
+
+    plugins = load_plugins(ROOT, Registry(),
+                           disabled=_cfg2.get("plugins", "disabled", []) or [])
     broken = [item for item in plugins if not item.ok]
     if broken:
         problems.append(f"有 {len(broken)} 个插件加载失败（见下面 ✕ 那几行）")

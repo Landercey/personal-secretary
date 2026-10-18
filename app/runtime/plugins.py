@@ -86,8 +86,11 @@ class PluginStatus:
     description: str = ""        # 一句话说它是干什么的
     version: str = ""            # 插件自己声明的版本（清单里的 version）
     permissions: tuple[str, ...] = ()   # 它要什么权限：network / files / upload
+    disabled: bool = False       # 用户自己在界面上关掉的（不是坏了）
 
     def describe(self) -> str:
+        if self.disabled:
+            return f"{self.title}（{self.name}）：已停用"
         if self.ok:
             return f"{self.title}（{self.name}）：正常"
         return f"{self.title}（{self.name}）：加载失败 — {self.error}"
@@ -164,7 +167,7 @@ def seed(root: Path, source: Path) -> int:
     return copied
 
 
-def load(root: Path, registry: Registry) -> list[PluginStatus]:
+def load(root: Path, registry: Registry, disabled=()) -> list[PluginStatus]:
     """把 `plugins/` 下的插件全加载一遍。**这个函数不会抛异常。**
 
     返回每个插件的结果，成功的和失败的都在里面 ——
@@ -172,8 +175,28 @@ def load(root: Path, registry: Registry) -> list[PluginStatus]:
 
     结果同时记在 `registry.status` 上，免得调用方再传一个列表到处走。
     """
-    registry.status = [_load_one(path, registry) for path in discover(root)]
+    off = {str(item) for item in (disabled or ())}
+    statuses: list[PluginStatus] = []
+    for path in discover(root):
+        if path.stem in off:
+            # 停用的插件**照样列出来**：用户得看得见"我关了什么"，
+            # 也得能一键开回来（消失了会以为被删了）
+            statuses.append(PluginStatus(name=path.stem, title=_title_of(path),
+                                         ok=False, error="已停用", disabled=True))
+            continue
+        statuses.append(_load_one(path, registry))
+    registry.status = statuses
     return registry.status
+
+
+def _title_of(path: Path) -> str:
+    """停用的插件不执行，只从文件里把 TITLE 抠出来 —— 界面上要显示中文名。"""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return path.stem
+    match = re.search(r"^TITLE\s*=\s*[\"'](.+?)[\"']", text, re.M)
+    return match.group(1) if match else path.stem
 
 
 def _module_name(stem: str) -> str:

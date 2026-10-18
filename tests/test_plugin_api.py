@@ -167,3 +167,32 @@ class TestMutePlugin(Base):
         ])
         self.assertEqual([d.title for d in kept], ["明天交作业"])
         self.assertEqual(len(message.raw.get("muted") or []), 2)
+
+
+class TestSwitches(Base):
+    def test_a_disabled_plugin_is_listed_but_not_loaded(self):
+        """关掉的插件还得列出来 —— 消失了用户会以为被删了。"""
+        self.write("off_one", """
+            TITLE = "被关掉的那个"
+            def register(registry):
+                raise AssertionError("停用的插件不该被执行")
+        """)
+        registry = plugin_module.Registry()
+        plugin_module.load(self.root, registry, disabled=["off_one"])
+        status = registry.status[0]
+        self.assertTrue(status.disabled)
+        self.assertEqual(status.title, "被关掉的那个")
+        self.assertIn("已停用", status.describe())
+
+    def test_turning_it_off_writes_the_name_into_the_config(self):
+        from types import SimpleNamespace
+        from app.runtime.config import config
+        from app.ui.bridge import Api
+
+        api = Api(None, [SimpleNamespace(name="mute", title="屏蔽词", ok=True,
+                                         error="", section="", description="",
+                                         disabled=False)], {}, notices=[])
+        self.assertTrue(api.set_plugin("mute", False)["ok"])
+        self.assertIn("mute", list(config.get("plugins", "disabled", [])))
+        self.assertTrue(api.set_plugin("mute", True)["ok"])
+        self.assertNotIn("mute", list(config.get("plugins", "disabled", [])))

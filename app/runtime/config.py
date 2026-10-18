@@ -146,6 +146,11 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     "risk": {
         "confirmed_secondary_account": False,
     },
+    "plugins": {
+        # 用户自己关掉的插件（文件名，不含 .py）。关掉的照样列在插件页里，
+        # 只是不加载 —— 不列出来的话，用户会以为插件被删了。
+        "disabled": [],
+    },
     "wecom_bot": {
         # 群机器人：只要一个 Webhook 地址，不用 CorpID/Secret，也不用配企业可信 IP。
         # 怎么拿：企业微信 → 进一个群（自己建个只有自己的群也行）→ 右上角「…」
@@ -381,6 +386,9 @@ KEY_COMMENTS: dict[str, str] = {
     "resource.mem_critical_percent": "内存占用超过这个百分比时，只记待办不分析不推送（别在打游戏时抢资源）。",
     # [risk]
     "risk.confirmed_secondary_account": "风控提示确认过没有。程序自己写的，不用管。",
+    "plugins.disabled": "你关掉的插件（文件名，不含 .py）\n"
+                        "#   关掉的插件不会加载，但还留在 plugins\\ 里，随时能开回来\n"
+                        "#   改完要重开一次程序才生效",
     # [wecom_bot]
     "wecom_bot.enabled": "改成 true 才会真的推送。没配好时推送会打印在屏幕上，不会静默丢消息。",
     "wecom_bot.webhook": "企业微信群的 Webhook 地址，整条贴进来。\n"
@@ -603,6 +611,8 @@ RESTART_KEYS: frozenset[str] = frozenset({
     # 以前它们不在这个名单里 → 界面上不提醒 → 用户打开"收所有私聊"、
     # 保存、然后发现发消息过去毫无反应（消息其实到了，全被按老设置拦掉了）。
     "qq.group_ids", "qq.private_ids", "qq.inbox_ids",
+    # 插件是启动时加载一次的：改了开关要重开程序才生效
+    "plugins.disabled",
     "qq.receive_all", "qq.receive_private_all", "qq.only_mention",
 })
 
@@ -819,6 +829,11 @@ class Config:
                         for section, (title, desc) in PLUGIN_SECTIONS.items()
                         if section in DEFAULTS]
         placed.update(PLUGIN_SECTIONS)
+        if "plugins" in DEFAULTS:
+            # 开关本身也算插件页的一部分：关掉的插件必须能在这儿开回来
+            plugin_items.insert(0, self._section_entry(
+                "plugins", "插件开关", "关掉的插件不加载，重开程序生效"))
+            placed.add("plugins")
         if plugin_items:
             groups.append({"name": "group_plugins", "title": "插件",
                            "desc": "装了什么插件，它自己的设置就出现在这里",

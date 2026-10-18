@@ -1563,6 +1563,10 @@ function drawSettings() {
       esc(g.title)}</button>`).join('');
   const panes = groups.map(g => `<div class="tabpane ${g.name === active ? 'on' : ''}" data-g="${g.name}">
       <p class="groupdesc">${esc(g.desc)}</p>
+      ${g.name === 'group_plugins'
+        ? `<div class="acts" style="margin:0 0 10px">
+             <button class="block" data-manage-plugins>管理插件（开关 / 状态 / 打开文件夹）</button>
+           </div>` : ''}
       ${g.sections.map((sec, i) => renderSection(sec, i === 0)).join('')}
     </div>`).join('');
 
@@ -1604,6 +1608,9 @@ function drawSettings() {
     const n = advancedCount();
     toast(showAdvanced ? `已显示高级设置（多了 ${n} 项）` : '已切回常用设置');
   };
+  $('detailInner').querySelectorAll('[data-manage-plugins]').forEach(b => {
+    b.onclick = () => { setPanel('plugins'); renderPanel(true); };
+  });
   $('btnSave').onclick = saveSettings;
   // 测试推送：结果**写在这段里面**，不能只用 toast ——
   // 失败时对方会回一串错误码（errcode 310000 这种），toast 两秒就没了，
@@ -2311,12 +2318,18 @@ async function drawPluginsPanel() {
 
   const cards = list.map(p => `
     <div class="guide" style="margin:0 0 10px">
-      <h3>${esc(p.title)} <span class="${p.ok ? 'ok' : 'bad'}">${
-        p.ok ? '正常' : '加载失败'}</span></h3>
+      <h3>${esc(p.title)} <span class="${p.disabled ? '' : (p.ok ? 'ok' : 'bad')}"
+        style="${p.disabled ? 'color:var(--text-3)' : ''}">${
+        p.disabled ? '已停用' : (p.ok ? '正常' : '加载失败')}</span></h3>
       <p>${esc(p.description || '（这个插件没写说明）')}</p>
-      ${p.ok ? '' : `<p class="bad">${esc(p.error)}</p>`}
-      ${p.section ? `<div class="acts" style="margin-top:10px">
-          <button class="block" data-sec="${esc(p.section)}">去设置</button></div>` : ''}
+      ${p.ok || p.disabled ? '' : `<p class="bad">${esc(p.error)}</p>`}
+      <div class="acts" style="margin-top:10px">
+        <div class="two">
+          ${p.section ? `<button data-sec="${esc(p.section)}">去设置</button>` : ''}
+          <button data-toggle="${esc(p.name)}" data-enable="${p.disabled ? 1 : 0}">${
+            p.disabled ? '启用' : '停用'}</button>
+        </div>
+      </div>
     </div>`).join('');
 
   $('detailInner').innerHTML = `
@@ -2338,6 +2351,14 @@ async function drawPluginsPanel() {
 
   $('detailInner').querySelectorAll('[data-sec]').forEach(button => {
     button.onclick = () => openSettings(button.dataset.sec);
+  });
+  $('detailInner').querySelectorAll('[data-toggle]').forEach(button => {
+    button.onclick = async () => {
+      const want = button.dataset.enable === '1';
+      const res = await call('set_plugin', button.dataset.toggle, want);
+      toast((res && res.message) || '没改成');
+      drawPluginsPanel();
+    };
   });
   $('btnPluginFolder').onclick = async () => {
     const res = await call('open_plugin_folder');
