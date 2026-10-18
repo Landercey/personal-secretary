@@ -1141,6 +1141,23 @@ function readBase64(file) {
 }
 
 async function acceptDrop(file) {
+  // 拖进来的是 NapCat 的 OneKey 离线包：这条路不是"变待办"，是"补安装包"。
+  // 网络下不动 QQ 的时候，别人把包发过来，往窗口一拖就行。
+  if (/\.zip$/i.test(file.name) && /onekey|napcat/i.test(file.name)) {
+    setPanel('drop');
+    $('detail').classList.add('open');
+    $('detailInner').innerHTML = `<div class="panelhead"><h2>正在收离线包…</h2></div>
+      <p class="note">${esc(file.name)}（${fmtSize(file.size)}）</p>`;
+    drawnPanel = 'drop';
+    const blob = await readBase64(file).catch(() => null);
+    const res = blob ? await call('install_napcat_zip', file.name, blob) : null;
+    $('detailInner').innerHTML = `<div class="panelhead"><h2>${
+      res && res.ok ? '离线包放好了' : '这个包没用上'}</h2></div>
+      <p class="note">${esc((res && res.message) || '读不出来，可能是文件太大')}</p>
+      <div class="acts"><button class="primary block" id="dropCancel">好</button></div>`;
+    $('dropCancel').onclick = () => { setPanel(null); renderPanel(true); };
+    return;
+  }
   if (file.size > dropMaxMb * 1024 * 1024) {
     toast(`文件超过 ${dropMaxMb} MB，请用 python run.py --file 路径`);
     return;

@@ -76,5 +76,66 @@ class TestOfflinePackage(unittest.TestCase):
 
         with self.assertRaises(RuntimeError) as caught:
             deploy.download_onekey(self.dir)
-        self.assertEqual(len(tries), 6, "三个地址 × 两轮")
+        self.assertEqual(len(tries), 2 * (1 + len(deploy.ONEKEY_MIRRORS)),
+                         "每个地址 × 两轮")
         self.assertIn("证书", str(caught.exception))
+
+
+class TestDropPackage(unittest.TestCase):
+    """把 OneKey 包**拖进窗口**就能装 —— 不用找文件夹、不用改名。"""
+
+    def setUp(self):
+        import os
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name)
+        self._old = os.environ.get("SECRETARY_HOME")
+        os.environ["SECRETARY_HOME"] = str(self.home)
+
+    def tearDown(self):
+        import os
+
+        if self._old is None:
+            os.environ.pop("SECRETARY_HOME", None)
+        else:
+            os.environ["SECRETARY_HOME"] = self._old
+        self.tmp.cleanup()
+
+    def api(self):
+        from app.ui.bridge import Api
+
+        return Api(None, [], {}, notices=[])
+
+    @staticmethod
+    def b64(blob: bytes) -> str:
+        import base64
+
+        return base64.b64encode(blob).decode("ascii")
+
+    def zip_bytes(self, with_installer: bool = True) -> bytes:
+        import io
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as bundle:
+            if with_installer:
+                bundle.writestr("NapCatInstaller.exe", b"MZ" + b"\0" * 2048)
+            bundle.writestr("readme.txt", b"hi")
+        return buf.getvalue()
+
+    def test_a_real_package_lands_in_the_napcat_folder(self):
+        res = self.api().install_napcat_zip(
+            "NapCat.Shell.Windows.OneKey.zip", self.b64(self.zip_bytes()))
+        self.assertTrue(res["ok"], res)
+        self.assertTrue(Path(res["path"]).is_file())
+        self.assertEqual(Path(res["path"]).name, "NapCat.Shell.Windows.OneKey.zip")
+
+    def test_a_broken_zip_is_refused_and_not_left_behind(self):
+        res = self.api().install_napcat_zip("x.zip", self.b64(b"not a zip"))
+        self.assertFalse(res["ok"])
+        self.assertFalse((self.home / "napcat" / "NapCat.Shell.Windows.OneKey.zip").exists())
+
+    def test_a_zip_without_the_installer_is_refused(self):
+        res = self.api().install_napcat_zip(
+            "随便.zip", self.b64(self.zip_bytes(with_installer=False)))
+        self.assertFalse(res["ok"])
+        self.assertIn("NapCatInstaller", res["message"])

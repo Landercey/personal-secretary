@@ -1679,6 +1679,44 @@ class Api:
         return {"ok": True, "path": str(folder)}
 
     @tracked
+    def install_napcat_zip(self, name: str, blob_b64: str) -> dict:
+        """把拖进来的 OneKey 离线包放进 `napcat\\`。
+
+        为什么要这个（2026-10-18 真事）：新用户的网络不信任 GitHub 的证书，
+        三个地址全下不动；让她自己找文件夹、改名、放进去，等于让她做运维。
+        现在把文件往窗口里一拖就行 —— 后面「启动 QQ」会自动用它，不联网。
+        """
+        import base64
+        import zipfile
+
+        from ..runtime import deploy
+
+        try:
+            raw = base64.b64decode(blob_b64 or "")
+        except (ValueError, TypeError):
+            return {"ok": False, "message": "这个文件读不出来"}
+        if not raw:
+            return {"ok": False, "message": "这个文件是空的"}
+        if len(raw) > 8 * 1024 * 1024:
+            return {"ok": False,
+                    "message": "太大了，不像是 OneKey 包（那个只有 1 MB 左右）"}
+        folder = deploy.default_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / "NapCat.Shell.Windows.OneKey.zip"
+        target.write_bytes(raw)
+        try:
+            with zipfile.ZipFile(target) as bundle:
+                names = bundle.namelist()
+        except zipfile.BadZipFile:
+            target.unlink(missing_ok=True)
+            return {"ok": False, "message": "这个 zip 打不开，多半没下载完整，重新下一份"}
+        if not any(n.endswith("NapCatInstaller.exe") for n in names):
+            target.unlink(missing_ok=True)
+            return {"ok": False, "message": "包里没有 NapCatInstaller.exe，这不是 OneKey 安装包"}
+        return {"ok": True, "path": str(target),
+                "message": "离线包收好了 —— 去「📱 QQ 接收」点启动，这次不联网"}
+
+    @tracked
     def export_ical(self) -> dict:
         """把写了时间的待办导出成 .ics，手机日历双击就能导入。
 

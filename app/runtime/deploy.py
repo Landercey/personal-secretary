@@ -57,6 +57,11 @@ ONEKEY_MIRRORS = (
     "download/NapCat.Shell.Windows.OneKey.zip",
     "https://ghproxy.net/https://github.com/NapNeko/NapCatQQ/releases/latest/"
     "download/NapCat.Shell.Windows.OneKey.zip",
+    # 再加两家：单靠一家镜像，碰上它抽风就等于没有备用
+    "https://gh-proxy.com/https://github.com/NapNeko/NapCatQQ/releases/latest/"
+    "download/NapCat.Shell.Windows.OneKey.zip",
+    "https://github.moeyy.xyz/https://github.com/NapNeko/NapCatQQ/releases/latest/"
+    "download/NapCat.Shell.Windows.OneKey.zip",
 )
 
 ONEBOT_PATH = "/onebot/v11/ws"
