@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+import re
+
 from ..contracts.interfaces import DraftEnricher
 from ..contracts.models import SOURCE_QQ_INBOX, Message, TaskDraft
 from ..runtime.config import config
@@ -83,13 +85,26 @@ class RuleParseEnricher(DraftEnricher):
 
     @staticmethod
     def _as_one_note(text: str) -> list[TaskDraft]:
-        """收件箱的一条消息 → 一条待办（原文全进正文，标题取开头一小段）。"""
+        """收件箱的一条消息 → 一条待办。
+
+        标题取**第一句**（不是整段、也不是被摘地点摘碎的半句），
+        原文整段进正文 —— 用户的原话是"虽然全部录入但他没处理"：
+        收件箱也要挑出个像样的标题，不能把一整段话原样当标题。
+        """
         body = str(text or "").strip()
         if not body:
             return []
         parsed = quick_parse.parse_line(body)      # 借它算时间/地点，标题不用它的
         limit = int(config.get("title", "max_len", 200) or 200)
-        head = " ".join(body.split())[:60]
+        # 第一句可能是"注意！"这种两三个字的，单独当标题没意义 ——
+        # 往后接一句，凑够 10 个字再停。
+        parts = [p for p in re.split(r"(?<=[。！？!?])|\n", body) if p.strip()]
+        head = ""
+        for part in parts[:3]:
+            head = (head + part).strip()
+            if len(head) >= 10:
+                break
+        head = " ".join((head or body).split())[:60].strip("。！？!?;；,， ")
         return [TaskDraft(
             title=head[:limit],
             detail=body,
