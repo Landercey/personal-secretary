@@ -324,6 +324,37 @@ class TestScheduler(unittest.TestCase):
         self.assertEqual(line, "1. 交作业｜已逾期 · 10-09 15:00｜某班群")
         self.assertNotIn("（", line)
 
+    def test_a_sticker_from_a_group_is_not_pushed(self):
+        """群里抓到的图片（表情包/头像）不往手机推 —— 自己拖进来的照推。"""
+        from app.sinks.console import build_digest
+        from app.contracts.models import Attachment, SOURCE_QQ_GROUP, SOURCE_MANUAL, Task
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            image = Path(tmp) / "sticker.png"
+            image.write_bytes(b"\x89PNG fake")
+            doc = Path(tmp) / "作业.docx"
+            doc.write_bytes(b"PK fake")
+            group_task = Task(task_id=1, title="群消息", source_kind=SOURCE_QQ_GROUP,
+                              attachments=[Attachment(name="sticker.png", path=str(image),
+                                                      mime="image/png", size=10, kind="image")])
+            mine = Task(task_id=2, title="我拖进来的", source_kind=SOURCE_MANUAL,
+                        attachments=[Attachment(name="作业.docx", path=str(doc),
+                                                mime="application/docx", size=10,
+                                                kind="document")])
+            payload = build_digest([group_task, mine])
+            names = [a.name for a in payload.attachments]
+            self.assertEqual(names, ["作业.docx"])
+
+    def test_no_time_means_no_placeholder(self):
+        """没写时间的待办不该在推送里显示"没写时间"占位。"""
+        from app.sinks.console import format_task_line
+        from app.contracts.models import Task
+
+        line = format_task_line(Task(task_id=1, title="拿快递"), 1)
+        self.assertEqual(line, "1. 拿快递")
+
     def test_the_copy_hint_only_rides_on_the_morning_digest(self):
         """一天三次都挂"长按能复制"就是噪音 —— 只给早报。"""
         self.scheduler.run_once(at("2026-10-08 07:31"))

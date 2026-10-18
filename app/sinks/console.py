@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from ..contracts.interfaces import Sink, SinkResult
-from ..contracts.models import SOURCE_QQ_GROUP, PushPayload, Task
+from ..contracts.models import SOURCE_MANUAL, SOURCE_QQ_GROUP, PushPayload, Task
 from ..runtime.humanize import human_due, short_title
 
 
@@ -54,15 +54,19 @@ def format_task_line(task: Task, index: int = 0) -> str:
     · 原话不再每条都附：它是从消息里抄出来的，跟标题基本重复。
       真要看原话，界面的详情里一直有（AI 归纳的那些除外，见 build_digest）。
     """
-    when = human_due(task.due_at)[0]
-    where = f" · {task.location}" if task.location else ""
     head = f"{index}. " if index else ""
     # 标题截到 38 字：长通知的标题是一整段话，整段塞进推送只会被手机系统乱截
     title = short_title(task.title, 38)
     # confidence < 1 = 这条是 AI 归纳出来的，不是规则算出来的。
     # 必须让用户在推送里就看得出来，不然他没法判断"这是原文说的还是模型补的"。
     ai = "【AI】" if float(getattr(task, "confidence", 1.0) or 1.0) < 1 else ""
-    parts = [f"{head}{title}{ai}", f"{when}{where}"]
+    parts = [f"{head}{title}{ai}"]
+    # 时间/地点没有就不写 —— "没写时间"这种占位在手机上一行里纯属噪音
+    # （用户 2026-10-18 的截图里一屏出现了四次）。
+    if task.due_at:
+        parts.append(human_due(task.due_at)[0] + (f" · {task.location}" if task.location else ""))
+    elif task.location:
+        parts.append(str(task.location))
     if task.source_kind == SOURCE_QQ_GROUP and task.source_name:
         parts.append(_short_source(str(task.source_name)))
     return "｜".join(parts)
@@ -142,6 +146,10 @@ def build_digest(tasks: list[Task], title: str = "待办汇总",
         for item in task.attachments:
             if len(attachments) >= max_attachments:
                 break
+            # 群里自动抓到的图片**不推到手机**：表情包、头像、随手拍都会进来，
+            # 用户的原话是"怎么发表情包了"。自己拖进软件的文件照常推。
+            if item.kind == "image" and task.source_kind != SOURCE_MANUAL:
+                continue
             if not item.path or item.path in seen or not item.exists():
                 continue
             seen.add(item.path)
